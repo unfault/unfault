@@ -1,6 +1,6 @@
 [package]
 name = "unfault"
-version = "0.6.0"
+version = "1.0.0-alpha.1"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -48,8 +48,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 
 # Local crates
 unfault-core = { path = "../core" }
-# Will be added later:
-# unfault-rag = { path = "../rag" }
+unfault-analysis = { path = "../analysis" }
+unfault-rag = { path = "../rag" }
 
 [dev-dependencies]
 tempfile = "3.8"
