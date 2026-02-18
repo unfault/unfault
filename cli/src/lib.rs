@@ -12,6 +12,7 @@
 //! - [`exit_codes`] - Standard exit codes
 //! - [`session`] - Session management for workspace scanning and analysis
 
+pub mod analysis;
 pub mod api;
 pub mod commands;
 pub mod config;

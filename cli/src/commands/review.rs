@@ -263,22 +263,8 @@ fn format_list_dimmed(values: &[String], separator: &str) -> String {
 }
 
 pub async fn execute(args: ReviewArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            display_config_error(&format!("{}", e));
-            eprintln!(
-                "\n{} Run `unfault login` to authenticate first.",
-                "Tip:".cyan().bold()
-            );
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
-
-    // Create API client (env var takes precedence over config file)
-    let api_client = ApiClient::new(config.base_url());
-    let trace_id = api_client.trace_id.clone();
+    // Generate a trace ID for this session
+    let trace_id = uuid::Uuid::new_v4().simple().to_string();
 
     // Get current directory
     let current_dir = std::env::current_dir().context("Failed to get current directory")?;
@@ -341,36 +327,17 @@ pub async fn execute(args: ReviewArgs) -> Result<i32> {
         return Ok(EXIT_SUCCESS);
     }
 
-    // Branch: Server-side parsing (legacy) vs Client-side parsing (default)
-    if args.server_parse {
-        // Legacy mode: send source code to server
-        execute_server_parse(
-            &args,
-            &config,
-            &api_client,
-            &trace_id,
-            &current_dir,
-            &workspace_label,
-            &dimensions,
-            &workspace_info,
-            session_start,
-        )
-        .await
-    } else {
-        // New default: client-side parsing
-        execute_client_parse(
-            &args,
-            &config,
-            &api_client,
-            &trace_id,
-            &current_dir,
-            &workspace_label,
-            &dimensions,
-            &workspace_info,
-            session_start,
-        )
-        .await
-    }
+    // Run local analysis (no API needed)
+    execute_client_parse(
+        &args,
+        &trace_id,
+        &current_dir,
+        &workspace_label,
+        &dimensions,
+        &workspace_info,
+        session_start,
+    )
+    .await
 }
 
 /// Execute review with client-side parsing (default mode).
@@ -381,8 +348,6 @@ pub async fn execute(args: ReviewArgs) -> Result<i32> {
 /// 4. Receive findings and optionally apply patches
 async fn execute_client_parse(
     args: &ReviewArgs,
-    config: &Config,
-    api_client: &ApiClient,
     trace_id: &str,
     current_dir: &std::path::Path,
     workspace_label: &str,
@@ -482,11 +447,10 @@ async fn execute_client_parse(
         }
     }
 
-    // Step 4: Send IR to API
+    // Step 4: Run analysis locally
     pb.set_message("Analyzing code graph...");
 
     // Build profiles from detected frameworks (e.g., "python_fastapi_backend", "go_gin_service")
-    // The API resolves these profile IDs to specific rules
     let profiles: Vec<String> = workspace_info
         .to_workspace_descriptor()
         .profiles
@@ -498,24 +462,16 @@ async fn execute_client_parse(
         eprintln!("\n{} Detected profiles: {:?}", "DEBUG".yellow(), profiles);
     }
 
-    let api_start = Instant::now();
-    let response = match api_client
-        .analyze_ir(
-            &config.api_key,
-            &workspace_id,
-            Some(&workspace_label),
-            &profiles,
-            ir_json,
-        )
-        .await
-    {
+    let analysis_start = Instant::now();
+    let response = match crate::analysis::analyze_ir_locally(ir_json, &profiles).await {
         Ok(response) => response,
         Err(e) => {
             pb.finish_and_clear();
-            return Ok(handle_api_error(e));
+            eprintln!("{} Analysis failed: {}", "✗".red().bold(), e);
+            return Ok(EXIT_CONFIG_ERROR);
         }
     };
-    let _api_ms = api_start.elapsed().as_millis();
+    let _analysis_ms = analysis_start.elapsed().as_millis();
 
     pb.finish_and_clear();
 
