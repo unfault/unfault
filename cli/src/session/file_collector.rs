@@ -15,8 +15,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::api::{FilePredicate, FileQueryHint, SourceFile};
 use crate::session::workspace::Language;
+use unfault_core::types::context::SourceFile;
+use unfault_core::types::profile::{FilePredicate, FileQueryHint};
 
 /// Collected files ready for analysis.
 #[derive(Debug, Clone)]
@@ -74,7 +75,7 @@ impl FileCollector {
             // Deduplicate and accumulate (no mutex needed - sequential)
             for file in hint_files {
                 if !seen_paths.contains(&file.path) {
-                    total_bytes += file.contents.len();
+                    total_bytes += file.content.len();
                     seen_paths.insert(file.path.clone());
                     all_files.push(file);
                 }
@@ -107,7 +108,7 @@ impl FileCollector {
                         Ok(contents) => Some(SourceFile {
                             path: relative_path,
                             language: language.as_str().to_string(),
-                            contents,
+                            content,
                         }),
                         Err(_) => {
                             skipped_count.fetch_add(1, Ordering::Relaxed);
@@ -120,7 +121,7 @@ impl FileCollector {
             // Scatter phase: sequential merge with deduplication (no contention)
             for file in collected.into_iter().flatten() {
                 if !seen_paths.contains(&file.path) {
-                    total_bytes += file.contents.len();
+                    total_bytes += file.content.len();
                     seen_paths.insert(file.path.clone());
                     all_files.push(file);
                 }
@@ -205,7 +206,7 @@ impl FileCollector {
                 Some(SourceFile {
                     path: relative_path,
                     language: language.as_str().to_string(),
-                    contents: final_contents,
+                    contents: final_content,
                 })
             })
             .collect();
@@ -219,7 +220,7 @@ impl FileCollector {
                 break;
             }
 
-            let file_bytes = file.contents.len() as i64;
+            let file_bytes = file.content.len() as i64;
             if total_bytes + file_bytes > max_bytes {
                 continue;
             }

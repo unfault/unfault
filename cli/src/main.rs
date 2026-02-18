@@ -99,8 +99,6 @@ enum Commands {
         #[command(subcommand)]
         command: GraphCommands,
     },
-    /// Authenticate with Unfault using device flow
-    Login,
     /// Start the LSP server for IDE integration
     Lsp {
         /// Enable verbose logging to stderr
@@ -132,12 +130,7 @@ enum Commands {
         /// Show what fixes would be applied without actually applying them
         #[arg(long)]
         dry_run: bool,
-        /// Use legacy server-side parsing (sends source code to server)
-        #[arg(long)]
-        server_parse: bool,
     },
-    /// Check authentication and service configuration status
-    Status,
 }
 
 /// Graph subcommands
@@ -397,7 +390,7 @@ async fn run_command(command: Commands) -> i32 {
                 workspace_path: path,
                 max_sessions: Some(max_sessions),
                 max_findings: Some(max_findings),
-                similarity_threshold: Some(threshold),
+                similarity_threshold: Some(threshold as f32),
                 json,
                 no_llm,
                 verbose,
@@ -413,13 +406,6 @@ async fn run_command(command: Commands) -> i32 {
         }
         Commands::Config { command } => run_config_command(command),
         Commands::Graph { command } => run_graph_command(command).await,
-        Commands::Login => match commands::login::execute().await {
-            Ok(exit_code) => exit_code,
-            Err(e) => {
-                eprintln!("Login error: {}", e);
-                EXIT_CONFIG_ERROR
-            }
-        },
         Commands::Lsp { verbose, stdio: _ } => {
             init_logger(verbose);
             // stdio flag is just for compatibility with language clients, we always use stdio
@@ -439,7 +425,6 @@ async fn run_command(command: Commands) -> i32 {
             dimension,
             fix,
             dry_run,
-            server_parse,
         } => {
             init_logger(verbose);
             // Convert OutputFormat to string for backward compatibility
@@ -472,7 +457,6 @@ async fn run_command(command: Commands) -> i32 {
                 },
                 fix,
                 dry_run,
-                server_parse,
             };
             match commands::review::execute(args).await {
                 Ok(exit_code) => exit_code,
@@ -482,13 +466,6 @@ async fn run_command(command: Commands) -> i32 {
                 }
             }
         }
-        Commands::Status => match commands::status::execute().await {
-            Ok(exit_code) => exit_code,
-            Err(e) => {
-                eprintln!("Status error: {}", e);
-                EXIT_CONFIG_ERROR
-            }
-        },
     }
 }
 

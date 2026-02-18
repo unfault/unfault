@@ -35,16 +35,16 @@ use colored::Colorize;
 use log::debug;
 use rayon::prelude::*;
 
-use unfault_core::IntermediateRepresentation;
 use unfault_core::graph::build_code_graph;
 use unfault_core::parse::ast::FileId;
 use unfault_core::parse::{go, python, rust as rust_parse, typescript};
-use unfault_core::semantics::SourceSemantics;
 use unfault_core::semantics::go::model::GoFileSemantics;
 use unfault_core::semantics::python::model::PyFileSemantics;
 use unfault_core::semantics::rust::model::RustFileSemantics;
 use unfault_core::semantics::typescript::model::TsFileSemantics;
+use unfault_core::semantics::SourceSemantics;
 use unfault_core::types::context::{Language, SourceFile};
+use unfault_core::IntermediateRepresentation;
 
 use super::semantics_cache::{CacheStats, SemanticsCache};
 
@@ -533,7 +533,10 @@ pub fn build_ir_cached(
             let json_size_mb = json_size as f64 / (1024.0 * 1024.0);
             let serialization_ms = serialization_start.elapsed().as_millis();
             debug!("[GRAPH] Serialization details:");
-            debug!("  - JSON size: {} bytes ({:.2} MB)", json_size, json_size_mb);
+            debug!(
+                "  - JSON size: {} bytes ({:.2} MB)",
+                json_size, json_size_mb
+            );
             debug!("  - Serialization time: {}ms", serialization_ms);
             debug!("  - Semantics count: {}", ir.semantics.len());
         }
@@ -542,10 +545,7 @@ pub fn build_ir_cached(
         }
     }
 
-    Ok(IrBuildResult {
-        ir,
-        cache_stats,
-    })
+    Ok(IrBuildResult { ir, cache_stats })
 }
 
 /// Discover source files in a directory using ignore patterns.

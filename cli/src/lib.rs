@@ -24,4 +24,4 @@ pub mod session;
 // Re-export commonly used types
 pub use api::ApiClient;
 pub use config::Config;
-pub use session::{FileCollector, SessionRunner, WorkspaceInfo, WorkspaceScanner};
+pub use session::{WorkspaceInfo, WorkspaceScanner};

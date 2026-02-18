@@ -4,14 +4,15 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use super::workspace_id::{
-    MetaFileInfo as WorkspaceIdMetaFile, WorkspaceIdSource, compute_workspace_id, get_git_remote,
+    compute_workspace_id, get_git_remote, MetaFileInfo as WorkspaceIdMetaFile, WorkspaceIdSource,
 };
-use super::workspace_settings::{LoadedSettings, WorkspaceSettings, load_settings};
-use crate::api::{AdvertisedProfile, MetaFile, ProjectLayout, WorkspaceDescriptor};
+use super::workspace_settings::{load_settings, LoadedSettings, WorkspaceSettings};
+use unfault_core::types::context::RepoLayout as ProjectLayout;
+use unfault_core::types::workspace::{AdvertisedProfile, MetaFile, WorkspaceDescriptor};
 
 /// Progress update during workspace scanning.
 #[derive(Debug, Clone)]
@@ -177,28 +178,23 @@ impl MetaFileKind {
 }
 
 impl WorkspaceInfo {
-    /// Convert to a WorkspaceDescriptor for the API.
+    /// Convert to a WorkspaceDescriptor.
     pub fn to_workspace_descriptor(&self) -> WorkspaceDescriptor {
-        WorkspaceDescriptor {
-            id: self.workspace_id.clone(),
-            id_source: self
-                .workspace_id_source
-                .as_ref()
-                .map(|s| s.as_str().to_string()),
-            label: self.label.clone(),
-            git_remote: self.git_remote.clone(),
-            profiles: self.build_profiles(),
-            meta_files: self
-                .meta_files
-                .iter()
-                .map(|mf| MetaFile {
-                    path: mf.path.to_string_lossy().to_string(),
-                    language: mf.kind.language().to_string(),
-                    kind: mf.kind.as_str().to_string(),
-                    contents: mf.contents.clone(),
-                })
-                .collect(),
-        }
+        let mut ws = WorkspaceDescriptor::new(self.label.clone());
+        ws.profiles = self.build_profiles();
+        ws.meta_files = self
+            .meta_files
+            .iter()
+            .map(|mf| {
+                MetaFile::new(
+                    mf.path.to_string_lossy().to_string(),
+                    mf.kind.language(),
+                    unfault_core::types::workspace::MetaFileKind::Pyproject, // TODO: proper mapping
+                    mf.contents.clone(),
+                )
+            })
+            .collect();
+        ws
     }
 
     /// Get the workspace settings if available.
@@ -248,7 +244,7 @@ impl WorkspaceInfo {
 
             profiles.push(AdvertisedProfile {
                 id: profile_id.to_string(),
-                confidence: framework.confidence * framework_confidence_factor,
+                confidence: (framework.confidence * framework_confidence_factor) as f32,
             });
         }
 
@@ -275,7 +271,7 @@ impl WorkspaceInfo {
 
                 profiles.push(AdvertisedProfile {
                     id: profile_id.to_string(),
-                    confidence: 0.7 * framework_confidence_factor,
+                    confidence: (0.7 * framework_confidence_factor) as f32,
                 });
             }
         }
@@ -560,15 +556,13 @@ impl WorkspaceScanner {
 
         let mut src_dirs = Vec::new();
         let mut test_dirs = Vec::new();
-        let mut all_dirs = Vec::new();
 
-        for dir in dir_results {
-            all_dirs.push(dir.relative_path.clone());
+        for dir in &dir_results {
             if dir.is_src {
                 src_dirs.push(dir.relative_path.clone());
             }
             if dir.is_test {
-                test_dirs.push(dir.relative_path);
+                test_dirs.push(dir.relative_path.clone());
             }
         }
 
@@ -614,7 +608,7 @@ impl WorkspaceScanner {
             src_dirs,
             test_dirs,
             other_dirs: vec![],
-            directories: all_dirs,
+            directories: vec![],
         };
 
         // Load workspace settings from configuration files
@@ -899,12 +893,10 @@ mod tests {
 
         assert!(!descriptor.label.is_empty());
         assert!(!descriptor.profiles.is_empty());
-        assert!(
-            descriptor
-                .profiles
-                .iter()
-                .any(|p| p.id == "python_fastapi_backend")
-        );
+        assert!(descriptor
+            .profiles
+            .iter()
+            .any(|p| p.id == "python_fastapi_backend"));
     }
 
     #[test]
@@ -928,12 +920,10 @@ mod tests {
         let info = scanner.scan().unwrap();
         let descriptor = info.to_workspace_descriptor();
 
-        assert!(
-            descriptor
-                .profiles
-                .iter()
-                .any(|p| p.id == "python_generic_backend")
-        );
+        assert!(descriptor
+            .profiles
+            .iter()
+            .any(|p| p.id == "python_generic_backend"));
     }
 
     #[test]
@@ -984,21 +974,18 @@ mod tests {
 
         // Should only find main.py, not the ignored files
         assert_eq!(info.source_files.len(), 1);
-        assert!(
-            info.source_files
-                .iter()
-                .any(|(p, _)| p.ends_with("main.py"))
-        );
-        assert!(
-            info.source_files
-                .iter()
-                .all(|(p, _)| !p.ends_with("app.log"))
-        );
-        assert!(
-            info.source_files
-                .iter()
-                .all(|(p, _)| !p.ends_with("secret.py"))
-        );
+        assert!(info
+            .source_files
+            .iter()
+            .any(|(p, _)| p.ends_with("main.py")));
+        assert!(info
+            .source_files
+            .iter()
+            .all(|(p, _)| !p.ends_with("app.log")));
+        assert!(info
+            .source_files
+            .iter()
+            .all(|(p, _)| !p.ends_with("secret.py")));
     }
 
     #[test]
@@ -1022,15 +1009,13 @@ mod tests {
 
         // Should only find main.py, not the ignored files/dirs
         assert_eq!(info.source_files.len(), 1);
-        assert!(
-            info.source_files
-                .iter()
-                .any(|(p, _)| p.ends_with("main.py"))
-        );
-        assert!(
-            info.source_files
-                .iter()
-                .all(|(p, _)| !p.ends_with("temp.tmp"))
-        );
+        assert!(info
+            .source_files
+            .iter()
+            .any(|(p, _)| p.ends_with("main.py")));
+        assert!(info
+            .source_files
+            .iter()
+            .all(|(p, _)| !p.ends_with("temp.tmp")));
     }
 }
