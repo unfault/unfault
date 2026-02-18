@@ -322,6 +322,7 @@ fn walk_ast_for_halstead(
     let kind = node.kind();
     let text = node_text(node, source);
 
+    #[allow(unreachable_patterns)]
     match kind {
         // Control flow operators
         "if_statement" | "switch_statement" | "for_statement" | "for_in_statement"

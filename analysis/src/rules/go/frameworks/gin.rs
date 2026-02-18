@@ -277,6 +277,7 @@ impl Rule for GinUntrustedInputRule {
 }
 
 /// Check if a call is a dangerous sink for untrusted input.
+#[allow(dead_code)]
 fn is_dangerous_sink(sink: &str) -> Option<String> {
     // SQL sinks
     if sink.contains("Query")
@@ -316,6 +317,7 @@ fn is_dangerous_sink(sink: &str) -> Option<String> {
 }
 
 /// Get the risk description for a sink type.
+#[allow(dead_code)]
 fn sink_type_risk(sink_type: &str) -> &'static str {
     match sink_type {
         "SQL operation" => "SQL injection attacks",

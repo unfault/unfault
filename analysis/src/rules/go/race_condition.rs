@@ -58,7 +58,7 @@ impl Rule for GoRaceConditionRule {
                 if goroutine.is_anonymous {
                     // Check if it looks like it's using loop variables
                     // (common pattern: go func() { use_i }() inside for loop)
-                    let text = &goroutine.text;
+                    let _text = &goroutine.text;
                     
                     // Simple heuristic: anonymous goroutine in a loop-like context
                     // warning about variable capture

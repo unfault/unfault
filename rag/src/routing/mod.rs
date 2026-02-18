@@ -8,7 +8,7 @@ mod signals;
 
 pub use signals::classify_intent;
 
-use crate::types::{RagQuery, RouteIntent};
+use crate::types::RagQuery;
 
 /// Parse a raw query string into a structured RagQuery.
 ///
@@ -53,7 +53,9 @@ fn extract_target(text: &str) -> Option<String> {
 
     // Look for file paths (contains / or . with extension)
     for word in text.split_whitespace() {
-        let clean = word.trim_matches(|c: char| !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-');
+        let clean = word.trim_matches(|c: char| {
+            !c.is_alphanumeric() && c != '/' && c != '.' && c != '_' && c != '-'
+        });
         if clean.contains('/') && clean.len() > 2 {
             return Some(clean.to_string());
         }
@@ -80,9 +82,21 @@ fn extract_target(text: &str) -> Option<String> {
             let lower = clean.to_lowercase();
             if !matches!(
                 lower.as_str(),
-                "what" | "where" | "which" | "does" | "this"
-                    | "that" | "these" | "those" | "from" | "have"
-                    | "with" | "about" | "many" | "most" | "some"
+                "what"
+                    | "where"
+                    | "which"
+                    | "does"
+                    | "this"
+                    | "that"
+                    | "these"
+                    | "those"
+                    | "from"
+                    | "have"
+                    | "with"
+                    | "about"
+                    | "many"
+                    | "most"
+                    | "some"
             ) {
                 return Some(clean.to_string());
             }
@@ -145,6 +159,7 @@ fn detect_frameworks(text: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::RouteIntent;
 
     #[test]
     fn test_parse_query_flow() {

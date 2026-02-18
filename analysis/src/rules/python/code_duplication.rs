@@ -88,6 +88,7 @@ struct DuplicatedCode {
     /// Second occurrence file path
     file2_path: String,
     /// Second occurrence file ID
+    #[allow(dead_code)]
     file2_id: FileId,
     /// Second occurrence function name
     func2_name: String,

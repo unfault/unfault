@@ -106,7 +106,7 @@ impl PyFileSemantics {
         }
 
         self.http_calls = super::http::summarize_http_clients(parsed);
-        
+
         // ORM analysis
         self.orm_queries = super::orm::summarize_orm_queries(parsed);
 
@@ -173,8 +173,12 @@ impl PyFileSemantics {
     /// ```
     pub fn import_insertion_line_for(&self, insertion_type: ImportInsertionType) -> u32 {
         // Only consider module-level imports
-        let module_level_imports: Vec<_> = self.imports.iter().filter(|imp| imp.is_module_level).collect();
-        
+        let module_level_imports: Vec<_> = self
+            .imports
+            .iter()
+            .filter(|imp| imp.is_module_level)
+            .collect();
+
         // If no existing module-level imports, use simple logic
         if module_level_imports.is_empty() {
             return self.base_import_line();
@@ -443,37 +447,202 @@ impl PyImport {
 /// Known Python standard library modules (for categorizing imports).
 const STDLIB_MODULES: &[&str] = &[
     // Frequently used in production code
-    "abc", "argparse", "asyncio", "base64", "bisect", "builtins", "calendar",
-    "codecs", "collections", "concurrent", "contextlib", "copy", "csv",
-    "dataclasses", "datetime", "decimal", "difflib", "dis", "email", "enum",
-    "errno", "faulthandler", "functools", "gc", "getpass", "glob", "gzip",
-    "hashlib", "heapq", "hmac", "html", "http", "importlib", "inspect", "io",
-    "ipaddress", "itertools", "json", "locale", "logging", "math", "mimetypes",
-    "multiprocessing", "numbers", "operator", "os", "pathlib", "pickle",
-    "platform", "pprint", "queue", "random", "re", "secrets", "select",
-    "shutil", "signal", "socket", "sqlite3", "ssl", "stat", "statistics",
-    "string", "struct", "subprocess", "sys", "tempfile", "textwrap", "threading",
-    "time", "timeit", "traceback", "typing", "unittest", "urllib", "uuid",
-    "warnings", "weakref", "xml", "zipfile", "zlib",
+    "abc",
+    "argparse",
+    "asyncio",
+    "base64",
+    "bisect",
+    "builtins",
+    "calendar",
+    "codecs",
+    "collections",
+    "concurrent",
+    "contextlib",
+    "copy",
+    "csv",
+    "dataclasses",
+    "datetime",
+    "decimal",
+    "difflib",
+    "dis",
+    "email",
+    "enum",
+    "errno",
+    "faulthandler",
+    "functools",
+    "gc",
+    "getpass",
+    "glob",
+    "gzip",
+    "hashlib",
+    "heapq",
+    "hmac",
+    "html",
+    "http",
+    "importlib",
+    "inspect",
+    "io",
+    "ipaddress",
+    "itertools",
+    "json",
+    "locale",
+    "logging",
+    "math",
+    "mimetypes",
+    "multiprocessing",
+    "numbers",
+    "operator",
+    "os",
+    "pathlib",
+    "pickle",
+    "platform",
+    "pprint",
+    "queue",
+    "random",
+    "re",
+    "secrets",
+    "select",
+    "shutil",
+    "signal",
+    "socket",
+    "sqlite3",
+    "ssl",
+    "stat",
+    "statistics",
+    "string",
+    "struct",
+    "subprocess",
+    "sys",
+    "tempfile",
+    "textwrap",
+    "threading",
+    "time",
+    "timeit",
+    "traceback",
+    "typing",
+    "unittest",
+    "urllib",
+    "uuid",
+    "warnings",
+    "weakref",
+    "xml",
+    "zipfile",
+    "zlib",
     // Testing and debugging
-    "doctest", "pdb", "profile", "trace", "unittest",
+    "doctest",
+    "pdb",
+    "profile",
+    "trace",
+    "unittest",
     // Less common but still stdlib
-    "aifc", "array", "ast", "atexit", "audioop", "bdb", "binascii", "binhex",
-    "cgi", "cgitb", "chunk", "cmath", "cmd", "code", "codeop", "colorsys",
-    "compileall", "configparser", "cProfile", "crypt", "ctypes", "curses",
-    "dbm", "filecmp", "fileinput", "fnmatch", "formatter", "fractions",
-    "ftplib", "getopt", "gettext", "graphlib", "grp", "imaplib", "imp",
-    "keyword", "lib2to3", "linecache", "lzma", "mailbox", "mailcap", "marshal",
-    "mmap", "modulefinder", "netrc", "nis", "nntplib", "ntpath", "optparse",
-    "ossaudiodev", "parser", "pickletools", "pipes", "pkgutil", "poplib",
-    "posix", "posixpath", "pow", "pstats", "pty", "pwd", "py_compile", "pyclbr",
-    "pydoc", "quopri", "readline", "reprlib", "resource", "rlcompleter",
-    "runpy", "sched", "selectors", "shelve", "shlex", "smtpd", "smtplib",
-    "sndhdr", "spwd", "stringprep", "sunau", "symbol", "symtable", "sysconfig",
-    "syslog", "tabnanny", "tarfile", "telnetlib", "termios", "test", "token",
-    "tokenize", "tomllib", "tty", "turtle", "turtledemo", "types", "unicodedata",
-    "uu", "venv", "wave", "webbrowser", "winreg", "winsound", "wsgiref",
-    "xdrlib", "xmlrpc", "zipapp", "zipimport",
+    "aifc",
+    "array",
+    "ast",
+    "atexit",
+    "audioop",
+    "bdb",
+    "binascii",
+    "binhex",
+    "cgi",
+    "cgitb",
+    "chunk",
+    "cmath",
+    "cmd",
+    "code",
+    "codeop",
+    "colorsys",
+    "compileall",
+    "configparser",
+    "cProfile",
+    "crypt",
+    "ctypes",
+    "curses",
+    "dbm",
+    "filecmp",
+    "fileinput",
+    "fnmatch",
+    "formatter",
+    "fractions",
+    "ftplib",
+    "getopt",
+    "gettext",
+    "graphlib",
+    "grp",
+    "imaplib",
+    "imp",
+    "keyword",
+    "lib2to3",
+    "linecache",
+    "lzma",
+    "mailbox",
+    "mailcap",
+    "marshal",
+    "mmap",
+    "modulefinder",
+    "netrc",
+    "nis",
+    "nntplib",
+    "ntpath",
+    "optparse",
+    "ossaudiodev",
+    "parser",
+    "pickletools",
+    "pipes",
+    "pkgutil",
+    "poplib",
+    "posix",
+    "posixpath",
+    "pow",
+    "pstats",
+    "pty",
+    "pwd",
+    "py_compile",
+    "pyclbr",
+    "pydoc",
+    "quopri",
+    "readline",
+    "reprlib",
+    "resource",
+    "rlcompleter",
+    "runpy",
+    "sched",
+    "selectors",
+    "shelve",
+    "shlex",
+    "smtpd",
+    "smtplib",
+    "sndhdr",
+    "spwd",
+    "stringprep",
+    "sunau",
+    "symbol",
+    "symtable",
+    "sysconfig",
+    "syslog",
+    "tabnanny",
+    "tarfile",
+    "telnetlib",
+    "termios",
+    "test",
+    "token",
+    "tokenize",
+    "tomllib",
+    "tty",
+    "turtle",
+    "turtledemo",
+    "types",
+    "unicodedata",
+    "uu",
+    "venv",
+    "wave",
+    "webbrowser",
+    "winreg",
+    "winsound",
+    "wsgiref",
+    "xdrlib",
+    "xmlrpc",
+    "zipapp",
+    "zipimport",
 ];
 
 /// Check if a module name is a Python standard library module.
@@ -504,22 +673,22 @@ pub struct PyParam {
     pub name: String,
     pub default: Option<String>,
     /// Type annotation if present, e.g. "int", "str", "dict", "SessionRunRequest"
-        pub type_annotation: Option<String>,
-    }
-    
-    /// Representation of a Python class definition.
-    /// Tracks the class name and its base classes for inheritance analysis.
-    #[derive(Debug, Clone, Serialize, Deserialize)]
-    pub struct PyClass {
-        /// The class name
-        pub name: String,
-        /// List of base class names (e.g., ["BaseModel"], ["ABC", "Generic[T]"])
-        pub base_classes: Vec<String>,
-        /// Location in source code
-        pub location: AstLocation,
-    }
-    
-    /// Representation of an assignment like `app = FastAPI()` or `session = Session()`.
+    pub type_annotation: Option<String>,
+}
+
+/// Representation of a Python class definition.
+/// Tracks the class name and its base classes for inheritance analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PyClass {
+    /// The class name
+    pub name: String,
+    /// List of base class names (e.g., ["BaseModel"], ["ABC", "Generic[T]"])
+    pub base_classes: Vec<String>,
+    /// Location in source code
+    pub location: AstLocation,
+}
+
+/// Representation of an assignment like `app = FastAPI()` or `session = Session()`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PyAssignment {
     pub target: String,
@@ -596,6 +765,7 @@ struct TraversalContext {
 }
 
 impl TraversalContext {
+    #[allow(dead_code)]
     fn new() -> Self {
         Self::default()
     }
@@ -604,11 +774,11 @@ impl TraversalContext {
 /// Collect semantics by walking the tree-sitter AST.
 fn collect_semantics(parsed: &ParsedFile, sem: &mut PyFileSemantics) {
     let root = parsed.tree.root_node();
-    
+
     // First pass: collect basic semantics with context tracking
     let ctx = TraversalContext::default();
     walk_nodes_with_context(root, parsed, sem, ctx);
-    
+
     // Second pass: collect bare except clauses with function context
     collect_bare_excepts(parsed, sem);
 }
@@ -622,7 +792,8 @@ fn walk_nodes_with_context(
     // Update context based on current node
     let new_ctx = match node.kind() {
         "class_definition" => {
-            let class_name = node.child_by_field_name("name")
+            let class_name = node
+                .child_by_field_name("name")
                 .map(|n| parsed.text_for_node(&n))
                 .unwrap_or_default();
             TraversalContext {
@@ -632,7 +803,8 @@ fn walk_nodes_with_context(
             }
         }
         "function_definition" | "async_function_definition" => {
-            let func_name = node.child_by_field_name("name")
+            let func_name = node
+                .child_by_field_name("name")
                 .map(|n| parsed.text_for_node(&n))
                 .unwrap_or_default();
             let qualified = if let Some(class) = &ctx.current_class {
@@ -651,19 +823,18 @@ fn walk_nodes_with_context(
             in_loop: true,
             ..ctx.clone()
         },
-        "list_comprehension" | "dictionary_comprehension" | "set_comprehension" | "generator_expression" => {
-            TraversalContext {
-                in_comprehension: true,
-                ..ctx.clone()
-            }
+        "list_comprehension"
+        | "dictionary_comprehension"
+        | "set_comprehension"
+        | "generator_expression" => TraversalContext {
+            in_comprehension: true,
+            ..ctx.clone()
         },
         // Track when we enter a lambda or if-block - these create new scopes
-        "lambda" | "if_statement" => {
-            TraversalContext {
-                in_nested_scope: true,
-                ..ctx.clone()
-            }
-        }
+        "lambda" | "if_statement" => TraversalContext {
+            in_nested_scope: true,
+            ..ctx.clone()
+        },
         _ => ctx.clone(),
     };
 
@@ -741,7 +912,7 @@ fn walk_for_bare_excepts(
         if !has_exception_type {
             let range = node.range();
             let text = parsed.text_for_node(&node);
-            
+
             // Get just the except line (not the body)
             let except_line = text.lines().next().unwrap_or(&text).to_string();
 
@@ -776,7 +947,7 @@ fn walk_for_bare_excepts(
 /// Check if an except_clause node has an exception type specified.
 fn has_exception_type_child(except_node: &tree_sitter::Node) -> bool {
     let child_count = except_node.child_count();
-    
+
     for i in 0..child_count {
         if let Some(child) = except_node.child(i) {
             let kind = child.kind();
@@ -784,13 +955,14 @@ fn has_exception_type_child(except_node: &tree_sitter::Node) -> bool {
             if kind == "identifier"
                 || kind == "tuple"
                 || kind == "attribute"  // e.g., `except module.Error:`
-                || kind == "as_pattern" // e.g., `except Error as e:`
+                || kind == "as_pattern"
+            // e.g., `except Error as e:`
             {
                 return true;
             }
         }
     }
-    
+
     false
 }
 
@@ -798,7 +970,7 @@ fn has_exception_type_child(except_node: &tree_sitter::Node) -> bool {
 fn find_except_keyword_position(except_node: &tree_sitter::Node, source: &str) -> (usize, usize) {
     let start = except_node.start_byte();
     let text = &source[except_node.byte_range()];
-    
+
     let except_keyword = "except";
     if text.starts_with(except_keyword) {
         (start, start + except_keyword.len())
@@ -883,6 +1055,7 @@ fn detect_triple_quote(line: &str) -> Option<DocstringMarker<'static>> {
 }
 
 /// Simple recursive traversal of all nodes in the tree.
+#[allow(dead_code)]
 fn walk_nodes(root: tree_sitter::Node, f: &mut dyn FnMut(tree_sitter::Node)) {
     fn recurse(node: tree_sitter::Node, f: &mut dyn FnMut(tree_sitter::Node)) {
         f(node);
@@ -973,27 +1146,32 @@ fn build_assignment(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<PyA
 
     // Handle both regular assignments (x = value) and annotated assignments (x: Type = value)
     // First check for annotated assignment pattern: name: type = value
-    let (target, type_annotation, value_repr) = if let Some(colon_idx) = find_annotation_colon(&text) {
-        // Annotated assignment: x: Type = value
-        let name = text[..colon_idx].trim();
-        let after_colon = &text[colon_idx + 1..];
-        
-        if let Some(eq_idx) = after_colon.find('=') {
-            let type_part = after_colon[..eq_idx].trim();
-            let value_part = after_colon[eq_idx + 1..].trim();
-            (name.to_string(), Some(type_part.to_string()), value_part.to_string())
+    let (target, type_annotation, value_repr) =
+        if let Some(colon_idx) = find_annotation_colon(&text) {
+            // Annotated assignment: x: Type = value
+            let name = text[..colon_idx].trim();
+            let after_colon = &text[colon_idx + 1..];
+
+            if let Some(eq_idx) = after_colon.find('=') {
+                let type_part = after_colon[..eq_idx].trim();
+                let value_part = after_colon[eq_idx + 1..].trim();
+                (
+                    name.to_string(),
+                    Some(type_part.to_string()),
+                    value_part.to_string(),
+                )
+            } else {
+                // Annotation without assignment (e.g., `x: int`) - skip these
+                return None;
+            }
+        } else if let Some(eq_idx) = text.find('=') {
+            // Regular assignment: x = value
+            let left = text[..eq_idx].trim();
+            let right = text[eq_idx + 1..].trim();
+            (left.to_string(), None, right.to_string())
         } else {
-            // Annotation without assignment (e.g., `x: int`) - skip these
             return None;
-        }
-    } else if let Some(eq_idx) = text.find('=') {
-        // Regular assignment: x = value
-        let left = text[..eq_idx].trim();
-        let right = text[eq_idx + 1..].trim();
-        (left.to_string(), None, right.to_string())
-    } else {
-        return None;
-    };
+        };
 
     if target.is_empty() || value_repr.is_empty() {
         return None;
@@ -1019,11 +1197,11 @@ fn build_assignment(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<PyA
 fn find_annotation_colon(text: &str) -> Option<usize> {
     // Look for pattern: identifier : type =
     // The colon must come before any '=' and must be followed eventually by '='
-    
+
     let mut bracket_depth: i32 = 0;
     let mut paren_depth: i32 = 0;
     let mut brace_depth: i32 = 0;
-    
+
     for (i, c) in text.char_indices() {
         match c {
             '[' => bracket_depth += 1,
@@ -1053,7 +1231,7 @@ fn find_annotation_colon(text: &str) -> Option<usize> {
             _ => {}
         }
     }
-    
+
     None
 }
 
@@ -1181,7 +1359,10 @@ fn build_function(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<PyFun
     // Detect async using both node kind and text-based approach for reliability
     // Some tree-sitter versions may not distinguish async_function_definition
     let is_async = node.kind() == "async_function_definition"
-        || parsed.text_for_node(node).trim_start().starts_with("async def");
+        || parsed
+            .text_for_node(node)
+            .trim_start()
+            .starts_with("async def");
 
     // Extract parameters from the function
     let params = extract_function_params(parsed, node);
@@ -1222,7 +1403,7 @@ fn compute_body_hash(parsed: &ParsedFile, body_node: &tree_sitter::Node) -> u64 
     use std::hash::{Hash, Hasher};
 
     let body_text = parsed.text_for_node(body_node);
-    
+
     // Normalize the body:
     // 1. Split into lines
     // 2. Trim each line
@@ -1273,7 +1454,7 @@ fn extract_function_params(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec
                     let type_annotation = param_node
                         .child_by_field_name("type")
                         .map(|t| parsed.text_for_node(&t));
-                    
+
                     if let Some(name) = name {
                         params.push(PyParam {
                             name,
@@ -1332,7 +1513,7 @@ fn extract_function_params(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec
                     let type_annotation = param_node
                         .child_by_field_name("type")
                         .map(|t| parsed.text_for_node(&t));
-                    
+
                     if let Some(name) = name {
                         params.push(PyParam {
                             name,
@@ -1342,7 +1523,9 @@ fn extract_function_params(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec
                     } else {
                         // Fallback: parse the text "name: type = value" directly
                         let text = parsed.text_for_node(&param_node);
-                        if let Some((name, type_ann, def_val)) = parse_typed_default_param_text(&text) {
+                        if let Some((name, type_ann, def_val)) =
+                            parse_typed_default_param_text(&text)
+                        {
                             params.push(PyParam {
                                 name,
                                 default: def_val,
@@ -1383,11 +1566,11 @@ fn parse_typed_param_text(text: &str) -> Option<(String, String)> {
     let colon_idx = text.find(':')?;
     let name = text[..colon_idx].trim().to_string();
     let type_ann = text[colon_idx + 1..].trim().to_string();
-    
+
     if name.is_empty() || type_ann.is_empty() {
         return None;
     }
-    
+
     Some((name, type_ann))
 }
 
@@ -1396,17 +1579,25 @@ fn parse_typed_default_param_text(text: &str) -> Option<(String, String, Option<
     let colon_idx = text.find(':')?;
     let name = text[..colon_idx].trim().to_string();
     let rest = &text[colon_idx + 1..];
-    
+
     // Find the '=' for default value
     if let Some(eq_idx) = rest.find('=') {
         let type_ann = rest[..eq_idx].trim().to_string();
         let default = rest[eq_idx + 1..].trim().to_string();
-        
+
         if name.is_empty() || type_ann.is_empty() {
             return None;
         }
-        
-        Some((name, type_ann, if default.is_empty() { None } else { Some(default) }))
+
+        Some((
+            name,
+            type_ann,
+            if default.is_empty() {
+                None
+            } else {
+                Some(default)
+            },
+        ))
     } else {
         // No default value
         let type_ann = rest.trim().to_string();
@@ -1652,13 +1843,19 @@ async def async_func():
     #[test]
     fn collects_simple_function_call() {
         let sem = parse_and_build_semantics("print('hello')");
-        assert!(sem.calls.iter().any(|c| c.function_call.callee_expr == "print"));
+        assert!(sem
+            .calls
+            .iter()
+            .any(|c| c.function_call.callee_expr == "print"));
     }
 
     #[test]
     fn collects_method_call() {
         let sem = parse_and_build_semantics("app.add_middleware(CORSMiddleware)");
-        assert!(sem.calls.iter().any(|c| c.function_call.callee_expr == "app.add_middleware"));
+        assert!(sem
+            .calls
+            .iter()
+            .any(|c| c.function_call.callee_expr == "app.add_middleware"));
     }
 
     #[test]
@@ -1679,8 +1876,14 @@ result = outer(inner(x))
 "#;
         let sem = parse_and_build_semantics(src);
         // Should collect both outer and inner calls
-        assert!(sem.calls.iter().any(|c| c.function_call.callee_expr == "outer"));
-        assert!(sem.calls.iter().any(|c| c.function_call.callee_expr == "inner"));
+        assert!(sem
+            .calls
+            .iter()
+            .any(|c| c.function_call.callee_expr == "outer"));
+        assert!(sem
+            .calls
+            .iter()
+            .any(|c| c.function_call.callee_expr == "inner"));
     }
 
     #[test]
@@ -1802,8 +2005,14 @@ def helper():
         assert!(sem.functions.iter().any(|f| f.name == "helper"));
 
         // Should have calls
-        assert!(sem.calls.iter().any(|c| c.function_call.callee_expr == "FastAPI"));
-        assert!(sem.calls.iter().any(|c| c.function_call.callee_expr == "app.add_middleware"));
+        assert!(sem
+            .calls
+            .iter()
+            .any(|c| c.function_call.callee_expr == "FastAPI"));
+        assert!(sem
+            .calls
+            .iter()
+            .any(|c| c.function_call.callee_expr == "app.add_middleware"));
     }
 
     #[test]
@@ -2018,8 +2227,11 @@ def test_function():
         let sem = parse_and_build_semantics(src);
         // All assignments should be marked as not module-level
         for assign in &sem.assignments {
-            assert!(!assign.is_module_level,
-                "Expected assignment '{}' to NOT be module-level", assign.target);
+            assert!(
+                !assign.is_module_level,
+                "Expected assignment '{}' to NOT be module-level",
+                assign.target
+            );
         }
     }
 
@@ -2040,8 +2252,11 @@ class TestClass:
         let sem = parse_and_build_semantics(src);
         // All assignments should be marked as not module-level
         for assign in &sem.assignments {
-            assert!(!assign.is_module_level,
-                "Expected assignment '{}' to NOT be module-level", assign.target);
+            assert!(
+                !assign.is_module_level,
+                "Expected assignment '{}' to NOT be module-level",
+                assign.target
+            );
         }
     }
 
@@ -2057,8 +2272,11 @@ async def async_func():
         let sem = parse_and_build_semantics(src);
         // All assignments should be marked as not module-level
         for assign in &sem.assignments {
-            assert!(!assign.is_module_level,
-                "Expected assignment '{}' to NOT be module-level", assign.target);
+            assert!(
+                !assign.is_module_level,
+                "Expected assignment '{}' to NOT be module-level",
+                assign.target
+            );
         }
     }
 
@@ -2075,24 +2293,33 @@ def some_function():
 ANOTHER_GLOBAL = {}
 "#;
         let sem = parse_and_build_semantics(src);
-        
+
         // Filter to only module-level assignments
-        let module_level: Vec<_> = sem.assignments.iter()
+        let module_level: Vec<_> = sem
+            .assignments
+            .iter()
             .filter(|a| a.is_module_level)
             .collect();
-        
+
         // Should have MODULE_CACHE and ANOTHER_GLOBAL as module-level
-        assert_eq!(module_level.len(), 2,
-            "Expected 2 module-level assignments, but found: {:?}", module_level);
-        
+        assert_eq!(
+            module_level.len(),
+            2,
+            "Expected 2 module-level assignments, but found: {:?}",
+            module_level
+        );
+
         let targets: Vec<&str> = module_level.iter().map(|a| a.target.as_str()).collect();
         assert!(targets.contains(&"MODULE_CACHE"));
         assert!(targets.contains(&"ANOTHER_GLOBAL"));
-        
+
         // local_dict should exist but not be module-level
         let local = sem.assignments.iter().find(|a| a.target == "local_dict");
         assert!(local.is_some(), "local_dict should be collected");
-        assert!(!local.unwrap().is_module_level, "local_dict should NOT be module-level");
+        assert!(
+            !local.unwrap().is_module_level,
+            "local_dict should NOT be module-level"
+        );
     }
 
     #[test]
@@ -2106,7 +2333,9 @@ my_lambda = lambda x: x + 1
 "#;
         let sem = parse_and_build_semantics(src);
         // Should collect my_lambda as a module-level assignment
-        let module_level: Vec<_> = sem.assignments.iter()
+        let module_level: Vec<_> = sem
+            .assignments
+            .iter()
             .filter(|a| a.is_module_level)
             .collect();
         assert_eq!(module_level.len(), 1);
@@ -2226,7 +2455,10 @@ app = FastAPI()
         assert_eq!(sem.assignments.len(), 1);
         assert_eq!(sem.assignments[0].target, "CONFIG");
         assert_eq!(sem.assignments[0].value_repr, "{}");
-        assert_eq!(sem.assignments[0].type_annotation, Some("dict[str, str]".to_string()));
+        assert_eq!(
+            sem.assignments[0].type_annotation,
+            Some("dict[str, str]".to_string())
+        );
     }
 
     #[test]
@@ -2246,7 +2478,10 @@ app = FastAPI()
         let sem = parse_and_build_semantics(src);
         assert_eq!(sem.assignments.len(), 1);
         assert_eq!(sem.assignments[0].target, "LANGUAGE_MAP");
-        assert_eq!(sem.assignments[0].type_annotation, Some("dict[str, str]".to_string()));
+        assert_eq!(
+            sem.assignments[0].type_annotation,
+            Some("dict[str, str]".to_string())
+        );
     }
 
     #[test]
@@ -2286,13 +2521,16 @@ def update_item(item_id: int, item: ItemUpdate, user: User):
         assert_eq!(sem.functions.len(), 1);
         let func = &sem.functions[0];
         assert_eq!(func.params.len(), 3);
-        
+
         assert_eq!(func.params[0].name, "item_id");
         assert_eq!(func.params[0].type_annotation, Some("int".to_string()));
-        
+
         assert_eq!(func.params[1].name, "item");
-        assert_eq!(func.params[1].type_annotation, Some("ItemUpdate".to_string()));
-        
+        assert_eq!(
+            func.params[1].type_annotation,
+            Some("ItemUpdate".to_string())
+        );
+
         assert_eq!(func.params[2].name, "user");
         assert_eq!(func.params[2].type_annotation, Some("User".to_string()));
     }
@@ -2459,7 +2697,10 @@ def fetch():
         let call = &sem.calls[0];
         assert!(call.function_call.is_import_call);
         assert_eq!(call.function_call.import_alias, Some("req".to_string()));
-        assert_eq!(call.function_call.callee_parts, vec!["req".to_string(), "get".to_string()]);
+        assert_eq!(
+            call.function_call.callee_parts,
+            vec!["req".to_string(), "get".to_string()]
+        );
     }
 
     #[test]
@@ -2475,7 +2716,10 @@ def fetch():
         let call = &sem.calls[0];
         assert!(call.function_call.is_import_call);
         assert_eq!(call.function_call.import_alias, None);
-        assert_eq!(call.function_call.callee_parts, vec!["requests".to_string(), "get".to_string()]);
+        assert_eq!(
+            call.function_call.callee_parts,
+            vec!["requests".to_string(), "get".to_string()]
+        );
     }
 
     #[test]
@@ -2492,7 +2736,10 @@ def fetch():
         let call = &sem.calls[0];
         assert!(!call.function_call.is_import_call);
         assert_eq!(call.function_call.import_alias, None);
-        assert_eq!(call.function_call.callee_parts, vec!["local_helper".to_string()]);
+        assert_eq!(
+            call.function_call.callee_parts,
+            vec!["local_helper".to_string()]
+        );
     }
 
     #[test]

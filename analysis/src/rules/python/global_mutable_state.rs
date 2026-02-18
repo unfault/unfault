@@ -51,6 +51,7 @@ struct GlobalMutableAssignment {
     /// The original assignment text
     text: String,
     /// True if the variable name follows UPPERCASE convention (likely a constant)
+    #[allow(dead_code)]
     is_likely_constant: bool,
     /// Type annotation if present, e.g. "dict[str, str]" for annotated assignments
     type_annotation: Option<String>,

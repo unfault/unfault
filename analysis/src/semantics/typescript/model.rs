@@ -457,7 +457,7 @@ fn walk_nodes_with_context(
                     // Check for global mutable state
                     if var.kind != VariableKind::Const {
                         // Find the keyword byte positions
-                        let text = parsed.text_for_node(&node);
+                        let _text = parsed.text_for_node(&node);
                         let keyword = if var.kind == VariableKind::Let {
                             "let"
                         } else {

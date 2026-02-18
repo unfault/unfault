@@ -9,7 +9,7 @@ use crate::parse::ast::FileId;
 use crate::rules::Rule;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
-use crate::semantics::python::model::{ImportCategory, ImportStyle, PyImport};
+use crate::semantics::python::model::PyImport;
 use crate::types::context::Dimension;
 use crate::types::finding::FindingKind;
 use crate::types::finding::Severity;
@@ -225,7 +225,7 @@ mod tests {
     use crate::parse::ast::{FileId, TextRange};
     use crate::parse::python::parse_python_file;
     use crate::semantics::SourceSemantics;
-    use crate::semantics::python::model::PyFileSemantics;
+    use crate::semantics::python::model::{ImportCategory, ImportStyle, PyFileSemantics};
     use crate::types::context::{Language, SourceFile};
 
     // ==================== Helper Functions ====================

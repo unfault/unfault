@@ -2,7 +2,9 @@
 
 use crate::parse::ast::ParsedFile;
 
-use super::model::{ExpressApp, ExpressFileSummary, ExpressMiddleware, ExpressRoute, ExpressRouter};
+use super::model::{
+    ExpressApp, ExpressFileSummary, ExpressMiddleware, ExpressRoute, ExpressRouter,
+};
 
 /// Summarize Express.js-related semantics in a TypeScript file.
 pub fn summarize_express(parsed: &ParsedFile) -> Option<ExpressFileSummary> {
@@ -28,7 +30,11 @@ pub fn summarize_express(parsed: &ParsedFile) -> Option<ExpressFileSummary> {
     Some(summary)
 }
 
-fn walk_for_express(node: tree_sitter::Node, parsed: &ParsedFile, summary: &mut ExpressFileSummary) {
+fn walk_for_express(
+    node: tree_sitter::Node,
+    parsed: &ParsedFile,
+    summary: &mut ExpressFileSummary,
+) {
     match node.kind() {
         "lexical_declaration" | "variable_declaration" => {
             // Check for express() or express.Router() calls
@@ -55,7 +61,7 @@ fn check_express_instantiation(
     node: &tree_sitter::Node,
     summary: &mut ExpressFileSummary,
 ) {
-    let text = parsed.text_for_node(node);
+    let _text = parsed.text_for_node(node);
 
     // Look for patterns like:
     // const app = express()
@@ -111,13 +117,12 @@ fn check_route_or_middleware(
     let location = parsed.location_for_node(node);
 
     // HTTP method routes: app.get(), router.post(), etc.
-    let http_methods = ["get", "post", "put", "patch", "delete", "head", "options", "all"];
+    let http_methods = [
+        "get", "post", "put", "patch", "delete", "head", "options", "all",
+    ];
 
     for method in http_methods {
-        let patterns = [
-            format!("app.{}", method),
-            format!("router.{}", method),
-        ];
+        let patterns = [format!("app.{}", method), format!("router.{}", method)];
 
         for pattern in &patterns {
             if callee.ends_with(pattern.as_str())
@@ -154,7 +159,10 @@ fn extract_route_info(
         if let Some(first_arg) = args_node.named_child(0) {
             let text = parsed.text_for_node(&first_arg);
             if text.starts_with('\'') || text.starts_with('"') || text.starts_with('`') {
-                path = Some(text.trim_matches(|c| c == '\'' || c == '"' || c == '`').to_string());
+                path = Some(
+                    text.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+                        .to_string(),
+                );
             }
         }
 
@@ -197,18 +205,18 @@ fn has_four_params(node: &tree_sitter::Node) -> bool {
     if let Some(params) = node.child_by_field_name("parameters") {
         return params.named_child_count() == 4;
     }
-    
+
     // For arrow functions, check params
     if node.kind() == "arrow_function" {
         if let Some(params) = node.child_by_field_name("parameters") {
             return params.named_child_count() == 4;
         }
         // Single param without parentheses
-        if let Some(param) = node.child_by_field_name("parameter") {
+        if let Some(_param) = node.child_by_field_name("parameter") {
             return false;
         }
     }
-    
+
     false
 }
 
@@ -222,7 +230,7 @@ fn extract_middleware_info(
     if let Some(args_node) = node.child_by_field_name("arguments") {
         if let Some(first_arg) = args_node.named_child(0) {
             let text = parsed.text_for_node(&first_arg);
-            
+
             // Extract middleware name from common patterns
             if text.contains("cors") {
                 middleware_name = "cors".to_string();
@@ -230,7 +238,8 @@ fn extract_middleware_info(
                 middleware_name = "helmet".to_string();
             } else if text.contains("express.json") || text.contains("bodyParser.json") {
                 middleware_name = "json".to_string();
-            } else if text.contains("express.urlencoded") || text.contains("bodyParser.urlencoded") {
+            } else if text.contains("express.urlencoded") || text.contains("bodyParser.urlencoded")
+            {
                 middleware_name = "urlencoded".to_string();
             } else if text.contains("express.static") {
                 middleware_name = "static".to_string();

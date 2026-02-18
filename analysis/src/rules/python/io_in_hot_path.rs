@@ -67,6 +67,7 @@ enum IoOperationType {
     /// Socket operations
     Socket,
     /// Generic I/O
+    #[allow(dead_code)]
     Generic,
 }
 

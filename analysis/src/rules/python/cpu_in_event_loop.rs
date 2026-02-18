@@ -87,6 +87,7 @@ enum CpuOperationType {
     /// File parsing (XML, YAML, etc.)
     FileParsing,
     /// Generic CPU-bound operation
+    #[allow(dead_code)]
     Generic,
 }
 

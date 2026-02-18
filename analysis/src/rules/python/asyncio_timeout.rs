@@ -142,7 +142,7 @@ impl Rule for PythonAsyncioTimeoutRule {
                 }
 
                 // Check for asyncio.sleep without reasonable bounds
-                if (callee == "asyncio.sleep" || callee.ends_with(".sleep")) {
+                if callee == "asyncio.sleep" || callee.ends_with(".sleep") {
                     // Try to detect very long sleeps
                     if args.contains("86400") || args.contains("3600") && !args.contains("*") {
                         findings.push(RuleFinding {

@@ -279,6 +279,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 
 /// Generate a patch to add all common exception handlers.
 /// Returns (imports, code) as separate strings for distinct hunks.
+#[allow(dead_code)]
 fn generate_exception_handler_patch(app_var: &str) -> String {
     format!(
         "{}\n{}",
@@ -348,6 +349,7 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
 }
 
 /// Generate a patch for specific missing handlers.
+#[allow(dead_code)]
 fn generate_specific_handler_patch(app_var: &str, missing: &[&str]) -> String {
     format!(
         "{}\n{}",

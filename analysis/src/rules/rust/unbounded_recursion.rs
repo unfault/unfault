@@ -135,6 +135,7 @@ struct SelfCall {
     location_col: u32,
     end_line: u32,
     end_col: u32,
+    #[allow(dead_code)]
     callee: String,
     is_tail_position: bool,
 }

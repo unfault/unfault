@@ -12,7 +12,7 @@ use crate::parse::ast::FileId;
 use crate::rules::Rule;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
-use crate::semantics::typescript::model::{TsCallSite, TsFileSemantics, TsFunction};
+use crate::semantics::typescript::model::{TsCallSite, TsFunction};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -59,6 +59,7 @@ impl Default for TypescriptRegexCompileRule {
 #[derive(Debug, Clone)]
 struct RegexInFunction {
     /// The callee being called (e.g., "RegExp", "new RegExp")
+    #[allow(dead_code)]
     callee: String,
     /// The pattern argument (if can be extracted)
     pattern_arg: Option<String>,

@@ -12,7 +12,7 @@ use crate::parse::ast::FileId;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::go::model::{GoCallSite, GoFileSemantics, GoFunction, GoMethod};
+use crate::semantics::go::model::{GoCallSite, GoFileSemantics};
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -60,6 +60,7 @@ impl Default for GoRegexCompileRule {
 #[derive(Debug, Clone)]
 struct RegexCompileInFunction {
     /// The callee being called (e.g., "regexp.MustCompile")
+    #[allow(dead_code)]
     callee: String,
     /// Whether this is MustCompile (panics on error) or Compile (returns error)
     is_must_compile: bool,

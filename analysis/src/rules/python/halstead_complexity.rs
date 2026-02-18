@@ -166,6 +166,7 @@ impl HalsteadMetrics {
 }
 
 /// Python operators for Halstead counting
+#[allow(dead_code)]
 const PYTHON_OPERATORS: &[&str] = &[
     // Arithmetic
     "+", "-", "*", "/", "//", "%", "**", "@",
@@ -185,6 +186,7 @@ const PYTHON_OPERATORS: &[&str] = &[
 ];
 
 /// Python keywords that count as operators
+#[allow(dead_code)]
 const PYTHON_KEYWORD_OPERATORS: &[&str] = &[
     "if", "elif", "else", "for", "while", "try", "except", "finally",
     "with", "return", "yield", "pass", "break", "continue", "raise",

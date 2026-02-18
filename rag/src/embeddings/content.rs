@@ -53,6 +53,7 @@ pub fn build_finding_content(
 }
 
 /// Compute a SHA-256 content hash for deduplication.
+#[allow(dead_code)]
 pub fn compute_content_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
@@ -60,6 +61,7 @@ pub fn compute_content_hash(content: &str) -> String {
 }
 
 /// Build a FindingRecord from analysis findings.
+#[allow(dead_code)]
 pub fn finding_to_record(
     workspace_id: &str,
     finding: &unfault_analysis::types::finding::Finding,

@@ -320,6 +320,7 @@ fn walk_ast_for_halstead(
     let kind = node.kind();
     let text = node_text(node, source);
 
+    #[allow(unreachable_patterns)]
     match kind {
         // Control flow operators
         "if_expression" | "match_expression" | "for_expression" | "while_expression"

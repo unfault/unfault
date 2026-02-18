@@ -94,6 +94,7 @@ impl NaiveDatetimePattern {
         }
     }
 
+    #[allow(dead_code)]
     fn fix_suggestion(&self) -> &'static str {
         match self {
             NaiveDatetimePattern::DatetimeNow => "datetime.now(timezone.utc)",

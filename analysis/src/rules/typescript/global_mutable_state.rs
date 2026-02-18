@@ -72,7 +72,7 @@ impl Rule for TypescriptGlobalMutableStateRule {
             };
 
             for global in &ts.global_mutable_state {
-                let line = global.location.range.start_line + 1;
+                let _line = global.location.range.start_line + 1;
 
                 let kind_str = match global.kind {
                     crate::semantics::typescript::model::VariableKind::Let => "let",

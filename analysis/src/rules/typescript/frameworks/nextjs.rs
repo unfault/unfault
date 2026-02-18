@@ -14,7 +14,7 @@ use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
-use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
+
 
 /// Rule that detects missing error logging in Next.js API routes.
 ///

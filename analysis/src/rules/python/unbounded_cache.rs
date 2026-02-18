@@ -65,6 +65,7 @@ enum CachePatternType {
     /// cachetools without maxsize/ttl
     CachetoolsUnbounded,
     /// Custom cache class without limits
+    #[allow(dead_code)]
     CustomCacheUnbounded,
 }
 

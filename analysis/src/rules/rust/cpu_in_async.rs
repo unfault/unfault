@@ -63,8 +63,10 @@ struct CpuIntensiveCall {
     /// Name of the enclosing async function
     async_function: String,
     /// Start byte offset
+    #[allow(dead_code)]
     start_byte: usize,
     /// End byte offset
+    #[allow(dead_code)]
     end_byte: usize,
 }
 
@@ -89,6 +91,7 @@ enum CpuOperationType {
     /// Base64 encoding/decoding
     Base64Processing,
     /// Generic CPU-bound operation
+    #[allow(dead_code)]
     Generic,
 }
 

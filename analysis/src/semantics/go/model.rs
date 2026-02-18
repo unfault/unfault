@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::semantics::common::{calls::FunctionCall, CommonLocation};
 use crate::parse::ast::{AstLocation, FileId, ParsedFile};
+use crate::semantics::common::{calls::FunctionCall, CommonLocation};
 use crate::types::context::Language;
 
 use super::frameworks::GoFrameworkSummary;
@@ -376,8 +376,10 @@ struct TraversalContext {
     current_function: Option<String>,
     current_qualified_name: Option<String>,
     /// Whether currently in an HTTP/RPC handler
+    #[allow(dead_code)]
     in_handler: bool,
     /// Type of handler if in_handler is true
+    #[allow(dead_code)]
     handler_type: Option<String>,
 }
 
@@ -413,7 +415,9 @@ fn walk_nodes_with_context(
                 .map(|n| parsed.text_for_node(&n))
                 .unwrap_or_default();
             let receiver = node.child_by_field_name("receiver");
-            let receiver_type = receiver.map(|r| extract_receiver_type(parsed, &r).0).unwrap_or_default();
+            let receiver_type = receiver
+                .map(|r| extract_receiver_type(parsed, &r).0)
+                .unwrap_or_default();
             let qualified = format!("{}.{}", receiver_type, func_name);
             TraversalContext {
                 current_function: Some(func_name),
@@ -622,12 +626,16 @@ fn extract_receiver_type(parsed: &ParsedFile, receiver: &tree_sitter::Node) -> (
     let text = parsed.text_for_node(receiver);
     // Remove parentheses and extract type
     let trimmed = text.trim_matches(|c| c == '(' || c == ')' || c == ' ');
-    
+
     // Check for pointer receiver
     if let Some(ptr_pos) = trimmed.find('*') {
         let type_name = trimmed[ptr_pos + 1..].trim().to_string();
         // Remove any variable name prefix
-        let type_name = type_name.split_whitespace().last().unwrap_or(&type_name).to_string();
+        let type_name = type_name
+            .split_whitespace()
+            .last()
+            .unwrap_or(&type_name)
+            .to_string();
         (type_name, true)
     } else {
         // Non-pointer receiver - extract type name after variable name if present
@@ -638,10 +646,7 @@ fn extract_receiver_type(parsed: &ParsedFile, receiver: &tree_sitter::Node) -> (
 }
 
 /// Extract parameters and return types from a function/method declaration.
-fn extract_signature(
-    parsed: &ParsedFile,
-    node: &tree_sitter::Node,
-) -> (Vec<GoParam>, Vec<String>) {
+fn extract_signature(parsed: &ParsedFile, node: &tree_sitter::Node) -> (Vec<GoParam>, Vec<String>) {
     let mut params = Vec::new();
     let mut return_types = Vec::new();
 
@@ -675,16 +680,9 @@ fn extract_params(parsed: &ParsedFile, params_node: &tree_sitter::Node) -> Vec<G
                             "identifier" => {
                                 names.push(parsed.text_for_node(&param_child));
                             }
-                            "type_identifier"
-                            | "qualified_type"
-                            | "pointer_type"
-                            | "slice_type"
-                            | "array_type"
-                            | "map_type"
-                            | "channel_type"
-                            | "function_type"
-                            | "interface_type"
-                            | "struct_type" => {
+                            "type_identifier" | "qualified_type" | "pointer_type"
+                            | "slice_type" | "array_type" | "map_type" | "channel_type"
+                            | "function_type" | "interface_type" | "struct_type" => {
                                 param_type = parsed.text_for_node(&param_child);
                             }
                             _ => {}
@@ -830,16 +828,9 @@ fn extract_struct_fields(parsed: &ParsedFile, struct_node: &tree_sitter::Node) -
                             "field_identifier" => {
                                 names.push(parsed.text_for_node(&field_child));
                             }
-                            "type_identifier"
-                            | "qualified_type"
-                            | "pointer_type"
-                            | "slice_type"
-                            | "array_type"
-                            | "map_type"
-                            | "channel_type"
-                            | "function_type"
-                            | "interface_type"
-                            | "struct_type" => {
+                            "type_identifier" | "qualified_type" | "pointer_type"
+                            | "slice_type" | "array_type" | "map_type" | "channel_type"
+                            | "function_type" | "interface_type" | "struct_type" => {
                                 field_type = parsed.text_for_node(&field_child);
                             }
                             "interpreted_string_literal" | "raw_string_literal" => {
@@ -910,16 +901,9 @@ fn collect_declarations(
                             "identifier" => {
                                 names.push(parsed.text_for_node(&spec_child));
                             }
-                            "type_identifier"
-                            | "qualified_type"
-                            | "pointer_type"
-                            | "slice_type"
-                            | "array_type"
-                            | "map_type"
-                            | "channel_type"
-                            | "function_type"
-                            | "interface_type"
-                            | "struct_type" => {
+                            "type_identifier" | "qualified_type" | "pointer_type"
+                            | "slice_type" | "array_type" | "map_type" | "channel_type"
+                            | "function_type" | "interface_type" | "struct_type" => {
                                 decl_type = Some(parsed.text_for_node(&spec_child));
                             }
                             "expression_list" => {
@@ -968,19 +952,23 @@ fn build_callsite(
     let is_self_call = false;
 
     // Detect import call and alias
-    let (is_import_call, import_alias) = sem.imports.iter().find_map(|imp| {
-        if imp.alias.as_ref() == Some(&first_part) {
-            Some((true, imp.alias.clone()))
-        } else {
-            // For non-aliased imports, check if first_part matches the package name (last segment of path)
-            let pkg_name = imp.path.rsplit('/').next().unwrap_or(&imp.path);
-            if pkg_name == first_part {
-                Some((true, None))
+    let (is_import_call, import_alias) = sem
+        .imports
+        .iter()
+        .find_map(|imp| {
+            if imp.alias.as_ref() == Some(&first_part) {
+                Some((true, imp.alias.clone()))
             } else {
-                None
+                // For non-aliased imports, check if first_part matches the package name (last segment of path)
+                let pkg_name = imp.path.rsplit('/').next().unwrap_or(&imp.path);
+                if pkg_name == first_part {
+                    Some((true, None))
+                } else {
+                    None
+                }
             }
-        }
-    }).unwrap_or((false, None));
+        })
+        .unwrap_or((false, None));
 
     let function_call = FunctionCall {
         callee_expr: callee.clone(),
@@ -1025,7 +1013,10 @@ fn build_goroutine(
     let has_context_param = text.contains("ctx") || text.contains("context.Context");
 
     // Check if goroutine uses a done channel pattern
-    let has_done_channel = text.contains("done") || text.contains("quit") || text.contains("stop") || text.contains("<-ctx.Done()");
+    let has_done_channel = text.contains("done")
+        || text.contains("quit")
+        || text.contains("stop")
+        || text.contains("<-ctx.Done()");
 
     // Check for unbounded channel send (send without select with default)
     let has_unbounded_channel_send = text.contains("<-") && !text.contains("select");
@@ -1059,7 +1050,11 @@ fn build_defer(
     let range = node.range();
 
     // Extract the call expression text (everything after "defer ")
-    let call_text = text.strip_prefix("defer ").unwrap_or(&text).trim().to_string();
+    let call_text = text
+        .strip_prefix("defer ")
+        .unwrap_or(&text)
+        .trim()
+        .to_string();
 
     // Check if defer is for resource cleanup
     let is_resource_cleanup = text.contains(".Close()")
@@ -1230,10 +1225,10 @@ fn walk_for_context_usage(
         let fn_name = node
             .child_by_field_name("name")
             .map(|n| parsed.text_for_node(&n));
-        
+
         // Check if this is an HTTP handler based on signature
         let (in_handler, handler_type) = detect_handler_type(parsed, &node);
-        
+
         ContextAnalysisState {
             current_fn: fn_name,
             in_handler,
@@ -1245,7 +1240,7 @@ fn walk_for_context_usage(
 
     if node.kind() == "call_expression" {
         let call_text = parsed.text_for_node(&node);
-        
+
         // Check for context patterns
         if call_text.contains("context.") {
             let is_background = call_text.contains("context.Background()");
@@ -1301,32 +1296,32 @@ fn walk_for_context_usage(
 /// Detect if a function/method declaration is an HTTP/RPC handler.
 fn detect_handler_type(parsed: &ParsedFile, node: &tree_sitter::Node) -> (bool, Option<String>) {
     let fn_text = parsed.text_for_node(node);
-    
+
     // Check for net/http handler: func(w http.ResponseWriter, r *http.Request)
     if fn_text.contains("http.ResponseWriter") && fn_text.contains("http.Request") {
         return (true, Some("http".to_string()));
     }
-    
+
     // Check for Gin handler: func(c *gin.Context)
     if fn_text.contains("*gin.Context") {
         return (true, Some("gin".to_string()));
     }
-    
+
     // Check for Echo handler: func(c echo.Context)
     if fn_text.contains("echo.Context") {
         return (true, Some("echo".to_string()));
     }
-    
+
     // Check for Fiber handler: func(c *fiber.Ctx)
     if fn_text.contains("*fiber.Ctx") {
         return (true, Some("fiber".to_string()));
     }
-    
+
     // Check for gRPC handler: (ctx context.Context, req *pb.Something)
     if fn_text.contains("context.Context") && fn_text.contains("*pb.") {
         return (true, Some("grpc".to_string()));
     }
-    
+
     (false, None)
 }
 
@@ -1491,7 +1486,10 @@ package main
 const MaxSize = 100
 "#;
         let sem = parse_and_build_semantics(src);
-        assert!(sem.declarations.iter().any(|d| d.name == "MaxSize" && d.is_const));
+        assert!(sem
+            .declarations
+            .iter()
+            .any(|d| d.name == "MaxSize" && d.is_const));
     }
 
     #[test]
@@ -1544,7 +1542,10 @@ func fetch() {
         let call = &sem.calls[0];
         assert!(call.function_call.is_import_call);
         assert_eq!(call.function_call.import_alias, None);
-        assert_eq!(call.function_call.callee_parts, vec!["http".to_string(), "Get".to_string()]);
+        assert_eq!(
+            call.function_call.callee_parts,
+            vec!["http".to_string(), "Get".to_string()]
+        );
     }
 
     #[test]
@@ -1563,7 +1564,10 @@ func fetch() {
         let call = &sem.calls[0];
         assert!(call.function_call.is_import_call);
         assert_eq!(call.function_call.import_alias, Some("h".to_string()));
-        assert_eq!(call.function_call.callee_parts, vec!["h".to_string(), "Get".to_string()]);
+        assert_eq!(
+            call.function_call.callee_parts,
+            vec!["h".to_string(), "Get".to_string()]
+        );
     }
 
     #[test]
@@ -1582,7 +1586,10 @@ func fetch() {
         let call = &sem.calls[0];
         assert!(!call.function_call.is_import_call);
         assert_eq!(call.function_call.import_alias, None);
-        assert_eq!(call.function_call.callee_parts, vec!["local_helper".to_string()]);
+        assert_eq!(
+            call.function_call.callee_parts,
+            vec!["local_helper".to_string()]
+        );
     }
 
     #[test]
@@ -1593,6 +1600,9 @@ package main
 var count int = 0
 "#;
         let sem = parse_and_build_semantics(src);
-        assert!(sem.declarations.iter().any(|d| d.name == "count" && !d.is_const));
+        assert!(sem
+            .declarations
+            .iter()
+            .any(|d| d.name == "count" && !d.is_const));
     }
 }

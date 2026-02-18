@@ -58,6 +58,7 @@ impl Default for PythonRegexCompileRule {
 #[derive(Debug, Clone)]
 struct RegexCompileInFunction {
     /// The callee being called (e.g., "re.compile")
+    #[allow(dead_code)]
     callee: String,
     /// The pattern argument (if can be extracted)
     pattern_arg: Option<String>,

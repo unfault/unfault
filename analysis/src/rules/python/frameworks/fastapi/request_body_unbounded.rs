@@ -47,6 +47,7 @@ struct BodyRoute {
     /// Location of just the decorator (for highlighting)
     decorator_location: AstLocation,
     /// The app/router variable name for patch generation
+    #[allow(dead_code)]
     app_var_name: Option<String>,
     /// Import insertion line for patch generation (1-based)
     import_insert_line: u32,

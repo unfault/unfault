@@ -25,6 +25,7 @@ impl GoCpuInHotPathRule {
     }
 
     /// Check if a function looks like an HTTP handler based on its parameters
+    #[allow(dead_code)]
     fn is_http_handler(func: &crate::semantics::go::model::GoFunction) -> bool {
         func.params.iter().any(|p| {
             p.param_type.contains("http.ResponseWriter") ||

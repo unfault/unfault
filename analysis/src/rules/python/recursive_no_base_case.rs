@@ -181,8 +181,8 @@ fn detect_recursive_functions(py: &crate::semantics::python::model::PyFileSemant
 fn check_for_base_case(
     py: &crate::semantics::python::model::PyFileSemantics,
     func_name: &str,
-    func_start_line: u32,
-    func_end_line: u32,
+    _func_start_line: u32,
+    _func_end_line: u32,
 ) -> bool {
     // Heuristic: If the function has parameters with default values that could
     // serve as termination conditions, it might have a base case

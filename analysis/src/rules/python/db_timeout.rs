@@ -64,6 +64,7 @@ struct DbCallPattern {
     /// The timeout parameter name
     timeout_param: &'static str,
     /// Whether it's an async call
+    #[allow(dead_code)]
     is_async: bool,
 }
 
