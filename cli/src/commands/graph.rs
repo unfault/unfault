@@ -295,64 +295,54 @@ fn resolve_identifier(
 /// * `Ok(EXIT_AUTH_ERROR)` - API key is invalid
 /// * `Ok(EXIT_NETWORK_ERROR)` - Cannot reach the API
 pub async fn execute_impact(args: ImpactArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!(
-                "{} Not logged in. Run `unfault login` first.",
-                "Error:".red().bold()
-            );
-            if args.verbose {
-                eprintln!("  {}: {}", "Details".dimmed(), e);
-            }
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
-
-    // Resolve session_id or workspace_id
-    let identifier = match resolve_identifier(
-        args.session_id.as_deref(),
-        args.workspace_path.as_deref(),
-        args.verbose,
-    ) {
-        Ok(id) => id,
-        Err(exit_code) => return Ok(exit_code),
-    };
-
-    // Create API client
-    let api_client = ApiClient::new(config.base_url());
-
-    // Build request based on resolved identifier
-    let (session_id, workspace_id) = match identifier {
-        ResolvedIdentifier::SessionId(sid) => (Some(sid), None),
-        ResolvedIdentifier::WorkspaceId(wid) => (None, Some(wid)),
-    };
-
-    let request = ImpactAnalysisRequest {
-        session_id,
-        workspace_id,
-        file_path: args.file_path.clone(),
-        max_depth: args.max_depth,
+    // Determine workspace path
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
     };
 
     if args.verbose {
         eprintln!("{} Analyzing impact of: {}", "→".cyan(), args.file_path);
     }
 
-    // Execute query
-    let response = match api_client.graph_impact(&config.api_key, &request).await {
-        Ok(response) => response,
+    // Build local graph
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
         Err(e) => {
-            return handle_api_error(e, &config, args.verbose);
+            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
         }
     };
 
-    // Output results
+    // Query impact using rag retrieval
+    let impact = unfault_rag::retrieval::get_impact(&graph, &args.file_path, args.max_depth as usize);
+
+    if impact.affected_files.is_empty() {
+        eprintln!(
+            "{} No downstream dependencies found for '{}'",
+            "ℹ".cyan(),
+            args.file_path
+        );
+        return Ok(EXIT_SUCCESS);
+    }
+
     if args.json {
-        output_impact_json(&response)?;
+        println!("{}", serde_json::to_string_pretty(&impact)?);
     } else {
-        output_impact_formatted(&response, args.verbose);
+        println!(
+            "\n{} Impact analysis for {}",
+            "📊".bright_blue(),
+            args.file_path.bright_blue()
+        );
+        println!(
+            "  {} {} file(s) affected:\n",
+            "→".cyan(),
+            impact.affected_files.len()
+        );
+        for file in &impact.affected_files {
+            println!("    {}", file);
+        }
+        println!();
     }
 
     Ok(EXIT_SUCCESS)
@@ -362,68 +352,45 @@ pub async fn execute_impact(args: ImpactArgs) -> Result<i32> {
 ///
 /// Shows files that use a specific library.
 pub async fn execute_library(args: LibraryArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!(
-                "{} Not logged in. Run `unfault login` first.",
-                "Error:".red().bold()
-            );
-            if args.verbose {
-                eprintln!("  {}: {}", "Details".dimmed(), e);
-            }
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
-
-    // Resolve session_id or workspace_id
-    let identifier = match resolve_identifier(
-        args.session_id.as_deref(),
-        args.workspace_path.as_deref(),
-        args.verbose,
-    ) {
-        Ok(id) => id,
-        Err(exit_code) => return Ok(exit_code),
-    };
-
-    // Create API client
-    let api_client = ApiClient::new(config.base_url());
-
-    // Build request based on resolved identifier
-    let (session_id, workspace_id) = match identifier {
-        ResolvedIdentifier::SessionId(sid) => (Some(sid), None),
-        ResolvedIdentifier::WorkspaceId(wid) => (None, Some(wid)),
-    };
-
-    let request = DependencyQueryRequest {
-        session_id,
-        workspace_id,
-        query_type: "files_using_library".to_string(),
-        library_name: Some(args.library_name.clone()),
-        file_path: None,
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
     };
 
     if args.verbose {
         eprintln!("{} Finding files using: {}", "→".cyan(), args.library_name);
     }
 
-    // Execute query
-    let response = match api_client
-        .graph_dependencies(&config.api_key, &request)
-        .await
-    {
-        Ok(response) => response,
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
         Err(e) => {
-            return handle_api_error(e, &config, args.verbose);
+            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
         }
     };
 
-    // Output results
+    // Find all files that use this library via UsesLibrary edges
+    let deps = unfault_rag::retrieval::get_dependencies(&graph, &args.library_name);
+
     if args.json {
-        output_deps_json(&response)?;
+        println!("{}", serde_json::to_string_pretty(&deps)?);
     } else {
-        output_library_formatted(&response, &args.library_name, args.verbose);
+        println!(
+            "\n{} Files using '{}':",
+            "📦".bright_blue(),
+            args.library_name.bright_blue()
+        );
+        if deps.library_users.is_empty() && deps.dependencies.is_empty() {
+            println!("  No files found using '{}'", args.library_name);
+        } else {
+            for file in &deps.library_users {
+                println!("    {}", file);
+            }
+            for file in &deps.dependencies {
+                println!("    {}", file);
+            }
+        }
+        println!();
     }
 
     Ok(EXIT_SUCCESS)
@@ -433,68 +400,49 @@ pub async fn execute_library(args: LibraryArgs) -> Result<i32> {
 ///
 /// Shows external dependencies of a file.
 pub async fn execute_deps(args: DepsArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!(
-                "{} Not logged in. Run `unfault login` first.",
-                "Error:".red().bold()
-            );
-            if args.verbose {
-                eprintln!("  {}: {}", "Details".dimmed(), e);
-            }
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
-
-    // Resolve session_id or workspace_id
-    let identifier = match resolve_identifier(
-        args.session_id.as_deref(),
-        args.workspace_path.as_deref(),
-        args.verbose,
-    ) {
-        Ok(id) => id,
-        Err(exit_code) => return Ok(exit_code),
-    };
-
-    // Create API client
-    let api_client = ApiClient::new(config.base_url());
-
-    // Build request based on resolved identifier
-    let (session_id, workspace_id) = match identifier {
-        ResolvedIdentifier::SessionId(sid) => (Some(sid), None),
-        ResolvedIdentifier::WorkspaceId(wid) => (None, Some(wid)),
-    };
-
-    let request = DependencyQueryRequest {
-        session_id,
-        workspace_id,
-        query_type: "external_dependencies".to_string(),
-        library_name: None,
-        file_path: Some(args.file_path.clone()),
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
     };
 
     if args.verbose {
         eprintln!("{} Finding dependencies of: {}", "→".cyan(), args.file_path);
     }
 
-    // Execute query
-    let response = match api_client
-        .graph_dependencies(&config.api_key, &request)
-        .await
-    {
-        Ok(response) => response,
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
         Err(e) => {
-            return handle_api_error(e, &config, args.verbose);
+            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
         }
     };
 
-    // Output results
+    let deps = unfault_rag::retrieval::get_dependencies(&graph, &args.file_path);
+
     if args.json {
-        output_deps_json(&response)?;
+        println!("{}", serde_json::to_string_pretty(&deps)?);
     } else {
-        output_deps_formatted(&response, &args.file_path, args.verbose);
+        println!(
+            "\n{} Dependencies of {}",
+            "📦".bright_blue(),
+            args.file_path.bright_blue()
+        );
+        if !deps.dependencies.is_empty() {
+            println!("  Internal modules:");
+            for dep in &deps.dependencies {
+                println!("    {}", dep);
+            }
+        }
+        if !deps.library_users.is_empty() {
+            println!("  External libraries:");
+            for lib in &deps.library_users {
+                println!("    {}", lib);
+            }
+        }
+        if deps.dependencies.is_empty() && deps.library_users.is_empty() {
+            println!("  No dependencies found for '{}'", args.file_path);
+        }
+        println!();
     }
 
     Ok(EXIT_SUCCESS)
@@ -504,45 +452,9 @@ pub async fn execute_deps(args: DepsArgs) -> Result<i32> {
 ///
 /// Shows the most critical/hub files in the codebase.
 pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!(
-                "{} Not logged in. Run `unfault login` first.",
-                "Error:".red().bold()
-            );
-            if args.verbose {
-                eprintln!("  {}: {}", "Details".dimmed(), e);
-            }
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
-
-    // Resolve session_id or workspace_id
-    let identifier = match resolve_identifier(
-        args.session_id.as_deref(),
-        args.workspace_path.as_deref(),
-        args.verbose,
-    ) {
-        Ok(id) => id,
-        Err(exit_code) => return Ok(exit_code),
-    };
-
-    // Create API client
-    let api_client = ApiClient::new(config.base_url());
-
-    // Build request based on resolved identifier
-    let (session_id, workspace_id) = match identifier {
-        ResolvedIdentifier::SessionId(sid) => (Some(sid), None),
-        ResolvedIdentifier::WorkspaceId(wid) => (None, Some(wid)),
-    };
-
-    let request = CentralityRequest {
-        session_id,
-        workspace_id,
-        limit: args.limit,
-        sort_by: args.sort_by.clone(),
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
     };
 
     if args.verbose {
@@ -554,19 +466,33 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
         );
     }
 
-    // Execute query
-    let response = match api_client.graph_centrality(&config.api_key, &request).await {
-        Ok(response) => response,
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
         Err(e) => {
-            return handle_api_error(e, &config, args.verbose);
+            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
         }
     };
 
-    // Output results
+    let centrality = unfault_rag::retrieval::get_centrality(&graph, args.limit as usize);
+
     if args.json {
-        output_critical_json(&response)?;
+        println!("{}", serde_json::to_string_pretty(&centrality)?);
     } else {
-        output_critical_formatted(&response, args.verbose);
+        println!("\n{} Most critical files (by import count):\n", "📊".bright_blue());
+        if centrality.central_files.is_empty() {
+            println!("  No import relationships found.");
+        } else {
+            for (i, (path, score)) in centrality.central_files.iter().enumerate() {
+                println!(
+                    "  {}. {} (imported {} times)",
+                    i + 1,
+                    path.bright_blue(),
+                    (*score as i32).to_string().yellow()
+                );
+            }
+        }
+        println!();
     }
 
     Ok(EXIT_SUCCESS)
@@ -576,72 +502,44 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
 ///
 /// Shows statistics about the code graph.
 pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    if args.verbose {
+        eprintln!("{} Building graph statistics...", "→".cyan());
+    }
+
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
         Err(e) => {
-            eprintln!(
-                "{} Not logged in. Run `unfault login` first.",
-                "Error:".red().bold()
-            );
-            if args.verbose {
-                eprintln!("  {}: {}", "Details".dimmed(), e);
-            }
-            return Ok(EXIT_CONFIG_ERROR);
+            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
         }
     };
 
-    // Resolve session_id or workspace_id
-    let identifier = match resolve_identifier(
-        args.session_id.as_deref(),
-        args.workspace_path.as_deref(),
-        args.verbose,
-    ) {
-        Ok(id) => id,
-        Err(exit_code) => return Ok(exit_code),
-    };
+    let overview = unfault_rag::retrieval::workspace_overview(&graph);
 
-    // Create API client
-    let api_client = ApiClient::new(config.base_url());
-
-    // Execute query based on resolved identifier
-    let response = match identifier {
-        ResolvedIdentifier::SessionId(sid) => {
-            if args.verbose {
-                eprintln!(
-                    "{} Getting graph statistics for session: {}",
-                    "→".cyan(),
-                    sid
-                );
-            }
-            api_client.graph_stats(&config.api_key, &sid).await
-        }
-        ResolvedIdentifier::WorkspaceId(wid) => {
-            if args.verbose {
-                eprintln!(
-                    "{} Getting graph statistics for workspace: {}",
-                    "→".cyan(),
-                    wid
-                );
-            }
-            api_client
-                .graph_stats_by_workspace(&config.api_key, &wid)
-                .await
-        }
-    };
-
-    let response = match response {
-        Ok(response) => response,
-        Err(e) => {
-            return handle_api_error(e, &config, args.verbose);
-        }
-    };
-
-    // Output results
     if args.json {
-        output_stats_json(&response)?;
+        println!("{}", serde_json::to_string_pretty(&overview)?);
     } else {
-        output_stats_formatted(&response, args.verbose);
+        println!("\n{} Graph Statistics\n", "📊".bright_blue());
+        println!("  Files:      {}", overview.file_count.to_string().yellow());
+        println!("  Functions:  {}", overview.function_count.to_string().yellow());
+        println!("  Languages:  {}", overview.languages.join(", ").cyan());
+        if !overview.frameworks.is_empty() {
+            println!("  Frameworks: {}", overview.frameworks.join(", ").cyan());
+        }
+        println!("  Nodes:      {}", graph.graph.node_count().to_string().yellow());
+        println!("  Edges:      {}", graph.graph.edge_count().to_string().yellow());
+        if !overview.entrypoints.is_empty() {
+            println!("\n  Entrypoints:");
+            for ep in &overview.entrypoints {
+                println!("    {}", ep);
+            }
+        }
+        println!();
     }
 
     Ok(EXIT_SUCCESS)
@@ -1129,36 +1027,13 @@ fn output_stats_json(response: &GraphStatsResponse) -> Result<()> {
 }
 
 pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!(
-                "{} Not logged in. Run `unfault login` first.",
-                "Error:".red().bold()
-            );
-            if args.verbose {
-                eprintln!("  {}: {}", "Details".dimmed(), e);
-            }
-            return Ok(EXIT_CONFIG_ERROR);
-        }
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
     };
-
-    // Resolve session_id or workspace_id
-    let identifier = match resolve_identifier(
-        args.session_id.as_deref(),
-        args.workspace_path.as_deref(),
-        args.verbose,
-    ) {
-        Ok(id) => id,
-        Err(exit_code) => return Ok(exit_code),
-    };
-
-    // Create API client
-    let api_client = ApiClient::new(config.base_url());
 
     // Parse function argument (file:function)
-    let (file_path, function_name) = match args.function.split_once(':') {
+    let (_file_path, function_name) = match args.function.split_once(':') {
         Some((file, func)) => (file.to_string(), func.to_string()),
         None => {
             eprintln!(
@@ -1169,150 +1044,70 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
         }
     };
 
-    // Build request based on resolved identifier
-    let (session_id, workspace_id) = match identifier {
-        ResolvedIdentifier::SessionId(sid) => (Some(sid), None),
-        ResolvedIdentifier::WorkspaceId(wid) => (None, Some(wid)),
-    };
-
-    let request = FunctionImpactRequest {
-        session_id,
-        workspace_id,
-        file_path,
-        function_name,
-        max_depth: args.max_depth,
-    };
-
     if args.verbose {
-        eprintln!(
-            "{} Analyzing impact of: {}:{}",
-            "→".cyan(),
-            request.file_path,
-            request.function_name
-        );
+        eprintln!("{} Analyzing call flow of: {}", "→".cyan(), args.function);
     }
 
-    // Execute query
-    let response = match api_client
-        .graph_function_impact(&config.api_key, &request)
-        .await
-    {
-        Ok(response) => response,
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
         Err(e) => {
-            return handle_api_error(e, &config, args.verbose);
+            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
         }
     };
 
-    // Output results
+    // Use flow extraction (BFS from function through call edges)
+    let flow = unfault_rag::retrieval::extract_flow(&graph, &function_name, args.max_depth as usize);
+
     if args.json {
-        let json = serde_json::to_string_pretty(&response)?;
-        println!("{}", json);
+        println!("{}", serde_json::to_string_pretty(&flow)?);
     } else {
         println!();
         println!(
             "{} {} {}",
             "🔗".cyan(),
             "Function Call Graph:".bold(),
-            response.function.bright_white()
+            function_name.bright_white()
         );
         println!();
 
-        if response.total_affected == 0 {
+        if flow.paths.is_empty() {
             println!(
-                "  {} This function is a leaf — not called by any other functions.",
+                "  {} No call paths found from this function.",
                 "ℹ".blue()
-            );
-            println!(
-                "  {} Safe to refactor without affecting other call paths.",
-                "".dimmed()
             );
             println!();
             return Ok(EXIT_SUCCESS);
         }
 
-        // Calculate direct vs transitive
-        let direct_count = response.direct_callers.len();
-        let transitive_only: Vec<_> = response
-            .transitive_callers
-            .iter()
-            .filter(|c| c.depth > 1)
-            .collect();
-        let transitive_count = transitive_only.len();
-
         println!(
-            "  {} This function is called from {} place(s)",
+            "  {} Found {} call path(s)",
             "→".cyan(),
-            response.total_affected.to_string().bold()
+            flow.paths.len().to_string().bold()
         );
-        if transitive_count > 0 {
-            println!(
-                "  {} {} direct, {} through call chains",
-                "".dimmed(),
-                direct_count,
-                transitive_count
-            );
-        }
         println!();
 
-        // Direct callers
-        if !response.direct_callers.is_empty() {
-            println!("{}", "Direct Callers".bold().underline());
-            println!(
-                "{}",
-                "Functions that call this directly".dimmed()
-            );
-            println!("{}", "─".repeat(60).dimmed());
-            for caller in &response.direct_callers {
+        // Display call paths
+        for (i, path) in flow.paths.iter().enumerate() {
+            println!("  Path {}:", i + 1);
+            for node in path {
+                let indent = "  ".repeat(node.depth + 2);
+                let file_info = node
+                    .file_path
+                    .as_deref()
+                    .map(|p| format!(" ({})", p))
+                    .unwrap_or_default();
                 println!(
-                    "  {} {} ({})",
-                    "•".cyan(),
-                    caller.function.bright_white(),
-                    caller.path.dimmed()
+                    "{}{} {}{}",
+                    indent,
+                    "→".cyan(),
+                    node.name.bright_white(),
+                    file_info.dimmed()
                 );
             }
             println!();
         }
 
-        // Transitive callers
-        if !transitive_only.is_empty() {
-            println!("{}", "Upstream Callers".bold().underline());
-            println!(
-                "{}",
-                "Functions that depend on this through call chains".dimmed()
-            );
-            println!("{}", "─".repeat(60).dimmed());
-            for caller in transitive_only {
-                let depth_indicator = "→".repeat(caller.depth as usize);
-                println!(
-                    "  {} {} ({}) {}",
-                    depth_indicator.dimmed(),
-                    caller.function.bright_white(),
-                    caller.path.dimmed(),
-                    format!("({} hops)", caller.depth).dimmed()
-                );
-            }
-            println!();
-        }
-
-        // Insights
-        if response.total_affected >= 5 {
-            println!(
-                "  {} This is a core function. Changes affect many call paths.",
-                "💡".yellow()
-            );
-            println!();
-        }
-
-        if args.verbose {
-            println!(
-                "  {} Direct: {}, Upstream: {}, Total: {}",
-                "Stats:".dimmed(),
-                direct_count,
-                transitive_count,
-                response.total_affected
-            );
-            println!();
-        }
     }
 
     Ok(EXIT_SUCCESS)

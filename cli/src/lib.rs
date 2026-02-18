@@ -18,6 +18,7 @@ pub mod commands;
 pub mod config;
 pub mod errors;
 pub mod exit_codes;
+pub mod local_graph;
 pub mod session;
 
 // Re-export commonly used types
