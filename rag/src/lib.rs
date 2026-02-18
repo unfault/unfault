@@ -4,40 +4,38 @@
 //! - LanceDB vector storage for embeddings
 //! - Embedding generation via OpenAI/Ollama
 //! - Semantic search over findings
-//! - Query intent classification
+//! - Query intent classification and routing
+//!
+//! # Architecture
+//!
+//! The RAG system has three layers:
+//!
+//! 1. **Graph-based retrieval** - Fast path using in-memory CodeGraph for
+//!    flow analysis, impact analysis, enumeration, and workspace overview.
+//!    No embeddings needed.
+//!
+//! 2. **Vector search** - Semantic similarity search over embedded findings
+//!    using LanceDB. Requires an embedding provider.
+//!
+//! 3. **LLM synthesis** - Optional LLM call to synthesize a natural language
+//!    response from retrieved context.
 //!
 //! # Example
 //!
 //! ```ignore
 //! use unfault_rag::RagEngine;
 //!
-//! let rag = RagEngine::new(".unfault/vectors.lance")?;
+//! let rag = RagEngine::new(".unfault/vectors.lance").await?;
 //! let results = rag.query("What are the security issues?").await?;
 //! ```
 
-// Re-export analysis types for convenience
-pub use unfault_analysis::{
-    CodeGraph, Engine as AnalysisEngine, FileId, Finding, FindingKind, Severity, SourceSemantics,
-};
+pub mod embeddings;
+pub mod error;
+pub mod routing;
+pub mod store;
+pub mod types;
 
-// Modules will be added as we port from API:
-// pub mod vector_store;
-// pub mod embeddings;
-// pub mod query;
-// pub mod intent;
-
-/// Placeholder for the RAG engine
-pub struct RagEngine;
-
-impl RagEngine {
-    /// Create a new RAG engine
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for RagEngine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Re-export main types
+pub use error::RagError;
+pub use store::VectorStore;
+pub use types::{RagQuery, RagResponse, RouteIntent};
