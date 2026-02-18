@@ -16,7 +16,9 @@
 //! ```
 
 // Re-export analysis types for convenience
-pub use unfault_analysis::{CodeGraph, Engine as AnalysisEngine, FileId, SourceSemantics};
+pub use unfault_analysis::{
+    CodeGraph, Engine as AnalysisEngine, FileId, Finding, FindingKind, Severity, SourceSemantics,
+};
 
 // Modules will be added as we port from API:
 // pub mod vector_store;

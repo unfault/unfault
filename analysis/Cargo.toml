@@ -15,7 +15,10 @@ name = "unfault_analysis"
 path = "src/lib.rs"
 
 [dependencies]
-unfault-core = { path = "../core" }
+# Note: unfault-core is NOT a dependency currently.
+# The analysis crate has its own copies of parse/semantics/graph/types
+# that diverged from core. These will be harmonized later.
+# unfault-core = { path = "../core" }
 
 # From workspace
 serde.workspace = true
@@ -25,5 +28,27 @@ async-trait.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+regex.workspace = true
+petgraph.workspace = true
+
+# Tree-sitter (needed for parse module)
+tree-sitter.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-yaml.workspace = true
+tree-sitter-hcl.workspace = true
+tree-sitter-json.workspace = true
+
+# Diff generation
+similar = { version = "2", features = ["inline", "text"] }
+
+# Analysis-specific
+arc-swap = "1"
+scc = "3"
+memchr = { version = "2", default-features = false }
 
 [dev-dependencies]

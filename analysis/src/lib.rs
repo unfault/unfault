@@ -10,37 +10,40 @@
 //! ```ignore
 //! use unfault_analysis::Engine;
 //!
-//! let engine = Engine::new();
-//! let results = engine.analyze(&files, &profiles).await?;
+//! let engine = Engine::with_default_config();
+//! let results = engine.analyze(&meta, contexts).await?;
 //! ```
 
-// Re-export core types for convenience
-pub use unfault_core::{
-    graph::CodeGraph,
-    parse::ast::FileId,
-    semantics::SourceSemantics,
-    types::context::{Language, SourceFile},
-    IntermediateRepresentation,
-};
+// Internal modules (from engine - will harmonize with core later)
+pub mod dependencies;
+pub mod graph;
+pub mod parse;
+pub mod semantics;
+pub mod types;
 
-// Modules will be added as we port from engine:
-// pub mod rules;
-// pub mod profiles;
-// pub mod engine;
-// pub mod session;
+// Analysis-specific modules
+pub mod config;
+pub mod engine;
+pub mod error;
+pub mod ir;
+pub mod profiles;
+pub mod rules;
+pub mod session;
+pub mod suppression;
 
-/// Placeholder for the analysis engine
-pub struct Engine;
+// Re-export commonly used types
+pub use graph::CodeGraph;
+pub use parse::ast::FileId;
+pub use semantics::SourceSemantics;
+pub use types::context::{Dimension, Language, SourceFile, SessionContextInput};
+pub use types::finding::{Finding, FindingApplicability, FindingKind, Severity};
+pub use types::meta::ReviewSessionMeta;
+pub use types::session_result::{ContextResult, ReviewSessionResult};
 
-impl Engine {
-    /// Create a new analysis engine with default configuration
-    pub fn new() -> Self {
-        Self
-    }
-}
-
-impl Default for Engine {
-    fn default() -> Self {
-        Self::new()
-    }
-}
+// Re-export main engine types
+pub use config::EngineConfig;
+pub use engine::Engine;
+pub use error::EngineError;
+pub use profiles::ProfileRegistry;
+pub use rules::registry::RuleRegistry;
+pub use rules::Rule;

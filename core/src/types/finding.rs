@@ -2,6 +2,61 @@ use serde::{Deserialize, Serialize};
 
 use crate::types::context::Dimension;
 
+/// Investment level for implementing a recommendation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum InvestmentLevel {
+    Low,
+    Medium,
+    High,
+}
+
+/// Lifecycle stage where a recommendation becomes relevant.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LifecycleStage {
+    Prototype,
+    Product,
+    Production,
+}
+
+/// Level at which a decision needs to be made.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionLevel {
+    Code,
+    Config,
+    ApiContract,
+    Architecture,
+}
+
+/// Type of benefit from implementing a recommendation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum Benefit {
+    Reliability,
+    Operability,
+    Latency,
+    Correctness,
+    Performance,
+    Security,
+}
+
+/// Guidance metadata that helps consumers (including LLM agents) decide whether a
+/// recommendation is worth implementing for the current context.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FindingApplicability {
+    pub investment_level: InvestmentLevel,
+    pub min_stage: LifecycleStage,
+    pub decision_level: DecisionLevel,
+    #[serde(default)]
+    pub benefits: Vec<Benefit>,
+    #[serde(default)]
+    pub prerequisites: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notes: Option<String>,
+}
+
 /// Core finding type produced by the engine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Finding {
@@ -13,6 +68,9 @@ pub struct Finding {
     pub severity: Severity,
     pub confidence: f32,
     pub dimension: Dimension,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub applicability: Option<FindingApplicability>,
 
     /// File path where this finding was detected
     pub file_path: String,
@@ -33,6 +91,11 @@ pub struct Finding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_column: Option<u32>,
 
+    /// Byte range for precise location (start_byte, end_byte).
+    /// Enables exact code extraction from source files.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub byte_range: Option<(usize, usize)>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub diff: Option<String>,
 
@@ -40,7 +103,7 @@ pub struct Finding {
     pub fix_preview: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum FindingKind {
     BehaviorThreat,
     PerformanceSmell,
