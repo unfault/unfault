@@ -1,0 +1,57 @@
+[package]
+name = "unfault"
+version = "0.6.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Unfault — a cognitive context engine for thoughtful engineers"
+documentation = "https://docs.rs/unfault"
+keywords = ["cli", "code-analysis", "lsp", "developer-tools"]
+categories = ["command-line-utilities", "development-tools"]
+readme = "README.md"
+
+[dependencies]
+# From workspace
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+rayon.workspace = true
+regex.workspace = true
+
+# CLI specific
+clap = { version = "4.5", features = ["derive"] }
+colored = "3"
+env_logger = "0.11"
+futures-util = "0.3"
+glob = "0.3"
+hex = "0.4"
+ignore = "0.4"
+indicatif = "0.17"
+log = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+tower-lsp = "0.20"
+dashmap = "6"
+scc = "3.4.8"
+sha2 = "0.10"
+rmp-serde = "1"
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+termimad = "0.31.3"
+textwrap = "0.16"
+toml = "0.8"
+urlencoding = "2"
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Local crates
+unfault-core = { path = "../core" }
+# Will be added later:
+# unfault-rag = { path = "../rag" }
+
+[dev-dependencies]
+tempfile = "3.8"
+mockall = "0.12"
+serial_test = "3.0"

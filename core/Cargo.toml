@@ -1,0 +1,48 @@
+[package]
+name = "unfault-core"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Core parsing, semantics extraction, and graph building for unfault"
+keywords = ["parser", "code-analysis", "graph", "semantics"]
+categories = ["development-tools", "parser-implementations"]
+readme = "README.md"
+
+[lib]
+name = "unfault_core"
+path = "src/lib.rs"
+
+[dependencies]
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+anyhow.workspace = true
+thiserror.workspace = true
+
+# Tree-sitter for parsing
+tree-sitter.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-yaml.workspace = true
+tree-sitter-hcl.workspace = true
+tree-sitter-json.workspace = true
+
+# Graph construction
+petgraph.workspace = true
+
+# Regex for pattern matching
+regex.workspace = true
+
+# Diff generation for patches
+similar = { version = "2", features = ["inline", "text"] }
+
+[dev-dependencies]

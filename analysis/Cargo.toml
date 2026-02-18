@@ -1,0 +1,29 @@
+[package]
+name = "unfault-analysis"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Rule evaluation and analysis engine for unfault"
+keywords = ["code-analysis", "rules", "linting"]
+categories = ["development-tools"]
+
+[lib]
+name = "unfault_analysis"
+path = "src/lib.rs"
+
+[dependencies]
+unfault-core = { path = "../core" }
+
+# From workspace
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+async-trait.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+rayon.workspace = true
+
+[dev-dependencies]
