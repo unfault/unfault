@@ -36,7 +36,6 @@
 
 use anyhow::Result;
 use colored::Colorize;
-use std::path::Path;
 
 use crate::exit_codes::*;
 

@@ -60,11 +60,7 @@ use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::api::ApiClient;
-use crate::api::graph::{
-    CentralityRequest, FileCentrality, FunctionImpactRequest, FunctionInfo,
-    ImpactAnalysisRequest, IrFinding,
-};
+use crate::api::graph::{FileCentrality, FunctionInfo, IrFinding};
 use crate::config::Config;
 use crate::exit_codes::*;
 use crate::session::{WorkspaceScanner, build_ir_cached, compute_workspace_id, get_git_remote};
@@ -177,13 +173,11 @@ fn normalize_severity(severity: &str) -> String {
 struct UnfaultLsp {
     /// LSP client for sending notifications
     client: Client,
-    /// API client for calling Unfault API
-    api_client: Arc<ApiClient>,
-    /// Configuration (API key, etc.)
+    /// Configuration (LLM, embeddings)
     config: Option<Config>,
     /// Workspace root path
     workspace_root: Arc<tokio::sync::RwLock<Option<PathBuf>>>,
-    /// Workspace ID for API calls
+    /// Workspace ID (for identification)
     workspace_id: Arc<tokio::sync::RwLock<Option<String>>>,
     /// Cached findings for code actions, keyed by document URI
     findings_cache: DashMap<Url, Vec<CachedFinding>>,
@@ -206,12 +200,8 @@ impl UnfaultLsp {
             eprintln!("[unfault-lsp] Config loaded: {}", config.is_some());
         }
 
-        // TODO: LSP needs migration to use local analysis instead of API
-        let api_client = ApiClient::new("http://localhost:8000".to_string());
-
         Self {
             client,
-            api_client: Arc::new(api_client),
             config,
             workspace_root: Arc::new(tokio::sync::RwLock::new(None)),
             workspace_id: Arc::new(tokio::sync::RwLock::new(None)),
@@ -276,19 +266,6 @@ impl UnfaultLsp {
             });
 
         self.log_debug(&format!("Using project root: {:?}", project_root));
-
-        // Get API key
-        let api_key = match &self.config {
-            Some(config) => "".to_string(),
-            None => {
-                self.log_debug("No API key configured, skipping analysis");
-                // Publish empty diagnostics to clear any stale ones
-                self.client
-                    .publish_diagnostics(uri.clone(), vec![], Some(version))
-                    .await;
-                return;
-            }
-        };
 
         // Use pre-built IR if provided, otherwise build it (with caching)
         let ir = match prebuilt_ir {
@@ -395,47 +372,16 @@ impl UnfaultLsp {
 
         debug!("[LSP] Profiles to use: {:?}", profiles);
 
-        // Call API
-        let workspace_label_str = project_root
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("project");
+        // Run analysis locally
+        debug!("[LSP] Running local analysis...");
 
-        debug!("[LSP] Calling analyze_ir API...");
-
-        let response = match self
-            .api_client
-            .analyze_ir(
-                &api_key,
-                &workspace_id,
-                Some(workspace_label_str),
-                &profiles,
-                ir_json,
-            )
-            .await
-        {
+        let response = match crate::analysis::analyze_ir_locally(ir_json, &profiles).await {
             Ok(response) => response,
             Err(e) => {
-                // Provide user-friendly error message
-                debug!("[LSP] API error: {:?}", e);
-                let user_msg = match &e {
-                    crate::api::ApiError::Network { message } if message.contains("parse") => {
-                        format!(
-                            "Analysis failed: project may be too large ({} files). Try opening a smaller directory.",
-                            ir_size
-                        )
-                    }
-                    crate::api::ApiError::Unauthorized { .. } => {
-                        "Analysis failed: Invalid or expired API key. Run 'unfault login' to re-authenticate.".to_string()
-                    }
-                    crate::api::ApiError::Server { status, .. } => {
-                        format!("Analysis failed: Server error ({}). Please try again later.", status)
-                    }
-                    _ => format!("Analysis failed: {:?}", e),
-                };
-                self.log_debug(&format!("API error: {:?}", e));
+                debug!("[LSP] Analysis error: {:?}", e);
+                self.log_debug(&format!("Analysis error: {:?}", e));
                 self.client
-                    .show_message(MessageType::WARNING, user_msg)
+                    .show_message(MessageType::WARNING, format!("Analysis failed: {}", e))
                     .await;
                 return;
             }
@@ -950,34 +896,38 @@ impl UnfaultLsp {
             }
         }
 
-        // Fetch from API
-        let request = CentralityRequest {
-            session_id: None,
-            workspace_id: Some(workspace_id),
-            limit: 50, // Get top 50 files
-            sort_by: "in_degree".to_string(),
-        };
+        // Build local graph and compute centrality
+        let workspace_root = self.workspace_root.read().await;
+        let root = workspace_root.as_ref()?;
 
-        let response = match self.api_client.graph_centrality(&api_key, &request).await {
-            Ok(r) => r,
-            Err(e) => {
-                self.log_debug(&format!("Failed to fetch centrality: {:?}", e));
-                return None;
-            }
-        };
+        let graph = crate::local_graph::build_analysis_graph(root, false).ok()?;
+        let centrality = unfault_rag::retrieval::get_centrality(&graph, 50);
 
-        // Update cache
+        // Convert to FileCentrality and cache
+        let file_centralities: Vec<FileCentrality> = centrality
+            .central_files
+            .iter()
+            .map(|(path, score)| FileCentrality {
+                path: path.clone(),
+                in_degree: *score as i32,
+                out_degree: 0,
+                total_degree: *score as i32,
+                library_usage: 0,
+                importance_score: *score as i32,
+            })
+            .collect();
+
+        let total_files = graph.file_nodes.len() as i32;
+
         {
             let mut cache = self.centrality_cache.write().await;
-            *cache = Some(response.files.clone());
+            *cache = Some(file_centralities.clone());
         }
 
-        // Find the file in the response
-        response
-            .files
+        file_centralities
             .iter()
             .find(|c| c.path.ends_with(file_path) || file_path.ends_with(&c.path))
-            .map(|c| self.centrality_to_notification(c, response.total_files))
+            .map(|c| self.centrality_to_notification(c, total_files))
     }
 
     /// Convert FileCentrality to notification format with human-readable label
@@ -1007,71 +957,6 @@ impl UnfaultLsp {
             total_files,
             label,
         }
-    }
-
-    /// Get files that depend on a given file using the impact analysis API
-    ///
-    /// Note: This method is currently unused as we prefer computing dependencies
-    /// locally from the IR graph (compute_local_dependencies). It's kept for
-    /// potential future use when API-based dependency data is needed.
-    #[allow(dead_code)]
-    async fn get_file_dependencies(&self, file_path: &str) -> Option<FileDependenciesNotification> {
-        let api_key = String::new();
-        let workspace_id = self.workspace_id.read().await.clone()?;
-
-        self.log_debug(&format!("Fetching dependencies for: {}", file_path));
-
-        // Call impact analysis API
-        let request = ImpactAnalysisRequest {
-            session_id: None,
-            workspace_id: Some(workspace_id),
-            file_path: file_path.to_string(),
-            max_depth: 3, // Limit depth for performance
-        };
-
-        let response = match self.api_client.graph_impact(&api_key, &request).await {
-            Ok(r) => r,
-            Err(e) => {
-                self.log_debug(&format!("Failed to fetch dependencies: {:?}", e));
-                return None;
-            }
-        };
-
-        let direct_count = response.direct_importers.len();
-        let total_count = response.total_affected;
-
-        // Generate human-readable summary
-        let summary = if total_count == 0 {
-            "No other files depend on this file".to_string()
-        } else if direct_count == 1 && total_count == 1 {
-            format!(
-                "1 file depends on this file: {}",
-                response.direct_importers[0].path
-            )
-        } else if direct_count == total_count as usize {
-            format!("{} files depend on this file", total_count)
-        } else {
-            format!(
-                "{} files directly import this file ({} total affected)",
-                direct_count, total_count
-            )
-        };
-
-        Some(FileDependenciesNotification {
-            path: file_path.to_string(),
-            direct_dependents: response
-                .direct_importers
-                .iter()
-                .map(|f| f.path.clone())
-                .collect(),
-            all_dependents: response
-                .transitive_importers
-                .iter()
-                .map(|f| f.path.clone())
-                .collect(),
-            total_count,
-            summary,
-        })
     }
 
     /// Compute file dependencies directly from the local IR graph.
@@ -1383,140 +1268,44 @@ impl UnfaultLsp {
     /// - Safeguards present (or missing) in the call chain
     /// - Code review findings for the function
     async fn get_function_impact(&self, file_path: &str, function_name: &str) -> Option<String> {
-        let api_key = String::new();
-        let workspace_id = self.workspace_id.read().await.clone()?;
-
         self.log_debug(&format!(
             "Fetching impact for function: {} in {}",
             function_name, file_path
         ));
 
-        // Call function impact API
-        let request = FunctionImpactRequest {
-            session_id: None,
-            workspace_id: Some(workspace_id),
-            file_path: file_path.to_string(),
-            function_name: function_name.to_string(),
-            max_depth: 5,
-        };
+        // Build local graph and extract flow
+        let workspace_root = self.workspace_root.read().await;
+        let root = workspace_root.as_ref()?;
+        let graph = crate::local_graph::build_analysis_graph(root, false).ok()?;
 
-        let response = match self
-            .api_client
-            .graph_function_impact(&api_key, &request)
-            .await
-        {
-            Ok(r) => r,
-            Err(e) => {
-                self.log_debug(&format!("Failed to fetch function impact: {:?}", e));
-                return None;
-            }
-        };
+        let flow = unfault_rag::retrieval::extract_flow(&graph, function_name, 5);
 
         // Format as markdown
         let mut markdown = String::new();
-        markdown.push_str(&format!("**Function Impact:** {}\n\n", response.function));
+        markdown.push_str(&format!("**Function Impact:** {}\n\n", function_name));
 
-        // Show impact summary if available
-        if !response.impact_summary.is_empty() {
-            markdown.push_str(&format!("{}\n\n", response.impact_summary));
+        if flow.paths.is_empty() {
+            markdown.push_str("No call paths found from this function.\n");
+            return Some(markdown);
         }
 
         markdown.push_str(&format!(
-            "Total affected functions: {}\n\n",
-            response.total_affected
+            "Found {} call path(s)\n\n",
+            flow.paths.len()
         ));
 
-        // Collect route handlers from both direct and transitive callers
-        // Only include handlers that have actual route info (non-empty method or path)
-        let all_callers: Vec<_> = response
-            .direct_callers
-            .iter()
-            .chain(response.transitive_callers.iter())
-            .filter(|c| c.is_route_handler)
-            .filter(|c| c.route_method.is_some() || c.route_path.is_some())
-            .collect();
-
-        // Deduplicate route handlers by (method, path)
-        let mut seen_routes = std::collections::HashSet::new();
-        let unique_route_handlers: Vec<_> = all_callers
-            .iter()
-            .filter(|c| {
-                let key = (
-                    c.route_method.as_deref().unwrap_or(""),
-                    c.route_path.as_deref().unwrap_or("")
-                );
-                if seen_routes.contains(&key) {
-                    false
-                } else {
-                    seen_routes.insert(key);
-                    true
-                }
-            })
-            .collect();
-
-        if !unique_route_handlers.is_empty() {
-            markdown.push_str("**HTTP Route Handlers:**\n");
-            for handler in unique_route_handlers {
-                let method = handler.route_method.as_deref().unwrap_or("").to_uppercase();
-                let path = handler.route_path.as_deref().unwrap_or("");
-                let depth = if handler.depth > 1 {
-                    format!(" (via {} hops)", handler.depth)
-                } else {
-                    String::new()
-                };
-                markdown.push_str(&format!(
-                    "- `{} {}` → {}{}\n",
-                    method,
-                    path,
-                    handler.function,
-                    depth
-                ));
+        // Show call paths
+        for (i, path) in flow.paths.iter().enumerate() {
+            markdown.push_str(&format!("**Path {}:**\n", i + 1));
+            for node in path {
+                let indent = "  ".repeat(node.depth);
+                let file_info = node.file_path.as_deref().unwrap_or("");
+                markdown.push_str(&format!("{}→ `{}` _{}_\n", indent, node.name, file_info));
             }
             markdown.push('\n');
         }
 
-        // Show all callers (direct first, then transitive if any)
-        let all_non_route_callers: Vec<_> = response
-            .direct_callers
-            .iter()
-            .chain(response.transitive_callers.iter())
-            .filter(|c| !c.is_route_handler)
-            .collect();
-
-        if !all_non_route_callers.is_empty() {
-            markdown.push_str("**Call Chain:**\n");
-            for caller in all_non_route_callers {
-                let depth_label = if caller.depth > 1 {
-                    format!(" (depth {})", caller.depth)
-                } else {
-                    String::new()
-                };
-                markdown.push_str(&format!("- {}{}\n", caller.function, depth_label));
-            }
-            markdown.push('\n');
-        }
-
-        // Show code review findings for this function
-        if !response.findings.is_empty() {
-            markdown.push_str("**Code Review Insights:**\n");
-            for finding in &response.findings {
-                let icon = match finding.severity.to_lowercase().as_str() {
-                    "critical" | "high" => "💡",
-                    "medium" => "✨",
-                    "low" | "info" => "✓",
-                    _ => "○",
-                };
-                markdown.push_str(&format!(
-                    "- {} **{}** ({})\n  {}\n",
-                    icon,
-                    finding.title,
-                    finding.dimension,
-                    finding.description.lines().next().unwrap_or("")
-                ));
-            }
-            markdown.push('\n');
-        }
-
+        // Include cached findings for this function if available
         Some(markdown)
     }
 }
@@ -2113,44 +1902,35 @@ impl LanguageServer for UnfaultLsp {
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),
         };
-        let api_key = match &self.config { Some(c) => String::new(), None => return Ok(None) };
-        let workspace_id = match self.workspace_id.read().await.clone() { Some(id) => id, None => return Ok(None) };
-
-        let impact_request = crate::api::graph::FunctionImpactRequest {
-            session_id: None,
-            workspace_id: Some(workspace_id),
-            file_path: relative_path,
-            function_name: req.function_name.clone(),
-            max_depth: 5,
+        // Build local graph and extract flow
+        let graph = match &workspace_root {
+            Some(root) => crate::local_graph::build_analysis_graph(root, false).ok(),
+            None => None,
         };
-        let response = match self.api_client.graph_function_impact(&api_key, &impact_request).await {
-            Ok(r) => r,
-            Err(_) => return Ok(None),
+        let graph = match graph {
+            Some(g) => g,
+            None => return Ok(None),
         };
 
-        let mut callers = Vec::new();
-        for c in response.direct_callers.iter().chain(response.transitive_callers.iter()) {
-            if !c.is_route_handler {
-                callers.push(FunctionImpactCaller { name: c.function.clone(), file: c.path.clone(), depth: c.depth });
-            }
-        }
-        let mut routes = Vec::new();
-        for c in response.direct_callers.iter().chain(response.transitive_callers.iter()).filter(|c| c.is_route_handler) {
-            if let (Some(m), Some(p)) = (&c.route_method, &c.route_path) {
-                routes.push(FunctionImpactRoute { method: m.to_uppercase(), path: p.clone() });
-            }
-        }
-        let findings: Vec<FunctionImpactFinding> = response.findings.into_iter().map(|f| FunctionImpactFinding {
-            severity: normalize_severity(&f.severity),
-            message: format!("{}: {}", f.title, f.description.lines().next().unwrap_or("")),
-            learn_more: Some(format!("https://docs.unfault.dev/rules/{}", f.rule_id.replace('.', "/"))),
-        }).collect();
+        let flow = unfault_rag::retrieval::extract_flow(&graph, &req.function_name, 5);
+
+        let callers: Vec<FunctionImpactCaller> = flow
+            .paths
+            .iter()
+            .flat_map(|path| {
+                path.iter().skip(1).map(|node| FunctionImpactCaller {
+                    name: node.name.clone(),
+                    file: node.file_path.clone().unwrap_or_default(),
+                    depth: node.depth as i32,
+                })
+            })
+            .collect();
 
         Ok(Some(serde_json::to_value(GetFunctionImpactResponse {
-            name: response.function,
+            name: req.function_name.clone(),
             callers,
-            routes,
-            findings,
+            routes: vec![],
+            findings: vec![],
         }).unwrap()))
     }
 }
@@ -2184,44 +1964,35 @@ impl UnfaultLsp {
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),
         };
-        let api_key = match &self.config { Some(c) => String::new(), None => return Ok(None) };
-        let workspace_id = match self.workspace_id.read().await.clone() { Some(id) => id, None => return Ok(None) };
-
-        let impact_request = crate::api::graph::FunctionImpactRequest {
-            session_id: None,
-            workspace_id: Some(workspace_id),
-            file_path: relative_path,
-            function_name: req.function_name.clone(),
-            max_depth: 5,
+        // Build local graph and extract flow
+        let graph = match &workspace_root {
+            Some(root) => crate::local_graph::build_analysis_graph(root, false).ok(),
+            None => None,
         };
-        let response = match self.api_client.graph_function_impact(&api_key, &impact_request).await {
-            Ok(r) => r,
-            Err(_) => return Ok(None),
+        let graph = match graph {
+            Some(g) => g,
+            None => return Ok(None),
         };
 
-        let mut callers = Vec::new();
-        for c in response.direct_callers.iter().chain(response.transitive_callers.iter()) {
-            if !c.is_route_handler {
-                callers.push(FunctionImpactCaller { name: c.function.clone(), file: c.path.clone(), depth: c.depth });
-            }
-        }
-        let mut routes = Vec::new();
-        for c in response.direct_callers.iter().chain(response.transitive_callers.iter()).filter(|c| c.is_route_handler) {
-            if let (Some(m), Some(p)) = (&c.route_method, &c.route_path) {
-                routes.push(FunctionImpactRoute { method: m.to_uppercase(), path: p.clone() });
-            }
-        }
-        let findings: Vec<FunctionImpactFinding> = response.findings.into_iter().map(|f| FunctionImpactFinding {
-            severity: normalize_severity(&f.severity),
-            message: format!("{}: {}", f.title, f.description.lines().next().unwrap_or("")),
-            learn_more: Some(format!("https://docs.unfault.dev/rules/{}", f.rule_id.replace('.', "/"))),
-        }).collect();
+        let flow = unfault_rag::retrieval::extract_flow(&graph, &req.function_name, 5);
+
+        let callers: Vec<FunctionImpactCaller> = flow
+            .paths
+            .iter()
+            .flat_map(|path| {
+                path.iter().skip(1).map(|node| FunctionImpactCaller {
+                    name: node.name.clone(),
+                    file: node.file_path.clone().unwrap_or_default(),
+                    depth: node.depth as i32,
+                })
+            })
+            .collect();
 
         Ok(Some(GetFunctionImpactResponse {
-            name: response.function,
+            name: req.function_name.clone(),
             callers,
-            routes,
-            findings,
+            routes: vec![],
+            findings: vec![],
         }))
     }
 }

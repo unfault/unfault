@@ -346,7 +346,7 @@ async fn execute_client_parse(
         None, // No meta files in client-side parsing (could be added later)
         Some(workspace_label),
     );
-    let workspace_id = workspace_id_result
+    let _workspace_id = workspace_id_result
         .as_ref()
         .map(|r| r.id.clone())
         .unwrap_or_else(|| format!("wks_{}", uuid::Uuid::new_v4().simple()));
