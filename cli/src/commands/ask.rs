@@ -275,139 +275,52 @@ fn detect_workspace_id(workspace_path: &Path, verbose: bool) -> Option<String> {
 /// * `Ok(EXIT_NETWORK_ERROR)` - Cannot reach the API
 /// * `Ok(EXIT_SERVICE_UNAVAILABLE)` - Embedding service not available
 pub async fn execute(args: AskArgs) -> Result<i32> {
-    // Load configuration
-    let config = match Config::load() {
-        Ok(config) => config,
-        Err(e) => {
-            eprintln!(
-                "{} Not logged in. Run `unfault login` first.",
-                "Error:".red().bold()
-            );
-            if args.verbose {
-                eprintln!("  {}: {}", "Details".dimmed(), e);
-            }
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
+    // Load configuration (needed for LLM config)
+    let config = Config::load().ok();
 
-    // Create API client
-    let api_client = ApiClient::new(config.base_url());
-
-    // Resolve workspace path: explicit or current directory
+    // Resolve workspace path
     let workspace_path = match args.workspace_path.as_ref() {
         Some(p) => std::path::PathBuf::from(p),
-        None => std::env::current_dir().map_err(|e| {
-            eprintln!(
-                "{} Failed to get current directory: {}",
-                "Error:".red().bold(),
-                e
-            );
-            anyhow::anyhow!("Failed to get current directory")
-        })?,
-    };
-
-    // Resolve workspace ID: use explicit ID if provided, otherwise auto-detect
-    let workspace_id = if let Some(ref ws_id) = args.workspace_id {
-        Some(ws_id.clone())
-    } else {
-        if args.verbose {
-            eprintln!(
-                "{} Auto-detecting workspace from: {}",
-                "→".cyan(),
-                workspace_path.display()
-            );
-        }
-
-        detect_workspace_id(&workspace_path, args.verbose)
-    };
-
-    // Build local graph for flow analysis
-    let graph_data = if args.verbose {
-        eprintln!("{} Building local code graph...", "→".cyan());
-
-        match build_local_graph(&workspace_path, None, false) {
-            Ok(graph) => {
-                eprintln!(
-                    "  Built graph: {} files, {} functions, {} calls",
-                    graph.stats.file_count,
-                    graph.stats.function_count,
-                    graph.stats.calls_edge_count
-                );
-                Some(graph_to_client_data(&graph))
-            }
-            Err(e) => {
-                eprintln!("  {} Failed to build graph: {}", "⚠".yellow(), e);
-                None
-            }
-        }
-    } else {
-        // Build silently in non-verbose mode
-        build_local_graph(&workspace_path, None, false)
-            .ok()
-            .map(|graph| graph_to_client_data(&graph))
-    };
-
-    // Build request
-    let request = RAGQueryRequest {
-        query: args.query.clone(),
-        workspace_id: workspace_id.clone(),
-        max_sessions: args.max_sessions,
-        max_findings: args.max_findings,
-        similarity_threshold: args.similarity_threshold,
-        graph_data,
+        None => std::env::current_dir()?,
     };
 
     if args.verbose {
         eprintln!("{} Querying: {}", "→".cyan(), args.query);
-        if let Some(ref ws) = workspace_id {
-            eprintln!("{} Workspace: {}", "→".cyan(), ws);
-        }
     }
 
-    // Execute query
-    let response = match api_client.query_rag(&config.api_key, &request).await {
-        Ok(response) => response,
+    // Build local graph for the query
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => Some(g),
         Err(e) => {
-            if e.is_auth_error() {
-                eprintln!(
-                    "{} Authentication failed. Run `unfault login` to re-authenticate.",
-                    "Error:".red().bold()
-                );
-                if args.verbose {
-                    eprintln!("  {}: {}", "Details".dimmed(), e);
-                    eprintln!("  {}: {}", "API URL".dimmed(), config.base_url());
-                }
-                return Ok(EXIT_AUTH_ERROR);
-            }
-            if e.is_network_error() {
-                eprintln!(
-                    "{} Cannot reach the API. Check your internet connection.",
-                    "Error:".red().bold()
-                );
-                if args.verbose {
-                    eprintln!("  {}: {}", "Details".dimmed(), e);
-                    eprintln!("  {}: {}", "API URL".dimmed(), config.base_url());
-                }
-                return Ok(EXIT_NETWORK_ERROR);
-            }
-            if e.is_server_error() {
-                eprintln!("{} {}", "Error:".red().bold(), e);
-                if args.verbose {
-                    eprintln!("  {}: {}", "API URL".dimmed(), config.base_url());
-                }
-                return Ok(EXIT_SERVICE_UNAVAILABLE);
-            }
-            eprintln!("{} {}", "Error:".red().bold(), e);
             if args.verbose {
-                eprintln!("  {}: {}", "API URL".dimmed(), config.base_url());
+                eprintln!("  {} Failed to build graph: {}", "⚠".yellow(), e);
             }
-            return Ok(EXIT_ERROR);
+            None
         }
     };
 
+    // Execute RAG query locally
+    let query_config = unfault_rag::QueryConfig {
+        max_depth: 10,
+        max_findings: args.max_findings.unwrap_or(10) as usize,
+        top_n_centrality: 10,
+        workspace_id: args.workspace_id.clone(),
+    };
+
+    let response = unfault_rag::execute_query(
+        &args.query,
+        graph.as_ref(),
+        None, // No vector store yet (will be added when embeddings are configured)
+        None, // No embedding provider yet
+        &query_config,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("RAG query failed: {}", e))?;
+
     // Check if LLM is configured for generating AI response (unless --no-llm)
-    let llm_response = if !args.no_llm && config.llm_ready() {
-        let llm_config = config.llm.as_ref().unwrap();
+    let llm_ready = config.as_ref().map(|c| c.llm_ready()).unwrap_or(false);
+    let llm_response = if !args.no_llm && llm_ready {
+        let llm_config = config.as_ref().unwrap().llm.as_ref().unwrap();
 
         if args.verbose {
             eprintln!(
@@ -418,17 +331,24 @@ pub async fn execute(args: AskArgs) -> Result<i32> {
             );
         }
 
-        // Build rich context for LLM
-        let llm_context = build_llm_context(
-            &response.context_summary,
-            &response.sessions,
-            &response.findings,
+        // Build context for LLM from the local RAG response
+        let llm_context = format!(
+            "Context: {}\n\nFindings:\n{}",
+            response.context_summary,
+            response
+                .findings
+                .iter()
+                .map(|f| format!(
+                    "- [{}] {} in {} ({})",
+                    f.finding.severity, f.finding.title, f.finding.file_path, f.finding.rule_id
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
         );
 
         // Create LLM client and generate response with streaming
-        match LlmClient::new_with_options(llm_config, args.verbose) {
+        match crate::api::llm::LlmClient::new_with_options(llm_config, args.verbose) {
             Ok(client) => {
-                // Print header before streaming starts (include model info)
                 println!();
                 println!(
                     "{} {} {}",
@@ -438,20 +358,12 @@ pub async fn execute(args: AskArgs) -> Result<i32> {
                 );
                 println!();
 
-                // Stream tokens directly to stdout
-                let result = client.generate_streaming(&args.query, &llm_context).await;
-
-                match result {
+                match client.generate_streaming(&args.query, &llm_context).await {
                     Ok(text) => {
-                        // Treat empty or whitespace-only responses as failures
                         let trimmed = text.trim();
                         if trimmed.is_empty() {
-                            if args.verbose {
-                                eprintln!("{} LLM returned empty response", "⚠".yellow());
-                            }
                             None
                         } else {
-                            // Already printed via streaming, store for output logic
                             Some(trimmed.to_string())
                         }
                     }
@@ -475,18 +387,107 @@ pub async fn execute(args: AskArgs) -> Result<i32> {
     };
 
     // Output results
-    // Note: when LLM is used with streaming, response was already printed to stdout
     let streamed = llm_response.is_some();
     if args.json {
-        output_json(&response, llm_response.as_deref())?;
+        println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
-        output_formatted(
-            &response,
-            llm_response.as_deref(),
-            args.verbose,
-            config.llm_ready(),
-            streamed,
-        );
+        // Print context summary
+        if !streamed {
+            println!();
+            println!("{} {}", "→".cyan(), response.context_summary);
+        }
+
+        // Print flow context
+        if let Some(ref flow) = response.flow_context {
+            println!();
+            println!("{} {}", "🔗".cyan(), "Call Flow:".bold());
+            for path in &flow.paths {
+                for node in path {
+                    let indent = "  ".repeat(node.depth + 1);
+                    let file_info = node.file_path.as_deref().unwrap_or("");
+                    println!(
+                        "{}→ {} {}",
+                        indent,
+                        node.name.bright_white(),
+                        file_info.dimmed()
+                    );
+                }
+            }
+        }
+
+        // Print graph context
+        if let Some(ref ctx) = response.graph_context {
+            if !ctx.affected_files.is_empty() {
+                println!();
+                println!("{} {}", "📊".cyan(), "Affected files:".bold());
+                for f in &ctx.affected_files {
+                    println!("  {}", f);
+                }
+            }
+            if !ctx.central_files.is_empty() {
+                println!();
+                println!("{} {}", "📊".cyan(), "Central files:".bold());
+                for (f, score) in &ctx.central_files {
+                    println!("  {} (score: {:.0})", f, score);
+                }
+            }
+        }
+
+        // Print enumerate context
+        if let Some(ref ctx) = response.enumerate_context {
+            println!();
+            println!(
+                "{} Found {} {}",
+                "📋".cyan(),
+                ctx.count.to_string().yellow(),
+                ctx.entity_type
+            );
+            for item in ctx.items.iter().take(20) {
+                println!("  {}", item);
+            }
+            if ctx.items.len() > 20 {
+                println!("  ... and {} more", ctx.items.len() - 20);
+            }
+        }
+
+        // Print workspace context
+        if let Some(ref ws) = response.workspace_context {
+            println!();
+            println!("{} {}", "🏗️".cyan(), "Workspace Overview:".bold());
+            println!("  Files:      {}", ws.file_count);
+            println!("  Functions:  {}", ws.function_count);
+            println!("  Languages:  {}", ws.languages.join(", "));
+            if !ws.frameworks.is_empty() {
+                println!("  Frameworks: {}", ws.frameworks.join(", "));
+            }
+        }
+
+        // Print findings
+        if !response.findings.is_empty() && !streamed {
+            println!();
+            println!("{} {}", "🔍".cyan(), "Relevant findings:".bold());
+            for sf in &response.findings {
+                println!(
+                    "  [{}] {} ({}) - {}:{}",
+                    sf.finding.severity,
+                    sf.finding.title,
+                    sf.finding.rule_id,
+                    sf.finding.file_path,
+                    sf.finding.line.unwrap_or(0)
+                );
+            }
+        }
+
+        // LLM hint
+        if !llm_ready && !streamed {
+            println!();
+            println!(
+                "  {} Configure an LLM with `unfault config llm set` for AI-powered responses.",
+                "Tip:".dimmed()
+            );
+        }
+
+        println!();
     }
 
     Ok(EXIT_SUCCESS)
