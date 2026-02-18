@@ -25,6 +25,7 @@ async-trait.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
 regex.workspace = true
+petgraph.workspace = true
 
 # Vector storage
 lancedb = "0.26"
