@@ -102,12 +102,6 @@ pub fn execute_show(args: ConfigShowArgs) -> Result<i32> {
     println!("{}", "Unfault Configuration".bold().underline());
     println!();
 
-    // Authentication
-    println!("{}", "Authentication".cyan().bold());
-    println!("  {} {}", "API Key:".dimmed(), mask_key(&config.api_key));
-    println!("  {} {}", "Base URL:".dimmed(), config.base_url());
-    println!();
-
     // LLM Configuration
     println!("{}", "LLM (BYOLLM)".cyan().bold());
     if let Some(ref llm) = config.llm {

@@ -200,22 +200,14 @@ struct UnfaultLsp {
 
 impl UnfaultLsp {
     fn new(client: Client, verbose: bool) -> Self {
-        // Use the same base URL resolution as the rest of the CLI:
-        // 1. UNFAULT_BASE_URL env var (if set)
-        // 2. Config file's stored_base_url (if authenticated)
-        // 3. Default production URL
         let config = crate::config::Config::load().ok();
-        let api_url = config
-            .as_ref()
-            .map(|c| c.base_url())
-            .unwrap_or_else(crate::config::default_base_url);
 
         if verbose {
-            eprintln!("[unfault-lsp] API URL: {}", api_url);
             eprintln!("[unfault-lsp] Config loaded: {}", config.is_some());
         }
 
-        let api_client = ApiClient::new(api_url);
+        // TODO: LSP needs migration to use local analysis instead of API
+        let api_client = ApiClient::new("http://localhost:8000".to_string());
 
         Self {
             client,
@@ -287,7 +279,7 @@ impl UnfaultLsp {
 
         // Get API key
         let api_key = match &self.config {
-            Some(config) => config.api_key.clone(),
+            Some(config) => "".to_string(),
             None => {
                 self.log_debug("No API key configured, skipping analysis");
                 // Publish empty diagnostics to clear any stale ones
@@ -941,7 +933,7 @@ impl UnfaultLsp {
 
     /// Get file centrality for a given file path
     async fn get_file_centrality(&self, file_path: &str) -> Option<FileCentralityNotification> {
-        let api_key = self.config.as_ref()?.api_key.clone();
+        let api_key = String::new();
         let workspace_id = self.workspace_id.read().await.clone()?;
 
         // Check cache first
@@ -1024,7 +1016,7 @@ impl UnfaultLsp {
     /// potential future use when API-based dependency data is needed.
     #[allow(dead_code)]
     async fn get_file_dependencies(&self, file_path: &str) -> Option<FileDependenciesNotification> {
-        let api_key = self.config.as_ref()?.api_key.clone();
+        let api_key = String::new();
         let workspace_id = self.workspace_id.read().await.clone()?;
 
         self.log_debug(&format!("Fetching dependencies for: {}", file_path));
@@ -1391,7 +1383,7 @@ impl UnfaultLsp {
     /// - Safeguards present (or missing) in the call chain
     /// - Code review findings for the function
     async fn get_function_impact(&self, file_path: &str, function_name: &str) -> Option<String> {
-        let api_key = self.config.as_ref()?.api_key.clone();
+        let api_key = String::new();
         let workspace_id = self.workspace_id.read().await.clone()?;
 
         self.log_debug(&format!(
@@ -2121,7 +2113,7 @@ impl LanguageServer for UnfaultLsp {
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),
         };
-        let api_key = match &self.config { Some(c) => c.api_key.clone(), None => return Ok(None) };
+        let api_key = match &self.config { Some(c) => String::new(), None => return Ok(None) };
         let workspace_id = match self.workspace_id.read().await.clone() { Some(id) => id, None => return Ok(None) };
 
         let impact_request = crate::api::graph::FunctionImpactRequest {
@@ -2192,7 +2184,7 @@ impl UnfaultLsp {
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),
         };
-        let api_key = match &self.config { Some(c) => c.api_key.clone(), None => return Ok(None) };
+        let api_key = match &self.config { Some(c) => String::new(), None => return Ok(None) };
         let workspace_id = match self.workspace_id.read().await.clone() { Some(id) => id, None => return Ok(None) };
 
         let impact_request = crate::api::graph::FunctionImpactRequest {

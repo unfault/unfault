@@ -1,7 +1,6 @@
 //! # Configuration Management
 //!
-//! This module handles loading and saving CLI configuration, including API keys,
-//! server URLs, and LLM configuration for Insights feature.
+//! This module handles loading and saving CLI configuration.
 //!
 //! ## Configuration File Location
 //!
@@ -9,58 +8,33 @@
 //!
 //! On Windows, uses `%USERPROFILE%\.config\unfault\config.json` if `$HOME` is not set.
 //!
-//! ## LLM Configuration
+//! ## Configuration Sections
 //!
-//! The CLI supports BYOLLM (Bring Your Own LLM) for generating AI insights:
-//! - OpenAI (GPT-4, GPT-3.5)
-//! - Anthropic (Claude)
-//! - Ollama (local models)
-//! - Custom endpoints
+//! - **llm**: LLM provider for AI-powered insights (OpenAI, Anthropic, Ollama, custom)
+//! - **embeddings**: Embedding provider for RAG semantic search (OpenAI, Ollama)
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-/// Default API base URL
-const DEFAULT_BASE_URL: &str = "https://app.unfault.dev";
-
-/// Environment variable for overriding the base URL
-const BASE_URL_ENV_VAR: &str = "UNFAULT_BASE_URL";
-
-/// LLM configuration for AI-powered insights
-///
-/// Stores the configuration for the user's LLM provider (BYOLLM).
+/// LLM configuration for AI-powered insights.
 ///
 /// # Supported Providers
 ///
-/// - `openai`: OpenAI API (GPT-4, GPT-3.5)
+/// - `openai`: OpenAI API (GPT-4o, o3, etc.)
 /// - `anthropic`: Anthropic API (Claude)
 /// - `ollama`: Local Ollama instance
-/// - `custom`: Custom OpenAI-compatible endpoint
-///
-/// # Example
-///
-/// ```rust
-/// use unfault::config::LlmConfig;
-///
-/// let config = LlmConfig {
-///     provider: "openai".to_string(),
-///     endpoint: "https://api.openai.com/v1".to_string(),
-///     model: "gpt-4".to_string(),
-///     api_key: None,
-///     api_key_env: Some("OPENAI_API_KEY".to_string()),
-/// };
-/// ```
+/// - `custom`: Any OpenAI-compatible endpoint
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
-    /// LLM provider (openai, anthropic, ollama, custom)
+    /// Provider name (openai, anthropic, ollama, custom)
     pub provider: String,
     /// API endpoint URL
     pub endpoint: String,
-    /// Model name (e.g., gpt-4, claude-3-opus)
+    /// Model name (e.g., gpt-4o, claude-sonnet-4-20250514)
     pub model: String,
-    /// API key (encrypted or plaintext)
+    /// API key (plaintext)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     /// Environment variable name for API key (preferred over api_key)
@@ -69,7 +43,7 @@ pub struct LlmConfig {
 }
 
 impl LlmConfig {
-    /// Create a new OpenAI configuration
+    /// Create a new OpenAI configuration.
     pub fn openai(model: &str) -> Self {
         Self {
             provider: "openai".to_string(),
@@ -80,7 +54,7 @@ impl LlmConfig {
         }
     }
 
-    /// Create a new Anthropic configuration
+    /// Create a new Anthropic configuration.
     pub fn anthropic(model: &str) -> Self {
         Self {
             provider: "anthropic".to_string(),
@@ -91,7 +65,7 @@ impl LlmConfig {
         }
     }
 
-    /// Create a new Ollama configuration
+    /// Create a new Ollama configuration.
     pub fn ollama(endpoint: &str, model: &str) -> Self {
         Self {
             provider: "ollama".to_string(),
@@ -102,7 +76,7 @@ impl LlmConfig {
         }
     }
 
-    /// Create a custom configuration
+    /// Create a custom configuration.
     pub fn custom(endpoint: &str, model: &str) -> Self {
         Self {
             provider: "custom".to_string(),
@@ -113,29 +87,25 @@ impl LlmConfig {
         }
     }
 
-    /// Get the API key from environment or config
+    /// Get the API key from environment or config.
     pub fn get_api_key(&self) -> Option<String> {
-        // First try environment variable
         if let Some(ref env_var) = self.api_key_env {
             if let Ok(key) = std::env::var(env_var) {
                 return Some(key);
             }
         }
-        // Fall back to stored key
         self.api_key.clone()
     }
 
-    /// Check if the LLM is configured and ready to use
+    /// Check if the LLM is configured and ready to use.
     pub fn is_ready(&self) -> bool {
-        // Ollama doesn't require an API key
         if self.provider == "ollama" {
             return true;
         }
-        // Other providers require an API key
         self.get_api_key().is_some()
     }
 
-    /// Get a masked version of the API key for display
+    /// Get a masked version of the API key for display.
     pub fn masked_api_key(&self) -> Option<String> {
         self.get_api_key().map(|key| {
             if key.len() > 8 {
@@ -147,103 +117,162 @@ impl LlmConfig {
     }
 }
 
-/// CLI configuration
+/// Embedding provider configuration for RAG semantic search.
 ///
-/// Stores authentication credentials, server configuration, and LLM settings.
+/// # Supported Providers
+///
+/// - `openai`: OpenAI embeddings (text-embedding-3-small, etc.)
+/// - `ollama`: Local Ollama embeddings (nomic-embed-text, etc.)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingConfig {
+    /// Provider name (openai, ollama)
+    pub provider: String,
+    /// API endpoint URL
+    pub endpoint: String,
+    /// Model name (e.g., text-embedding-3-small, nomic-embed-text)
+    pub model: String,
+    /// Embedding dimensions (provider/model dependent)
+    #[serde(default = "default_embedding_dims")]
+    pub dimensions: usize,
+    /// API key (plaintext)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    /// Environment variable name for API key
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+}
+
+fn default_embedding_dims() -> usize {
+    1536
+}
+
+impl EmbeddingConfig {
+    /// Create a new OpenAI embedding configuration.
+    pub fn openai(model: &str, dims: usize) -> Self {
+        Self {
+            provider: "openai".to_string(),
+            endpoint: "https://api.openai.com/v1".to_string(),
+            model: model.to_string(),
+            dimensions: dims,
+            api_key: None,
+            api_key_env: Some("OPENAI_API_KEY".to_string()),
+        }
+    }
+
+    /// Create a new Ollama embedding configuration.
+    pub fn ollama(endpoint: &str, model: &str, dims: usize) -> Self {
+        Self {
+            provider: "ollama".to_string(),
+            endpoint: endpoint.to_string(),
+            model: model.to_string(),
+            dimensions: dims,
+            api_key: None,
+            api_key_env: None,
+        }
+    }
+
+    /// Get the API key from environment or config.
+    pub fn get_api_key(&self) -> Option<String> {
+        if let Some(ref env_var) = self.api_key_env {
+            if let Ok(key) = std::env::var(env_var) {
+                return Some(key);
+            }
+        }
+        self.api_key.clone()
+    }
+
+    /// Check if the embedding provider is configured and ready.
+    pub fn is_ready(&self) -> bool {
+        if self.provider == "ollama" {
+            return true;
+        }
+        self.get_api_key().is_some()
+    }
+}
+
+/// CLI configuration.
+///
+/// Stored at `~/.config/unfault/config.json`.
 ///
 /// # Example
 ///
-/// ```rust
-/// use unfault::config::Config;
-///
-/// let config = Config::new("sk_live_abc123".to_string());
-/// config.save().expect("Failed to save config");
+/// ```json
+/// {
+///   "llm": {
+///     "provider": "ollama",
+///     "endpoint": "http://localhost:11434",
+///     "model": "llama3.2"
+///   },
+///   "embeddings": {
+///     "provider": "ollama",
+///     "endpoint": "http://localhost:11434",
+///     "model": "nomic-embed-text",
+///     "dimensions": 768
+///   }
+/// }
 /// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
-    /// API key for authentication
-    pub api_key: String,
-    /// Base URL for the API (stored in config file)
-    #[serde(default = "stored_default_base_url")]
-    stored_base_url: String,
     /// LLM configuration for AI-powered insights (optional)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub llm: Option<LlmConfig>,
-}
 
-/// Default base URL for storage (without env var override)
-fn stored_default_base_url() -> String {
-    DEFAULT_BASE_URL.to_string()
-}
-
-impl Config {
-    /// Get the effective base URL
-    ///
-    /// Environment variable `UNFAULT_BASE_URL` takes precedence over the config file.
-    pub fn base_url(&self) -> String {
-        std::env::var(BASE_URL_ENV_VAR).unwrap_or_else(|_| self.stored_base_url.clone())
-    }
+    /// Embedding configuration for RAG semantic search (optional)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embeddings: Option<EmbeddingConfig>,
 }
 
 impl Config {
-    /// Create a new configuration with an API key
-    ///
-    /// Uses the default base URL.
-    ///
-    /// # Arguments
-    ///
-    /// * `api_key` - The API key for authentication
-    pub fn new(api_key: String) -> Self {
-        Self {
-            api_key,
-            stored_base_url: DEFAULT_BASE_URL.to_string(),
-            llm: None,
-        }
+    /// Create an empty configuration.
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    /// Create a new configuration with an API key and custom base URL
-    ///
-    /// # Arguments
-    ///
-    /// * `api_key` - The API key for authentication
-    /// * `base_url` - The base URL for the API (stored in config file)
-    pub fn new_with_url(api_key: String, base_url: String) -> Self {
-        Self {
-            api_key,
-            stored_base_url: base_url,
-            llm: None,
-        }
-    }
-
-    /// Set the LLM configuration
+    /// Set the LLM configuration.
     pub fn with_llm(mut self, llm_config: LlmConfig) -> Self {
         self.llm = Some(llm_config);
         self
     }
 
-    /// Remove the LLM configuration
+    /// Set the embedding configuration.
+    pub fn with_embeddings(mut self, embedding_config: EmbeddingConfig) -> Self {
+        self.embeddings = Some(embedding_config);
+        self
+    }
+
+    /// Remove the LLM configuration.
     pub fn remove_llm(&mut self) {
         self.llm = None;
     }
 
-    /// Check if LLM is configured
+    /// Remove the embedding configuration.
+    pub fn remove_embeddings(&mut self) {
+        self.embeddings = None;
+    }
+
+    /// Check if LLM is configured.
     pub fn has_llm(&self) -> bool {
         self.llm.is_some()
     }
 
-    /// Check if LLM is configured and ready to use
+    /// Check if LLM is configured and ready to use.
     pub fn llm_ready(&self) -> bool {
-        self.llm.as_ref().map(|l| l.is_ready()).unwrap_or(false)
+        self.llm.as_ref().is_some_and(|l| l.is_ready())
     }
 
-    /// Load configuration from the default config file
+    /// Check if embeddings are configured and ready.
+    pub fn embeddings_ready(&self) -> bool {
+        self.embeddings.as_ref().is_some_and(|e| e.is_ready())
+    }
+
+    /// Load configuration from the default config file.
     ///
-    /// # Returns
-    ///
-    /// * `Ok(Config)` - Successfully loaded configuration
-    /// * `Err(_)` - Configuration file not found or invalid
+    /// Returns a default (empty) config if the file doesn't exist.
     pub fn load() -> Result<Self> {
         let path = config_path()?;
+        if !path.exists() {
+            return Ok(Self::default());
+        }
         let contents = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read config file: {}", path.display()))?;
         let config: Config = serde_json::from_str(&contents)
@@ -251,18 +280,10 @@ impl Config {
         Ok(config)
     }
 
-    /// Save configuration to the default config file
-    ///
-    /// Creates the config directory if it doesn't exist.
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Successfully saved configuration
-    /// * `Err(_)` - Failed to create directory or write file
+    /// Save configuration to the default config file.
     pub fn save(&self) -> Result<()> {
         let path = config_path()?;
 
-        // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).with_context(|| {
                 format!("Failed to create config directory: {}", parent.display())
@@ -276,17 +297,12 @@ impl Config {
         Ok(())
     }
 
-    /// Check if a configuration file exists
+    /// Check if a configuration file exists.
     pub fn exists() -> bool {
         config_path().map(|p| p.exists()).unwrap_or(false)
     }
 
-    /// Delete the configuration file
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(())` - Successfully deleted or file didn't exist
-    /// * `Err(_)` - Failed to delete file
+    /// Delete the configuration file.
     pub fn delete() -> Result<()> {
         let path = config_path()?;
         if path.exists() {
@@ -295,28 +311,21 @@ impl Config {
         }
         Ok(())
     }
+
+    /// Get the path to the config directory.
+    pub fn config_dir() -> Result<PathBuf> {
+        let dir = dirs_config_dir().context("Could not determine config directory")?;
+        Ok(dir.join("unfault"))
+    }
 }
 
-/// Get the default base URL
-///
-/// Checks the `UNFAULT_BASE_URL` environment variable first,
-/// then falls back to the default production URL.
-pub fn default_base_url() -> String {
-    std::env::var(BASE_URL_ENV_VAR).unwrap_or_else(|_| DEFAULT_BASE_URL.to_string())
-}
-
-/// Get the path to the configuration file
-///
-/// Uses platform-specific config directories:
-/// - Linux: `~/.config/unfault/config.json`
-/// - macOS: `~/Library/Application Support/unfault/config.json`
-/// - Windows: `%APPDATA%\unfault\config.json`
+/// Get the path to the configuration file.
 fn config_path() -> Result<PathBuf> {
     let config_dir = dirs_config_dir().context("Could not determine config directory")?;
     Ok(config_dir.join("unfault").join("config.json"))
 }
 
-/// Get the config directory
+/// Get the config directory.
 ///
 /// Uses `$HOME/.config` on all platforms for consistency.
 fn dirs_config_dir() -> Option<PathBuf> {
@@ -334,127 +343,133 @@ fn dirs_config_dir() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
-    use tempfile::TempDir;
 
     #[test]
-    fn test_config_new() {
-        let config = Config::new("sk_live_test123".to_string());
-        assert_eq!(config.api_key, "sk_live_test123");
+    fn test_config_default() {
+        let config = Config::new();
+        assert!(config.llm.is_none());
+        assert!(config.embeddings.is_none());
+        assert!(!config.llm_ready());
+        assert!(!config.embeddings_ready());
     }
 
     #[test]
-    fn test_config_new_with_url() {
-        // Clear env var to test stored URL
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::remove_var(BASE_URL_ENV_VAR) };
-        let config = Config::new_with_url(
-            "sk_live_test123".to_string(),
-            "http://localhost:8000".to_string(),
-        );
-        assert_eq!(config.api_key, "sk_live_test123");
-        assert_eq!(config.base_url(), "http://localhost:8000");
+    fn test_config_with_llm() {
+        let config =
+            Config::new().with_llm(LlmConfig::ollama("http://localhost:11434", "llama3.2"));
+        assert!(config.has_llm());
+        assert!(config.llm_ready()); // ollama doesn't need API key
+    }
+
+    #[test]
+    fn test_config_with_embeddings() {
+        let config = Config::new().with_embeddings(EmbeddingConfig::ollama(
+            "http://localhost:11434",
+            "nomic-embed-text",
+            768,
+        ));
+        assert!(config.embeddings_ready());
+        assert_eq!(config.embeddings.unwrap().dimensions, 768);
     }
 
     #[test]
     fn test_config_serialization() {
-        let config = Config::new_with_url(
-            "sk_live_test123".to_string(),
-            "https://api.example.com".to_string(),
-        );
-        let json = serde_json::to_string(&config).unwrap();
-        assert!(json.contains("sk_live_test123"));
-        assert!(json.contains("https://api.example.com"));
+        let config = Config::new()
+            .with_llm(LlmConfig::ollama("http://localhost:11434", "llama3.2"))
+            .with_embeddings(EmbeddingConfig::openai("text-embedding-3-small", 1536));
+
+        let json = serde_json::to_string_pretty(&config).unwrap();
+        assert!(json.contains("ollama"));
+        assert!(json.contains("llama3.2"));
+        assert!(json.contains("text-embedding-3-small"));
     }
 
     #[test]
     fn test_config_deserialization() {
-        // Clear env var to test stored URL
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::remove_var(BASE_URL_ENV_VAR) };
-        let json = r#"{"api_key":"sk_live_test123","stored_base_url":"https://api.example.com"}"#;
+        let json = r#"{
+            "llm": {
+                "provider": "openai",
+                "endpoint": "https://api.openai.com/v1",
+                "model": "gpt-4o",
+                "api_key_env": "OPENAI_API_KEY"
+            }
+        }"#;
         let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.api_key, "sk_live_test123");
-        assert_eq!(config.base_url(), "https://api.example.com");
+        assert!(config.has_llm());
+        assert!(config.embeddings.is_none());
+        assert_eq!(config.llm.unwrap().model, "gpt-4o");
     }
 
     #[test]
-    fn test_config_deserialization_default_url() {
-        let json = r#"{"api_key":"sk_live_test123"}"#;
+    fn test_config_deserialization_empty() {
+        let json = "{}";
         let config: Config = serde_json::from_str(json).unwrap();
-        assert_eq!(config.api_key, "sk_live_test123");
-        // base_url should use default
+        assert!(config.llm.is_none());
+        assert!(config.embeddings.is_none());
     }
 
     #[test]
-    fn test_default_base_url_without_env() {
-        // Clear the env var if set
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::remove_var(BASE_URL_ENV_VAR) };
-        let url = default_base_url();
-        assert_eq!(url, DEFAULT_BASE_URL);
+    fn test_config_backward_compat() {
+        // Old config with api_key should deserialize without error (unknown fields ignored)
+        let json = r#"{"api_key": "old_key", "llm": {"provider": "ollama", "endpoint": "http://localhost:11434", "model": "llama3.2"}}"#;
+        // serde will ignore unknown fields with default config
+        let config: Config = serde_json::from_str(json).unwrap();
+        assert!(config.has_llm());
     }
 
     #[test]
-    fn test_default_base_url_with_env() {
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::set_var(BASE_URL_ENV_VAR, "http://localhost:9000") };
-        let url = default_base_url();
-        assert_eq!(url, "http://localhost:9000");
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::remove_var(BASE_URL_ENV_VAR) };
+    fn test_llm_openai() {
+        let llm = LlmConfig::openai("gpt-4o");
+        assert_eq!(llm.provider, "openai");
+        assert_eq!(llm.api_key_env, Some("OPENAI_API_KEY".to_string()));
     }
 
     #[test]
-    fn test_config_save_and_load() {
-        // Clear env var to test stored URL
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::remove_var(BASE_URL_ENV_VAR) };
-
-        let temp_dir = TempDir::new().unwrap();
-        let config_dir = temp_dir.path().join("unfault");
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("config.json");
-
-        let config = Config::new_with_url(
-            "sk_live_test_save_load".to_string(),
-            "http://test.example.com".to_string(),
-        );
-
-        // Save directly to temp path
-        let contents = serde_json::to_string_pretty(&config).unwrap();
-        fs::write(&config_path, contents).unwrap();
-
-        // Load from temp path
-        let loaded_contents = fs::read_to_string(&config_path).unwrap();
-        let loaded: Config = serde_json::from_str(&loaded_contents).unwrap();
-
-        assert_eq!(loaded.api_key, "sk_live_test_save_load");
-        assert_eq!(loaded.base_url(), "http://test.example.com");
+    fn test_llm_anthropic() {
+        let llm = LlmConfig::anthropic("claude-sonnet-4-20250514");
+        assert_eq!(llm.provider, "anthropic");
+        assert_eq!(llm.api_key_env, Some("ANTHROPIC_API_KEY".to_string()));
     }
 
     #[test]
-    fn test_env_var_takes_precedence() {
-        let config = Config::new_with_url(
-            "sk_live_test123".to_string(),
-            "http://stored.example.com".to_string(),
-        );
+    fn test_llm_ollama_ready() {
+        let llm = LlmConfig::ollama("http://localhost:11434", "llama3.2");
+        assert!(llm.is_ready()); // No API key needed
+    }
 
-        // Set env var - should take precedence
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::set_var(BASE_URL_ENV_VAR, "http://env.example.com") };
-        assert_eq!(config.base_url(), "http://env.example.com");
+    #[test]
+    fn test_llm_openai_not_ready_without_key() {
+        let llm = LlmConfig::openai("gpt-4o");
+        // Without env var set, not ready
+        assert!(!llm.is_ready() || std::env::var("OPENAI_API_KEY").is_ok());
+    }
 
-        // Clear env var - should fall back to stored URL
-        // SAFETY: Test code runs serially with serial_test, no other threads access this env var
-        unsafe { env::remove_var(BASE_URL_ENV_VAR) };
-        assert_eq!(config.base_url(), "http://stored.example.com");
+    #[test]
+    fn test_embedding_openai() {
+        let emb = EmbeddingConfig::openai("text-embedding-3-small", 1536);
+        assert_eq!(emb.provider, "openai");
+        assert_eq!(emb.dimensions, 1536);
+    }
+
+    #[test]
+    fn test_embedding_ollama() {
+        let emb = EmbeddingConfig::ollama("http://localhost:11434", "nomic-embed-text", 768);
+        assert!(emb.is_ready());
+        assert_eq!(emb.dimensions, 768);
+    }
+
+    #[test]
+    fn test_masked_api_key() {
+        let mut llm = LlmConfig::openai("gpt-4o");
+        llm.api_key = Some("sk-1234567890abcdef".to_string());
+        let masked = llm.masked_api_key().unwrap();
+        assert!(masked.starts_with("sk-1"));
+        assert!(masked.ends_with("cdef"));
+        assert!(masked.contains("..."));
     }
 
     #[test]
     fn test_config_exists() {
-        // This test depends on whether a config file exists on the system
-        // Just verify it doesn't panic
-        let _ = Config::exists();
+        let _ = Config::exists(); // Should not panic
     }
 }
