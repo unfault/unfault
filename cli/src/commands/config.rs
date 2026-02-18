@@ -329,7 +329,8 @@ fn remove_llm_config() -> Result<i32> {
     Ok(EXIT_SUCCESS)
 }
 
-/// Mask an API key for display
+/// Mask a key for display
+#[cfg(test)]
 fn mask_key(key: &str) -> String {
     if key.len() > 8 {
         format!("{}...{}", &key[..4], &key[key.len() - 4..])

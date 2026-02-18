@@ -161,6 +161,7 @@ pub struct GetFunctionImpactResponse {
     pub findings: Vec<FunctionImpactFinding>,
 }
 
+#[cfg(test)]
 fn normalize_severity(severity: &str) -> String {
     match severity.to_lowercase().as_str() {
         "critical" | "high" => "error".to_string(),
@@ -879,9 +880,6 @@ impl UnfaultLsp {
 
     /// Get file centrality for a given file path
     async fn get_file_centrality(&self, file_path: &str) -> Option<FileCentralityNotification> {
-        let api_key = String::new();
-        let workspace_id = self.workspace_id.read().await.clone()?;
-
         // Check cache first
         {
             let cache = self.centrality_cache.read().await;
@@ -1897,7 +1895,7 @@ impl LanguageServer for UnfaultLsp {
         let uri = Url::parse(&req.uri).ok();
         let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
         let workspace_root = { self.workspace_root.read().await.clone() };
-        let relative_path = match (&file_path, &workspace_root) {
+        let _relative_path = match (&file_path, &workspace_root) {
             (Some(fp), Some(ws)) => fp.strip_prefix(ws).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| fp.to_string_lossy().to_string()),
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),
@@ -1959,7 +1957,7 @@ impl UnfaultLsp {
         let uri = Url::parse(&req.uri).ok();
         let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
         let workspace_root = { self.workspace_root.read().await.clone() };
-        let relative_path = match (&file_path, &workspace_root) {
+        let _relative_path = match (&file_path, &workspace_root) {
             (Some(fp), Some(ws)) => fp.strip_prefix(ws).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| fp.to_string_lossy().to_string()),
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),

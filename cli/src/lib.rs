@@ -16,12 +16,10 @@ pub mod analysis;
 pub mod api;
 pub mod commands;
 pub mod config;
-pub mod errors;
 pub mod exit_codes;
 pub mod local_graph;
 pub mod session;
 
 // Re-export commonly used types
-pub use api::ApiClient;
 pub use config::Config;
 pub use session::{WorkspaceInfo, WorkspaceScanner};
