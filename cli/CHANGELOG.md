@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `unfault config agent claude` and `unfault config agent opencode` generate per-command
+  `SKILL.md` files so Claude Code and OpenCode agents can use unfault natively.
+  Four skills are created: `unfault-review`, `unfault-graph-impact`, `unfault-graph-explore`,
+  and `unfault-config`. Graph skills auto-trigger in context (fast, local); the review skill
+  requires explicit invocation (`disable-model-invocation: true`) because it calls an external
+  LLM. Skills are written project-local by default; pass `--global` to write to the user's
+  home config directory. Pass `--dry-run` to preview paths without writing files.
+
 ## [0.6.0] - 2025-12-23
 
 ### Added

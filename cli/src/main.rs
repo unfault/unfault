@@ -278,6 +278,35 @@ enum ConfigCommands {
         #[command(subcommand)]
         command: LlmCommands,
     },
+    /// Generate agent skill files for Claude Code or OpenCode
+    Agent {
+        /// Agent tool to configure skills for
+        #[command(subcommand)]
+        tool: AgentTool,
+    },
+}
+
+/// Agent tool targets for skill generation
+#[derive(Subcommand, Clone, Debug)]
+pub enum AgentTool {
+    /// Generate skills for Claude Code (.claude/skills/)
+    Claude {
+        /// Write to ~/.claude/skills/ instead of .claude/skills/ in the project
+        #[arg(long)]
+        global: bool,
+        /// Print what would be created without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Generate skills for OpenCode (.opencode/skills/)
+    Opencode {
+        /// Write to ~/.config/opencode/skills/ instead of .opencode/skills/ in the project
+        #[arg(long)]
+        global: bool,
+        /// Print what would be created without writing files
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// LLM subcommands
@@ -423,6 +452,28 @@ fn run_config_command(command: ConfigCommands) -> i32 {
             }
         }
         ConfigCommands::Llm { command } => run_llm_command(command),
+        ConfigCommands::Agent { tool } => {
+            let (agent_tool, global, dry_run) = match tool {
+                AgentTool::Claude { global, dry_run } => {
+                    (commands::agent_skills::AgentTool::Claude, global, dry_run)
+                }
+                AgentTool::Opencode { global, dry_run } => {
+                    (commands::agent_skills::AgentTool::Opencode, global, dry_run)
+                }
+            };
+            let args = commands::agent_skills::AgentSkillsArgs {
+                tool: agent_tool,
+                global,
+                dry_run,
+            };
+            match commands::agent_skills::execute(args) {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Agent skills error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
     }
 }
 
