@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
-use crate::api::graph::IrFinding;
+use crate::output::IrFinding;
 
 /// Statistics from a patch application session
 #[derive(Debug, Default, Clone)]

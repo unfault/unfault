@@ -7,7 +7,7 @@ use std::time::Instant;
 
 use anyhow::{Context, Result};
 
-use crate::api::graph::{IrAnalyzeResponse, IrFinding, IrGraphStats};
+use crate::output::{IrAnalyzeResponse, IrFinding, IrGraphStats};
 
 /// Run analysis locally on a serialized IR.
 ///

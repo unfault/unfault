@@ -32,7 +32,7 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::api::graph::IrFinding;
+use crate::output::IrFinding;
 use crate::exit_codes::*;
 use crate::session::{
     PatchApplier, ScanProgress, WorkspaceScanner, build_ir_cached,

@@ -5,7 +5,6 @@
 //!
 //! ## Modules
 //!
-//! - [`api`] - API client for communicating with the Unfault API
 //! - [`commands`] - CLI command implementations
 //! - [`config`] - Configuration management
 //! - [`errors`] - Error handling and display
@@ -13,11 +12,12 @@
 //! - [`session`] - Session management for workspace scanning and analysis
 
 pub mod analysis;
-pub mod api;
 pub mod commands;
 pub mod config;
 pub mod exit_codes;
 pub mod local_graph;
+pub mod llm;
+pub mod output;
 pub mod session;
 
 // Re-export commonly used types

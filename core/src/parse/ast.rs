@@ -5,11 +5,11 @@ use tree_sitter::{Node, Tree};
 use crate::types::context::Language;
 
 /// Engine-internal identifier for a file in a session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub struct FileId(pub u64);
 
 /// Text range in (line, col) space; 0-based.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct TextRange {
     pub start_line: u32,
     pub start_col: u32,
@@ -18,7 +18,7 @@ pub struct TextRange {
 }
 
 /// Lightweight handle to "where in the AST" something lives.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct AstLocation {
     pub file_id: FileId,
     pub range: TextRange,

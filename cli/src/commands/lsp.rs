@@ -60,7 +60,7 @@ use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::api::graph::{FileCentrality, FunctionInfo, IrFinding};
+use crate::output::{FileCentrality, FunctionInfo, IrFinding};
 use crate::config::Config;
 use crate::exit_codes::*;
 use crate::session::{WorkspaceScanner, build_ir_cached, compute_workspace_id, get_git_remote};
@@ -899,7 +899,7 @@ impl UnfaultLsp {
         let root = workspace_root.as_ref()?;
 
         let graph = crate::local_graph::build_analysis_graph(root, false).ok()?;
-        let centrality = unfault_core::graph::traversal::get_centrality(&graph, 50);
+        let centrality = unfault_analysis::graph::traversal::get_centrality(&graph, 50);
 
         // Convert to FileCentrality and cache
         let file_centralities: Vec<FileCentrality> = centrality
@@ -1276,7 +1276,7 @@ impl UnfaultLsp {
         let root = workspace_root.as_ref()?;
         let graph = crate::local_graph::build_analysis_graph(root, false).ok()?;
 
-        let flow = unfault_core::graph::traversal::extract_flow(&graph, function_name, 5);
+        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, function_name, 5);
 
         // Format as markdown
         let mut markdown = String::new();
@@ -1910,7 +1910,7 @@ impl LanguageServer for UnfaultLsp {
             None => return Ok(None),
         };
 
-        let flow = unfault_core::graph::traversal::extract_flow(&graph, &req.function_name, 5);
+        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, 5);
 
         let callers: Vec<FunctionImpactCaller> = flow
             .paths
@@ -1972,7 +1972,7 @@ impl UnfaultLsp {
             None => return Ok(None),
         };
 
-        let flow = unfault_core::graph::traversal::extract_flow(&graph, &req.function_name, 5);
+        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, 5);
 
         let callers: Vec<FunctionImpactCaller> = flow
             .paths

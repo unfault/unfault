@@ -15,6 +15,8 @@
 //! - UsesLibrary: File/function uses external library
 //! - Framework-specific edges (FastAPI routes, middlewares)
 
+pub mod traversal;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 

@@ -7,6 +7,7 @@
 pub use unfault_core::types::context;
 pub use unfault_core::types::dependency;
 pub use unfault_core::types::finding;
+pub use unfault_core::types::graph_query;
 pub use unfault_core::types::meta;
 pub use unfault_core::types::patch;
 pub use unfault_core::types::profile;

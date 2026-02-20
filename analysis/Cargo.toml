@@ -15,10 +15,7 @@ name = "unfault_analysis"
 path = "src/lib.rs"
 
 [dependencies]
-# Note: unfault-core is NOT a dependency currently.
-# The analysis crate has its own copies of parse/semantics/graph/types
-# that diverged from core. These will be harmonized later.
-# unfault-core = { path = "../core" }
+unfault-core = { path = "../core" }
 
 # From workspace
 serde.workspace = true
