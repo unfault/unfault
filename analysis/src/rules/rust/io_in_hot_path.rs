@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! fn process_items(items: &[Item]) {
 //!     for item in items {
 //!         let config = std::fs::read_to_string("config.json")?;  // I/O in loop!
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! fn process_items(items: &[Item]) {
 //!     let config = std::fs::read_to_string("config.json")?;  // I/O before loop
 //!     for item in items {

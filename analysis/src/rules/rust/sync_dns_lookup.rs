@@ -6,14 +6,14 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! async fn connect_to_host(host: &str) {
 //!     let addrs = std::net::ToSocketAddrs::to_socket_addrs(&(host, 80));  // Blocking!
 //! }
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! async fn connect_to_host(host: &str) {
 //!     let addrs = tokio::net::lookup_host((host, 80)).await?;
 //! }

@@ -7,14 +7,14 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! tokio::spawn(async {
 //!     do_something().await?;  // Error goes nowhere!
 //! });
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! let handle = tokio::spawn(async {
 //!     do_something().await
 //! });

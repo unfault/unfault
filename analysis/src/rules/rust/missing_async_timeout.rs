@@ -6,14 +6,14 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! async fn fetch_data() {
 //!     let response = client.get(url).send().await?;  // No timeout
 //! }
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! async fn fetch_data() {
 //!     let response = tokio::time::timeout(
 //!         Duration::from_secs(30),

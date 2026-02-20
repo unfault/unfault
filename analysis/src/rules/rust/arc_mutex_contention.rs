@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Potentially problematic:
-//! ```rust
+//! ```rust,ignore
 //! async fn handle_request(state: Arc<Mutex<State>>) {
 //!     let guard = state.lock().unwrap();  // Blocks the task!
 //!     // ...
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Better alternatives:
-//! ```rust
+//! ```rust,ignore
 //! // Use tokio::sync::Mutex for async
 //! async fn handle_request(state: Arc<tokio::sync::Mutex<State>>) {
 //!     let guard = state.lock().await;

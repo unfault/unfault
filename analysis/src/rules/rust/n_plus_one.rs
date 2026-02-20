@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! for user_id in user_ids {
 //!     let orders = sqlx::query!("SELECT * FROM orders WHERE user_id = ?", user_id)
 //!         .fetch_all(&pool).await?;
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! let orders = sqlx::query!("SELECT * FROM orders WHERE user_id = ANY(?)", &user_ids)
 //!     .fetch_all(&pool).await?;
 //! ```

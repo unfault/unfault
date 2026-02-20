@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! pub fn process(data: &str) {
 //!     println!("Processing: {}", data);  // Not appropriate for library
 //!     // ...
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! pub fn process(data: &str) {
 //!     tracing::debug!("Processing: {}", data);
 //!     // ...

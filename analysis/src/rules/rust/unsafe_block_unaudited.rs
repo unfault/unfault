@@ -7,7 +7,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! fn dangerous() {
 //!     unsafe {
 //!         *raw_ptr = 42;  // No explanation!
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! fn dangerous() {
 //!     // SAFETY: raw_ptr is valid because it was just allocated
 //!     // and we have exclusive access via &mut self

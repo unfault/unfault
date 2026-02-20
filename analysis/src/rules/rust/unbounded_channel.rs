@@ -6,13 +6,13 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 //! let (tx, rx) = std::sync::mpsc::channel();  // Also unbounded
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! let (tx, rx) = tokio::sync::mpsc::channel(100);  // Bounded with backpressure
 //! ```
 

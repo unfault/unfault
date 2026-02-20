@@ -7,14 +7,14 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! async fn process_file(path: &str) -> Result<String, io::Error> {
 //!     std::fs::read_to_string(path)  // Blocks the runtime!
 //! }
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! async fn process_file(path: &str) -> Result<String, io::Error> {
 //!     tokio::fs::read_to_string(path).await
 //! }

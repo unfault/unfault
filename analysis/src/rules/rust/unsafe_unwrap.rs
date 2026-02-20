@@ -18,14 +18,14 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! fn process(data: Option<String>) -> String {
 //!     data.unwrap()  // Will panic if None
 //! }
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! fn process(data: Option<String>) -> Result<String, Error> {
 //!     data.ok_or(Error::MissingData)  // Explicit error handling
 //! }

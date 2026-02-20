@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! async fn process_all(items: Vec<Item>) {
 //!     let handles: Vec<_> = items
 //!         .into_iter()
@@ -17,7 +17,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! async fn process_all(items: Vec<Item>) {
 //!     let semaphore = Arc::new(Semaphore::new(10));
 //!     let handles: Vec<_> = items

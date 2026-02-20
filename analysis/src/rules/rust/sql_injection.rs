@@ -6,13 +6,13 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! let query = format!("SELECT * FROM users WHERE id = {}", user_id);
 //! let query = "SELECT * FROM users WHERE name = '".to_string() + &name + "'";
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! // Use parameterized queries with sqlx
 //! sqlx::query("SELECT * FROM users WHERE id = $1")
 //!     .bind(user_id)

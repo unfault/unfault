@@ -6,14 +6,14 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! fn process_file(reader: BufReader<File>) {
 //!     let lines: Vec<String> = reader.lines().collect();  // OOM on large files
 //! }
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! fn process_file(reader: BufReader<File>) {
 //!     for line in reader.lines().take(10000) {  // Bounded
 //!         process(line?);

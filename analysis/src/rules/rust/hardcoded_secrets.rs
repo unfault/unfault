@@ -7,13 +7,13 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! const API_KEY: &str = "sk-1234567890abcdef";
 //! let password = "super_secret_password";
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! let api_key = std::env::var("API_KEY")?;
 //! let password = std::env::var("DATABASE_PASSWORD")?;
 //! ```
