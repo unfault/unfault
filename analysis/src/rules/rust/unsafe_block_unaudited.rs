@@ -176,17 +176,24 @@ impl Rule for RustUnsafeBlockUnauditedRule {
 
 /// Determine severity based on operations in the unsafe block.
 fn determine_severity(operations: &[UnsafeOp]) -> Severity {
+    // Return the highest severity across all operations.
+    // Priority: Critical > High > Medium
+    let mut highest: u8 = 0;
     for op in operations {
-        match op {
-            UnsafeOp::Transmute => return Severity::Critical,
-            UnsafeOp::RawPointerDeref => return Severity::High,
-            UnsafeOp::MutableStaticAccess => return Severity::High,
-            UnsafeOp::ExternCall => return Severity::Medium,
-            UnsafeOp::UnsafeFnCall => return Severity::Medium,
-            UnsafeOp::UnionFieldAccess => return Severity::Medium,
+        let level: u8 = match op {
+            UnsafeOp::Transmute => 2,
+            UnsafeOp::RawPointerDeref | UnsafeOp::MutableStaticAccess => 1,
+            UnsafeOp::ExternCall | UnsafeOp::UnsafeFnCall | UnsafeOp::UnionFieldAccess => 0,
+        };
+        if level > highest {
+            highest = level;
         }
     }
-    Severity::Medium
+    match highest {
+        2 => Severity::Critical,
+        1 => Severity::High,
+        _ => Severity::Medium,
+    }
 }
 
 /// Describe the operations found in the unsafe block.
