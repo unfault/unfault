@@ -92,7 +92,8 @@ impl Rule for DjangoSessionSettingsRule {
                                 description: Some(
                                     "SESSION_COOKIE_SECURE=False allows session cookies to be \
                                      sent over unencrypted HTTP connections. In production, \
-                                     set this to True to ensure cookies are only sent over HTTPS.".to_string()
+                                     set this to True to ensure cookies are only sent over HTTPS."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::High,
@@ -102,10 +103,14 @@ impl Rule for DjangoSessionSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "SESSION_COOKIE_SECURE = True")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "SESSION_COOKIE_SECURE = True",
+                                )),
                                 fix_preview: Some(generate_secure_cookie_fix_preview()),
                                 tags: vec![
                                     "python".into(),
@@ -125,7 +130,8 @@ impl Rule for DjangoSessionSettingsRule {
                                 description: Some(
                                     "SESSION_COOKIE_HTTPONLY=False allows JavaScript to access \
                                      session cookies, making them vulnerable to XSS attacks. \
-                                     Set this to True (the default) to prevent JavaScript access.".to_string()
+                                     Set this to True (the default) to prevent JavaScript access."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::High,
@@ -135,10 +141,14 @@ impl Rule for DjangoSessionSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "SESSION_COOKIE_HTTPONLY = True")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "SESSION_COOKIE_HTTPONLY = True",
+                                )),
                                 fix_preview: Some(generate_httponly_fix_preview()),
                                 tags: vec![
                                     "python".into(),
@@ -153,14 +163,20 @@ impl Rule for DjangoSessionSettingsRule {
                     "SESSION_COOKIE_SAMESITE" => {
                         has_session_cookie_samesite = true;
                         let value = assign.value_repr.trim().to_lowercase();
-                        if value == "none" || value == "'none'" || value == "\"none\"" || value == "false" {
+                        if value == "none"
+                            || value == "'none'"
+                            || value == "\"none\""
+                            || value == "false"
+                        {
                             findings.push(RuleFinding {
                                 rule_id: self.id().to_string(),
-                                title: "SESSION_COOKIE_SAMESITE is set to None or False".to_string(),
+                                title: "SESSION_COOKIE_SAMESITE is set to None or False"
+                                    .to_string(),
                                 description: Some(
                                     "SESSION_COOKIE_SAMESITE=None or False allows the session \
                                      cookie to be sent with cross-site requests, making it \
-                                     vulnerable to CSRF attacks. Use 'Lax' or 'Strict'.".to_string()
+                                     vulnerable to CSRF attacks. Use 'Lax' or 'Strict'."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::Medium,
@@ -170,10 +186,14 @@ impl Rule for DjangoSessionSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "SESSION_COOKIE_SAMESITE = 'Lax'")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "SESSION_COOKIE_SAMESITE = 'Lax'",
+                                )),
                                 fix_preview: Some(generate_samesite_fix_preview()),
                                 tags: vec![
                                     "python".into(),
@@ -230,7 +250,7 @@ impl Rule for DjangoSessionSettingsRule {
 
             // Check for missing security settings in production-like settings
             let is_prod_settings = py.path.contains("prod") || py.path.contains("production");
-            
+
             if is_prod_settings {
                 if !has_session_cookie_secure {
                     findings.push(RuleFinding {
@@ -239,7 +259,8 @@ impl Rule for DjangoSessionSettingsRule {
                         description: Some(
                             "SESSION_COOKIE_SECURE is not explicitly set in production settings. \
                              Add SESSION_COOKIE_SECURE = True to ensure session cookies are \
-                             only sent over HTTPS.".to_string()
+                             only sent over HTTPS."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -249,9 +270,9 @@ impl Rule for DjangoSessionSettingsRule {
                         file_path: py.path.clone(),
                         line: Some(1),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_missing_settings_fix_preview()),
                         tags: vec![
@@ -269,7 +290,8 @@ impl Rule for DjangoSessionSettingsRule {
                         title: "SESSION_COOKIE_SAMESITE not set in production settings".to_string(),
                         description: Some(
                             "SESSION_COOKIE_SAMESITE is not explicitly set. Add \
-                             SESSION_COOKIE_SAMESITE = 'Lax' or 'Strict' for CSRF protection.".to_string()
+                             SESSION_COOKIE_SAMESITE = 'Lax' or 'Strict' for CSRF protection."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Low,
@@ -279,9 +301,9 @@ impl Rule for DjangoSessionSettingsRule {
                         file_path: py.path.clone(),
                         line: Some(1),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_missing_settings_fix_preview()),
                         tags: vec![
@@ -333,7 +355,8 @@ SESSION_COOKIE_SECURE = os.environ.get('DJANGO_ENV') == 'production'
 # Or use django-environ:
 import environ
 env = environ.Env()
-SESSION_COOKIE_SECURE = env.bool('SESSION_COOKIE_SECURE', default=True)"#.to_string()
+SESSION_COOKIE_SECURE = env.bool('SESSION_COOKIE_SECURE', default=True)"#
+        .to_string()
 }
 
 /// Generate fix preview for SESSION_COOKIE_HTTPONLY.
@@ -344,7 +367,8 @@ fn generate_httponly_fix_preview() -> String {
 SESSION_COOKIE_HTTPONLY = True
 
 # This prevents XSS attacks from stealing session cookies
-# Never set this to False unless you have a very specific need"#.to_string()
+# Never set this to False unless you have a very specific need"#
+        .to_string()
 }
 
 /// Generate fix preview for SESSION_COOKIE_SAMESITE.
@@ -358,7 +382,8 @@ SESSION_COOKIE_SAMESITE = 'Lax'
 # SESSION_COOKIE_SAMESITE = 'Strict'
 
 # Never use 'None' or False unless you need cross-site cookies
-# If you must use 'None', SESSION_COOKIE_SECURE must be True"#.to_string()
+# If you must use 'None', SESSION_COOKIE_SECURE must be True"#
+        .to_string()
 }
 
 /// Generate fix preview for SESSION_COOKIE_AGE.
@@ -378,7 +403,8 @@ SESSION_EXPIRE_AT_BROWSER_CLOSE = True
 # For long-lived sessions, implement session refresh:
 # - Use shorter SESSION_COOKIE_AGE
 # - Implement token refresh on activity
-# - Add session activity tracking"#.to_string()
+# - Add session activity tracking"#
+        .to_string()
 }
 
 /// Generate fix preview for missing session settings.
@@ -405,7 +431,8 @@ SESSION_COOKIE_AGE = 1209600
 
 # For high-security applications:
 SESSION_COOKIE_NAME = 'sessionid'  # Change from default if needed
-SESSION_SAVE_EVERY_REQUEST = True  # Refresh session on each request"#.to_string()
+SESSION_SAVE_EVERY_REQUEST = True  # Refresh session on each request"#
+        .to_string()
 }
 
 #[cfg(test)]

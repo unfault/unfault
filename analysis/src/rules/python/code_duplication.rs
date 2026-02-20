@@ -29,11 +29,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::python::model::PyFileSemantics;
 use crate::semantics::SourceSemantics;
+use crate::semantics::python::model::PyFileSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 
@@ -48,7 +48,7 @@ const SIMILARITY_THRESHOLD: f64 = 0.85;
 fn is_excluded_file(path: &str) -> bool {
     let filename = path.rsplit('/').next().unwrap_or(path);
     let filename_lower = filename.to_lowercase();
-    
+
     // Exclude test files
     filename_lower.starts_with("test_")
         || filename_lower.ends_with("_test.py")
@@ -157,8 +157,12 @@ impl Rule for PythonCodeDuplicationRule {
 
             // Extract and normalize functions
             for func in &py.functions {
-                let line_count =
-                    func.location.range.end_line.saturating_sub(func.location.range.start_line) + 1;
+                let line_count = func
+                    .location
+                    .range
+                    .end_line
+                    .saturating_sub(func.location.range.start_line)
+                    + 1;
 
                 if line_count < MIN_FUNCTION_LINES {
                     continue;
@@ -188,8 +192,12 @@ fn normalize_function(
     py: &PyFileSemantics,
     file_id: FileId,
 ) -> NormalizedFunction {
-    let line_count =
-        func.location.range.end_line.saturating_sub(func.location.range.start_line) + 1;
+    let line_count = func
+        .location
+        .range
+        .end_line
+        .saturating_sub(func.location.range.start_line)
+        + 1;
 
     // Create a normalized body representation
     // In a real implementation, we would extract the actual function body
@@ -262,15 +270,15 @@ fn create_normalized_body(func: &crate::semantics::python::model::PyFunction) ->
         if param_name == "self" || param_name == "cls" {
             continue;
         }
-        
+
         // Include parameter name - different param names suggest different purposes
         normalized.push_str(&format!("P_{}:", param_name));
-        
+
         // Include type annotation if present - different types mean different functions
         if let Some(ref type_ann) = param.type_annotation {
             normalized.push_str(&format!("T_{}:", type_ann));
         }
-        
+
         if param.default.is_some() {
             normalized.push_str("DEF ");
         } else {
@@ -320,7 +328,8 @@ fn find_duplicates(functions: &[NormalizedFunction]) -> Vec<DuplicatedCode> {
                 }
 
                 // Calculate detailed similarity
-                let similarity = calculate_similarity(&func1.normalized_body, &func2.normalized_body);
+                let similarity =
+                    calculate_similarity(&func1.normalized_body, &func2.normalized_body);
 
                 if similarity >= SIMILARITY_THRESHOLD {
                     duplicates.push(DuplicatedCode {
@@ -456,7 +465,7 @@ fn create_finding(rule_id: &str, dup: &DuplicatedCode) -> RuleFinding {
         column: Some(1),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         // No patch: code duplication refactoring requires human judgment about
         // where to place shared code, naming conventions, and API design
         patch: None,
@@ -475,8 +484,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::python::build_python_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::python::build_python_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str, path: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -650,7 +659,9 @@ def check_input(data):
         let (file_id1, sem1) = parse_and_build_semantics(source1, "file1.py");
         let (file_id2, sem2) = parse_and_build_semantics(source2, "file2.py");
         let rule = PythonCodeDuplicationRule::new();
-        let findings = rule.evaluate(&[(file_id1, sem1), (file_id2, sem2)], None).await;
+        let findings = rule
+            .evaluate(&[(file_id1, sem1), (file_id2, sem2)], None)
+            .await;
 
         // Should detect cross-file duplication
         // Detection depends on normalization quality
@@ -892,8 +903,8 @@ def transform_data(items):
 
     #[test]
     fn normalized_body_includes_class_context() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         let method = PyFunction {
             name: "method_a".to_string(),
@@ -919,13 +930,16 @@ def transform_data(items):
         };
 
         let normalized = create_normalized_body(&method);
-        assert!(normalized.contains("CLASS:MyClass"), "Should include class context");
+        assert!(
+            normalized.contains("CLASS:MyClass"),
+            "Should include class context"
+        );
     }
 
     #[test]
     fn normalized_body_includes_toplevel_marker() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         let func = PyFunction {
             name: "standalone".to_string(),
@@ -951,13 +965,16 @@ def transform_data(items):
         };
 
         let normalized = create_normalized_body(&func);
-        assert!(normalized.contains("TOPLEVEL"), "Should include TOPLEVEL marker for non-methods");
+        assert!(
+            normalized.contains("TOPLEVEL"),
+            "Should include TOPLEVEL marker for non-methods"
+        );
     }
 
     #[test]
     fn normalized_body_includes_param_names() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         let func = PyFunction {
             name: "process".to_string(),
@@ -990,26 +1007,30 @@ def transform_data(items):
         };
 
         let normalized = create_normalized_body(&func);
-        assert!(normalized.contains("P_items:REQ"), "Should include param name 'items'");
-        assert!(normalized.contains("P_count:DEF"), "Should include param name 'count' with default marker");
+        assert!(
+            normalized.contains("P_items:REQ"),
+            "Should include param name 'items'"
+        );
+        assert!(
+            normalized.contains("P_count:DEF"),
+            "Should include param name 'count' with default marker"
+        );
     }
 
     #[test]
     fn normalized_body_includes_type_annotations() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         let func = PyFunction {
             name: "get_diagnostics".to_string(),
             is_method: false,
             class_name: None,
-            params: vec![
-                PyParam {
-                    name: "request".to_string(),
-                    default: None,
-                    type_annotation: Some("DiagnosticsRequest".to_string()),
-                },
-            ],
+            params: vec![PyParam {
+                name: "request".to_string(),
+                default: None,
+                type_annotation: Some("DiagnosticsRequest".to_string()),
+            }],
             is_async: true,
             return_type: None,
             body_hash: None,
@@ -1025,26 +1046,27 @@ def transform_data(items):
         };
 
         let normalized = create_normalized_body(&func);
-        assert!(normalized.contains("T_DiagnosticsRequest"),
-            "Should include type annotation in normalization: {}", normalized);
+        assert!(
+            normalized.contains("T_DiagnosticsRequest"),
+            "Should include type annotation in normalization: {}",
+            normalized
+        );
     }
 
     #[test]
     fn different_type_annotations_produce_different_hashes() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         let func1 = PyFunction {
             name: "get_diagnostics".to_string(),
             is_method: false,
             class_name: None,
-            params: vec![
-                PyParam {
-                    name: "request".to_string(),
-                    default: None,
-                    type_annotation: Some("DiagnosticsRequest".to_string()),
-                },
-            ],
+            params: vec![PyParam {
+                name: "request".to_string(),
+                default: None,
+                type_annotation: Some("DiagnosticsRequest".to_string()),
+            }],
             is_async: true,
             return_type: None,
             body_hash: None,
@@ -1063,13 +1085,11 @@ def transform_data(items):
             name: "get_code_actions".to_string(),
             is_method: false,
             class_name: None,
-            params: vec![
-                PyParam {
-                    name: "request".to_string(),
-                    default: None,
-                    type_annotation: Some("CodeActionsRequest".to_string()),
-                },
-            ],
+            params: vec![PyParam {
+                name: "request".to_string(),
+                default: None,
+                type_annotation: Some("CodeActionsRequest".to_string()),
+            }],
             is_async: true,
             return_type: None,
             body_hash: None,
@@ -1087,20 +1107,24 @@ def transform_data(items):
         let normalized1 = create_normalized_body(&func1);
         let normalized2 = create_normalized_body(&func2);
 
-        assert_ne!(normalized1, normalized2,
-            "Functions with different type annotations should have different normalized bodies");
+        assert_ne!(
+            normalized1, normalized2,
+            "Functions with different type annotations should have different normalized bodies"
+        );
 
         let hash1 = hash_string(&normalized1);
         let hash2 = hash_string(&normalized2);
 
-        assert_ne!(hash1, hash2,
-            "Functions with different type annotations should have different hashes");
+        assert_ne!(
+            hash1, hash2,
+            "Functions with different type annotations should have different hashes"
+        );
     }
 
     #[test]
     fn normalized_body_skips_self_and_cls() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         let method = PyFunction {
             name: "method".to_string(),
@@ -1133,14 +1157,20 @@ def transform_data(items):
         };
 
         let normalized = create_normalized_body(&method);
-        assert!(!normalized.contains("P_self"), "Should skip 'self' parameter");
-        assert!(normalized.contains("P_data"), "Should include regular parameters");
+        assert!(
+            !normalized.contains("P_self"),
+            "Should skip 'self' parameter"
+        );
+        assert!(
+            normalized.contains("P_data"),
+            "Should include regular parameters"
+        );
     }
 
     #[test]
     fn normalized_body_includes_return_type() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         let func = PyFunction {
             name: "is_empty".to_string(),
@@ -1166,13 +1196,17 @@ def transform_data(items):
         };
 
         let normalized = create_normalized_body(&func);
-        assert!(normalized.contains("RET:bool"), "Should include return type in normalization: {}", normalized);
+        assert!(
+            normalized.contains("RET:bool"),
+            "Should include return type in normalization: {}",
+            normalized
+        );
     }
 
     #[test]
     fn different_return_types_produce_different_hashes() {
-        use crate::semantics::python::model::{PyFunction, PyParam};
         use crate::parse::ast::{AstLocation, TextRange};
+        use crate::semantics::python::model::{PyFunction, PyParam};
 
         // Simulates is_empty(self) -> bool
         let func1 = PyFunction {
@@ -1225,15 +1259,20 @@ def transform_data(items):
         let normalized1 = create_normalized_body(&func1);
         let normalized2 = create_normalized_body(&func2);
 
-        assert_ne!(normalized1, normalized2,
+        assert_ne!(
+            normalized1, normalized2,
             "Functions with different return types should have different normalized bodies.\n\
              is_empty: {}\n\
-             to_dict: {}", normalized1, normalized2);
+             to_dict: {}",
+            normalized1, normalized2
+        );
 
         let hash1 = hash_string(&normalized1);
         let hash2 = hash_string(&normalized2);
 
-        assert_ne!(hash1, hash2,
-            "Functions with different return types should have different hashes");
+        assert_ne!(
+            hash1, hash2,
+            "Functions with different return types should have different hashes"
+        );
     }
 }

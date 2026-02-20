@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::BareExceptClause;
@@ -109,7 +109,7 @@ impl Rule for PythonBareExceptRule {
                     column: Some(bare_except.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -127,7 +127,10 @@ impl Rule for PythonBareExceptRule {
 }
 
 /// Generate a patch to replace `except:` with `except Exception:`
-fn generate_bare_except_patch(bare_except: &BareExceptClause, file_id: FileId) -> (String, FilePatch) {
+fn generate_bare_except_patch(
+    bare_except: &BareExceptClause,
+    file_id: FileId,
+) -> (String, FilePatch) {
     // The fix is to replace `except:` with `except Exception:`
     let original = &bare_except.text;
     let patched = if original.trim() == "except:" {
@@ -172,7 +175,7 @@ mod tests {
         let file_id = FileId(1);
         let parsed = parse_python_file(file_id, &sf).expect("parsing should succeed");
         let sem = PyFileSemantics::from_parsed(&parsed);
-        
+
         sem.bare_excepts
     }
 
@@ -440,12 +443,14 @@ def hello():
     #[tokio::test]
     async fn evaluate_returns_empty_for_code_without_bare_except() {
         let rule = PythonBareExceptRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 try:
     risky()
 except ValueError:
     pass
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
@@ -455,12 +460,14 @@ except ValueError:
     #[tokio::test]
     async fn evaluate_detects_bare_except() {
         let rule = PythonBareExceptRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 try:
     risky()
 except:
     pass
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
@@ -472,24 +479,32 @@ except:
     #[tokio::test]
     async fn evaluate_finding_has_correct_properties() {
         let rule = PythonBareExceptRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 def my_func():
     try:
         risky()
     except:
         pass
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let finding = &findings[0];
         assert_eq!(finding.rule_id, "python.bare_except");
         assert!(finding.description.as_ref().unwrap().contains("my_func"));
         assert!(finding.patch.is_some());
         assert!(finding.fix_preview.is_some());
-        assert!(finding.fix_preview.as_ref().unwrap().contains("except Exception:"));
+        assert!(
+            finding
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("except Exception:")
+        );
         assert!(finding.tags.contains(&"python".to_string()));
         assert!(finding.tags.contains(&"exception-handling".to_string()));
     }
@@ -507,7 +522,7 @@ def test():
 "#;
         let results = parse_and_find_bare_excepts(src);
         assert_eq!(results.len(), 1);
-        
+
         let info = &results[0];
         assert!(info.line > 0);
         assert!(info.column > 0);

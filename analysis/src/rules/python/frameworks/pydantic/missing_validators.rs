@@ -55,7 +55,10 @@ impl Rule for PydanticMissingValidatorsRule {
             // Check for Pydantic imports
             let has_pydantic = py.imports.iter().any(|imp| {
                 imp.module.contains("pydantic")
-                    || imp.names.iter().any(|n| n == "BaseModel" || n == "BaseSettings")
+                    || imp
+                        .names
+                        .iter()
+                        .any(|n| n == "BaseModel" || n == "BaseSettings")
             });
 
             if !has_pydantic {
@@ -63,14 +66,18 @@ impl Rule for PydanticMissingValidatorsRule {
             }
 
             // Check for Pydantic built-in types that provide validation
-            let has_email_str = py.imports.iter().any(|imp| {
-                imp.names.iter().any(|n| n == "EmailStr")
-            });
-            let has_http_url = py.imports.iter().any(|imp| {
-                imp.names.iter().any(|n| n == "HttpUrl" || n == "AnyUrl")
-            });
+            let has_email_str = py
+                .imports
+                .iter()
+                .any(|imp| imp.names.iter().any(|n| n == "EmailStr"));
+            let has_http_url = py
+                .imports
+                .iter()
+                .any(|imp| imp.names.iter().any(|n| n == "HttpUrl" || n == "AnyUrl"));
             let has_secret_str = py.imports.iter().any(|imp| {
-                imp.names.iter().any(|n| n == "SecretStr" || n == "SecretBytes")
+                imp.names
+                    .iter()
+                    .any(|n| n == "SecretStr" || n == "SecretBytes")
             });
 
             // Look for field assignments that might need validators
@@ -90,7 +97,8 @@ impl Rule for PydanticMissingValidatorsRule {
                         description: Some(
                             "Field appears to store an email address but uses plain str type. \
                              Use pydantic.EmailStr for automatic email validation, or add a \
-                             custom validator.".to_string()
+                             custom validator."
+                                .to_string(),
                         ),
                         kind: FindingKind::AntiPattern,
                         severity: Severity::Low,
@@ -100,9 +108,9 @@ impl Rule for PydanticMissingValidatorsRule {
                         file_path: py.path.clone(),
                         line: Some(assign.location.range.start_line + 1),
                         column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_email_validator_fix_preview()),
                         tags: vec![
@@ -115,7 +123,9 @@ impl Rule for PydanticMissingValidatorsRule {
                 }
 
                 // Check for URL fields without HttpUrl
-                if (target_lower.contains("url") || target_lower.contains("link") || target_lower.contains("href"))
+                if (target_lower.contains("url")
+                    || target_lower.contains("link")
+                    || target_lower.contains("href"))
                     && type_hint.contains("str")
                     && !type_hint.contains("httpurl")
                     && !type_hint.contains("anyurl")
@@ -127,7 +137,8 @@ impl Rule for PydanticMissingValidatorsRule {
                         description: Some(
                             "Field appears to store a URL but uses plain str type. \
                              Use pydantic.HttpUrl for automatic URL validation, or add a \
-                             custom validator.".to_string()
+                             custom validator."
+                                .to_string(),
                         ),
                         kind: FindingKind::AntiPattern,
                         severity: Severity::Low,
@@ -137,9 +148,9 @@ impl Rule for PydanticMissingValidatorsRule {
                         file_path: py.path.clone(),
                         line: Some(assign.location.range.start_line + 1),
                         column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_url_validator_fix_preview()),
                         tags: vec![
@@ -152,8 +163,8 @@ impl Rule for PydanticMissingValidatorsRule {
                 }
 
                 // Check for password/secret fields without SecretStr
-                if (target_lower.contains("password") 
-                    || target_lower.contains("secret") 
+                if (target_lower.contains("password")
+                    || target_lower.contains("secret")
                     || target_lower.contains("token")
                     || target_lower.contains("api_key")
                     || target_lower.contains("apikey"))
@@ -167,7 +178,8 @@ impl Rule for PydanticMissingValidatorsRule {
                         description: Some(
                             "Field appears to store sensitive data but uses plain str type. \
                              Use pydantic.SecretStr to prevent accidental logging or exposure \
-                             of sensitive values.".to_string()
+                             of sensitive values."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -177,9 +189,9 @@ impl Rule for PydanticMissingValidatorsRule {
                         file_path: py.path.clone(),
                         line: Some(assign.location.range.start_line + 1),
                         column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_secret_validator_fix_preview()),
                         tags: vec![
@@ -193,7 +205,9 @@ impl Rule for PydanticMissingValidatorsRule {
                 }
 
                 // Check for phone number fields
-                if (target_lower.contains("phone") || target_lower.contains("mobile") || target_lower.contains("tel"))
+                if (target_lower.contains("phone")
+                    || target_lower.contains("mobile")
+                    || target_lower.contains("tel"))
                     && type_hint.contains("str")
                 {
                     findings.push(RuleFinding {
@@ -202,7 +216,8 @@ impl Rule for PydanticMissingValidatorsRule {
                         description: Some(
                             "Field appears to store a phone number but has no validation. \
                              Add a custom validator or use a library like phonenumbers for \
-                             proper phone number validation.".to_string()
+                             proper phone number validation."
+                                .to_string(),
                         ),
                         kind: FindingKind::AntiPattern,
                         severity: Severity::Low,
@@ -212,9 +227,9 @@ impl Rule for PydanticMissingValidatorsRule {
                         file_path: py.path.clone(),
                         line: Some(assign.location.range.start_line + 1),
                         column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_phone_validator_fix_preview()),
                         tags: vec![
@@ -272,7 +287,8 @@ class UserWithLibrary(BaseModel):
             email_info = validate_email(v, check_deliverability=False)
             return email_info.normalized
         except EmailNotValidError as e:
-            raise ValueError(str(e))"#.to_string()
+            raise ValueError(str(e))"#
+        .to_string()
 }
 
 /// Generate fix preview for URL validation.
@@ -317,7 +333,8 @@ class StrictUrl(BaseModel):
         pattern = r'^https?://[^\s/$.?#].[^\s]*$'
         if not re.match(pattern, v):
             raise ValueError('Invalid URL format')
-        return v"#.to_string()
+        return v"#
+        .to_string()
 }
 
 /// Generate fix preview for secret/password validation.
@@ -362,7 +379,8 @@ class Settings(BaseSettings):
     class Config:
         env_file = '.env'
 
-# The secret values won't be exposed in logs or error messages"#.to_string()
+# The secret values won't be exposed in logs or error messages"#
+        .to_string()
 }
 
 /// Generate fix preview for phone number validation.
@@ -422,7 +440,8 @@ def validate_phone(v: str) -> str:
 PhoneNumber = Annotated[str, BeforeValidator(validate_phone)]
 
 class ContactWithType(BaseModel):
-    phone: PhoneNumber"#.to_string()
+    phone: PhoneNumber"#
+        .to_string()
 }
 
 #[cfg(test)]

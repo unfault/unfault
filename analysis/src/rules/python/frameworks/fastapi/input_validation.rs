@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -84,10 +84,7 @@ impl Rule for FastApiInputValidationRule {
             // Check POST, PUT, PATCH routes for proper input validation
             for route in &fastapi.routes {
                 // Only check routes that typically accept request bodies
-                let needs_body = matches!(
-                    route.http_method.as_str(),
-                    "POST" | "PUT" | "PATCH"
-                );
+                let needs_body = matches!(route.http_method.as_str(), "POST" | "PUT" | "PATCH");
 
                 if !needs_body {
                     continue;
@@ -107,14 +104,14 @@ impl Rule for FastApiInputValidationRule {
                 //
                 // Parameters with FastAPI special types (Path, Query, Depends, etc.) are not body params.
                 // Parameters with Pydantic model-like types (capitalized names) are properly validated.
-                
+
                 let bad_body_param = func.params.iter().find(|param| {
                     // Skip common non-body parameters
                     let name = param.name.as_str();
                     if name == "self" || name == "cls" || name == "request" {
                         return false;
                     }
-                    
+
                     match &param.type_annotation {
                         None => {
                             // Untyped parameter - could be a body parameter
@@ -151,7 +148,7 @@ impl Rule for FastApiInputValidationRule {
                 };
 
                 let line = route.location.range.start_line + 1;
-                
+
                 // Generate a patch suggesting Pydantic model usage
                 let patch = generate_pydantic_suggestion_patch(
                     *file_id,
@@ -227,7 +224,7 @@ fn generate_pydantic_suggestion_patch(
     line: u32,
 ) -> FilePatch {
     let model_name = format!("{}Request", capitalize_first(handler_name));
-    
+
     let suggestion = format!(
         "# TODO: Define a Pydantic model for request validation:\n\
          # from pydantic import BaseModel\n\
@@ -239,11 +236,7 @@ fn generate_pydantic_suggestion_patch(
          # Then update the {} {} endpoint to use it:\n\
          # async def {}(data: {}):\n\
          #     ...\n",
-        model_name,
-        http_method,
-        path,
-        handler_name,
-        model_name
+        model_name, http_method, path, handler_name, model_name
     );
 
     FilePatch {
@@ -268,7 +261,7 @@ fn generate_pydantic_suggestion_patch(
 fn is_bad_body_type(type_str: &str) -> bool {
     // Normalize the type string
     let normalized = type_str.trim();
-    
+
     // Check for dict variants
     if normalized == "dict"
         || normalized == "Dict"
@@ -279,12 +272,12 @@ fn is_bad_body_type(type_str: &str) -> bool {
     {
         return true;
     }
-    
+
     // Check for Any
     if normalized == "Any" || normalized == "typing.Any" {
         return true;
     }
-    
+
     // All other types are considered OK (Pydantic models, custom types, etc.)
     false
 }
@@ -397,7 +390,11 @@ async def update_item(item_id: int, item: dict):
         let rule = FastApiInputValidationRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert_eq!(findings.len(), 2, "Should detect both POST and PUT endpoints");
+        assert_eq!(
+            findings.len(),
+            2,
+            "Should detect both POST and PUT endpoints"
+        );
     }
 
     // ==================== Negative Tests (Should Not Detect) ====================
@@ -481,7 +478,10 @@ async def create_item(item: ItemCreate):
         let rule = FastApiInputValidationRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(findings.is_empty(), "Should not flag endpoints with Pydantic models");
+        assert!(
+            findings.is_empty(),
+            "Should not flag endpoints with Pydantic models"
+        );
     }
 
     #[tokio::test]
@@ -499,7 +499,10 @@ async def create_item(item: SessionRunRequest):
         let rule = FastApiInputValidationRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(findings.is_empty(), "Should not flag endpoints with custom model types");
+        assert!(
+            findings.is_empty(),
+            "Should not flag endpoints with custom model types"
+        );
     }
 
     #[tokio::test]
@@ -517,7 +520,10 @@ async def create_item(user = Depends(get_user)):
         let rule = FastApiInputValidationRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(findings.is_empty(), "Should not flag endpoints using Depends");
+        assert!(
+            findings.is_empty(),
+            "Should not flag endpoints using Depends"
+        );
     }
 
     #[tokio::test]
@@ -578,7 +584,7 @@ async def create_item(item: dict):
 
         assert!(!findings.is_empty());
         assert!(findings[0].patch.is_some(), "Should generate a patch");
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         assert!(!patch.hunks.is_empty());
         assert!(patch.hunks[0].replacement.contains("Pydantic"));
@@ -601,7 +607,7 @@ async def create_item(item: dict):
 
         assert!(!findings.is_empty());
         assert!(findings[0].fix_preview.is_some());
-        
+
         let preview = findings[0].fix_preview.as_ref().unwrap();
         assert!(preview.contains("BaseModel"));
         assert!(preview.contains("class"));
@@ -719,10 +725,10 @@ async def update_user(user_id: int, user: dict):
             language: Language::Python,
             content: src2.to_string(),
         };
-        
+
         let parsed1 = parse_python_file(FileId(1), &sf1).unwrap();
         let parsed2 = parse_python_file(FileId(2), &sf2).unwrap();
-        
+
         let mut sem1 = PyFileSemantics::from_parsed(&parsed1);
         let mut sem2 = PyFileSemantics::from_parsed(&parsed2);
         sem1.analyze_frameworks(&parsed1).unwrap();

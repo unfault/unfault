@@ -11,10 +11,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::applicability_defaults::sql_injection;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -76,7 +76,8 @@ impl Rule for GinMissingValidationRule {
                     || call.function_call.callee_expr.contains("BindQuery")
                     || call.function_call.callee_expr.contains("BindUri")
                     || call.function_call.callee_expr.contains("BindHeader")
-                    || (call.function_call.callee_expr.ends_with(".Bind") && !call.function_call.callee_expr.contains("Should"));
+                    || (call.function_call.callee_expr.ends_with(".Bind")
+                        && !call.function_call.callee_expr.contains("Should"));
 
                 if !is_bind_call {
                     continue;
@@ -88,7 +89,11 @@ impl Rule for GinMissingValidationRule {
                 // Flag bind calls for validation review
                 let title = format!(
                     "Gin {} - ensure struct has validation tags",
-                    call.function_call.callee_expr.split('.').last().unwrap_or("Bind")
+                    call.function_call
+                        .callee_expr
+                        .split('.')
+                        .last()
+                        .unwrap_or("Bind")
                 );
 
                 let description = format!(
@@ -121,7 +126,7 @@ impl Rule for GinMissingValidationRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: None, // Struct modification needed
                     fix_preview: Some(
                         "// Add validation tags to your struct:\n\
@@ -218,7 +223,11 @@ impl Rule for GinUntrustedInputRule {
                 // Flag Gin input usage for security review
                 let title = format!(
                     "Gin input `{}` - validate before use in sensitive operations",
-                    call.function_call.callee_expr.split('.').last().unwrap_or("input")
+                    call.function_call
+                        .callee_expr
+                        .split('.')
+                        .last()
+                        .unwrap_or("input")
                 );
 
                 let description = format!(
@@ -250,7 +259,7 @@ impl Rule for GinUntrustedInputRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: None, // Complex flow analysis
                     fix_preview: Some(format!(
                         "// Validate input before use:\n\
@@ -289,10 +298,7 @@ fn is_dangerous_sink(sink: &str) -> Option<String> {
     }
 
     // Command execution sinks
-    if sink.contains("exec.Command")
-        || sink.contains("os.exec")
-        || sink.contains("syscall.Exec")
-    {
+    if sink.contains("exec.Command") || sink.contains("os.exec") || sink.contains("syscall.Exec") {
         return Some("command execution".to_string());
     }
 
@@ -307,9 +313,7 @@ fn is_dangerous_sink(sink: &str) -> Option<String> {
     }
 
     // Template rendering
-    if sink.contains("template.HTML")
-        || sink.contains("c.HTML")
-    {
+    if sink.contains("template.HTML") || sink.contains("c.HTML") {
         return Some("template rendering".to_string());
     }
 
@@ -333,8 +337,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

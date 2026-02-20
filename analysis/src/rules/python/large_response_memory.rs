@@ -9,9 +9,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -129,12 +129,9 @@ impl Rule for PythonLargeResponseMemoryRule {
                     // .read() without arguments reads entire file
                     if !callee.contains("readline") && !callee.contains("readlines") {
                         // Generate actual fix: .read() → .read(8192)
-                        let patch = generate_read_chunked_patch(
-                            *file_id,
-                            call.start_byte,
-                            call.end_byte,
-                        );
-                        
+                        let patch =
+                            generate_read_chunked_patch(*file_id, call.start_byte, call.end_byte);
+
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "File read entirely into memory".to_string(),
@@ -179,12 +176,16 @@ impl Rule for PythonLargeResponseMemoryRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column as u32),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(JSON_FILE_FIX.to_string()),
-                        tags: vec!["memory".to_string(), "json".to_string(), "streaming".to_string()],
+                        tags: vec![
+                            "memory".to_string(),
+                            "json".to_string(),
+                            "streaming".to_string(),
+                        ],
                     });
                 }
 
@@ -226,7 +227,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                             callee,
                             args,
                         );
-                        
+
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Large CSV file read entirely into memory".to_string(),
@@ -263,7 +264,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                             callee,
                             args,
                         );
-                        
+
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Large JSON file read entirely into memory".to_string(),
@@ -386,11 +387,7 @@ result = df.groupby('column').sum().compute()
 # - Using pyarrow: engine='pyarrow'"#;
 
 /// Generate patch to add chunk size to .read() call
-fn generate_read_chunked_patch(
-    file_id: FileId,
-    _start_byte: usize,
-    _end_byte: usize,
-) -> FilePatch {
+fn generate_read_chunked_patch(file_id: FileId, _start_byte: usize, _end_byte: usize) -> FilePatch {
     // The call pattern `.read()` is typically part of a method chain (e.g., `f.read()`)
     // We can't easily replace just the `.read()` part without more context
     // So we provide a helpful comment with the recommended fix pattern
@@ -415,13 +412,13 @@ fn generate_pandas_chunksize_patch(
 ) -> FilePatch {
     // Parse args to insert chunksize parameter
     let args_inner = args.trim().trim_start_matches('(').trim_end_matches(')');
-    
+
     let new_call = if args_inner.is_empty() {
         format!("{}(chunksize=10000)", callee)
     } else {
         format!("{}({}, chunksize=10000)", callee, args_inner)
     };
-    
+
     FilePatch {
         file_id,
         hunks: vec![PatchHunk {

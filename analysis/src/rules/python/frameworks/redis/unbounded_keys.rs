@@ -101,12 +101,14 @@ impl Rule for RedisUnboundedKeysRule {
                 if has_timestamp_key {
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
-                        title: "Redis key with timestamp/UUID may cause unbounded growth".to_string(),
+                        title: "Redis key with timestamp/UUID may cause unbounded growth"
+                            .to_string(),
                         description: Some(
                             "Redis key appears to include a timestamp or UUID, which creates \
                              a new key for each operation. This can lead to unbounded key growth \
                              and memory exhaustion. Consider using fixed key patterns with TTL, \
-                             or use sorted sets for time-series data.".to_string()
+                             or use sorted sets for time-series data."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::High,
@@ -116,9 +118,9 @@ impl Rule for RedisUnboundedKeysRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_timestamp_key_fix_preview()),
                         tags: vec![
@@ -147,7 +149,8 @@ impl Rule for RedisUnboundedKeysRule {
                             "Redis key appears to include dynamic user input. If not properly \
                              bounded, this can lead to key explosion. Ensure keys are validated, \
                              normalized, and consider using hash slots or key prefixes with \
-                             cleanup policies.".to_string()
+                             cleanup policies."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -157,16 +160,12 @@ impl Rule for RedisUnboundedKeysRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_dynamic_key_fix_preview()),
-                        tags: vec![
-                            "python".into(),
-                            "redis".into(),
-                            "dynamic-key".into(),
-                        ],
+                        tags: vec!["python".into(), "redis".into(), "dynamic-key".into()],
                     });
                 }
 
@@ -191,7 +190,8 @@ impl Rule for RedisUnboundedKeysRule {
                             description: Some(
                                 "Redis list/set/sorted set operation without visible size limit. \
                                  Collections can grow unbounded. Use LTRIM for lists, or \
-                                 ZREMRANGEBYRANK for sorted sets to maintain a maximum size.".to_string()
+                                 ZREMRANGEBYRANK for sorted sets to maintain a maximum size."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::Medium,
@@ -201,9 +201,9 @@ impl Rule for RedisUnboundedKeysRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(generate_collection_limit_fix_preview()),
                             tags: vec![
@@ -219,14 +219,16 @@ impl Rule for RedisUnboundedKeysRule {
 
             // Check for KEYS command usage (dangerous in production)
             for call in &py.calls {
-                if call.function_call.callee_expr.ends_with(".keys") && call.args_repr.contains("*") {
+                if call.function_call.callee_expr.ends_with(".keys") && call.args_repr.contains("*")
+                {
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "Redis KEYS command with wildcard".to_string(),
                         description: Some(
                             "Redis KEYS command with wildcard pattern is dangerous in production. \
                              It blocks the server while scanning all keys. Use SCAN instead for \
-                             iterating over keys.".to_string()
+                             iterating over keys."
+                                .to_string(),
                         ),
                         kind: FindingKind::PerformanceSmell,
                         severity: Severity::High,
@@ -236,9 +238,9 @@ impl Rule for RedisUnboundedKeysRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_scan_fix_preview()),
                         tags: vec![
@@ -295,7 +297,8 @@ r.xadd("events_stream", {"data": json.dumps(data)}, maxlen=10000)
 
 # For session data, use fixed session IDs with TTL:
 session_id = generate_session_id()  # Fixed per session
-r.setex(f"session:{session_id}", 3600, json.dumps(session_data))"#.to_string()
+r.setex(f"session:{session_id}", 3600, json.dumps(session_data))"#
+        .to_string()
 }
 
 /// Generate fix preview for dynamic keys.
@@ -342,7 +345,8 @@ if r.scard("cached_users") < MAX_CACHED_USERS:
 def cleanup_old_keys(pattern: str, max_age: int):
     for key in r.scan_iter(pattern):
         if r.ttl(key) == -1:  # No TTL set
-            r.expire(key, max_age)"#.to_string()
+            r.expire(key, max_age)"#
+        .to_string()
 }
 
 /// Generate fix preview for collection limits.
@@ -399,7 +403,8 @@ def check_collection_sizes():
         else:
             continue
         if size > 10000:
-            print(f"Warning: {key} has {size} elements")"#.to_string()
+            print(f"Warning: {key} has {size} elements")"#
+        .to_string()
 }
 
 /// Generate fix preview for SCAN vs KEYS.
@@ -455,7 +460,8 @@ for member in r.sscan_iter("myset"):
 
 # For sorted set, use ZSCAN:
 for member, score in r.zscan_iter("myzset"):
-    pass"#.to_string()
+    pass"#
+        .to_string()
 }
 
 #[cfg(test)]

@@ -45,10 +45,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::{RustFileSemantics, VariableBinding};
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::{RustFileSemantics, VariableBinding};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -156,29 +156,25 @@ impl Rule for RustCloneInLoopRule {
                         consumed_var,
                         accessed_fields,
                         consuming_binding,
-                    } => {
-                        Some(create_clone_to_consume_finding(
-                            *file_id,
-                            &rust.path,
-                            line,
-                            call.function_call.location.column,
-                            consumed_var,
-                            accessed_fields,
-                            consuming_binding,
-                            self.id(),
-                        ))
-                    }
-                    ClonePattern::LoopInvariant => {
-                        Some(create_loop_invariant_finding(
-                            *file_id,
-                            &rust.path,
-                            line,
-                            call.function_call.location.column,
-                            &cloned_expr,
-                            call.function_name.as_deref(),
-                            self.id(),
-                        ))
-                    }
+                    } => Some(create_clone_to_consume_finding(
+                        *file_id,
+                        &rust.path,
+                        line,
+                        call.function_call.location.column,
+                        consumed_var,
+                        accessed_fields,
+                        consuming_binding,
+                        self.id(),
+                    )),
+                    ClonePattern::LoopInvariant => Some(create_loop_invariant_finding(
+                        *file_id,
+                        &rust.path,
+                        line,
+                        call.function_call.location.column,
+                        &cloned_expr,
+                        call.function_name.as_deref(),
+                        self.id(),
+                    )),
                     ClonePattern::Generic => {
                         // Skip iteration-dependent clones - they are necessary
                         // and there's no meaningful fix we can suggest
@@ -340,9 +336,7 @@ fn create_clone_to_consume_finding(
     let fixed_init = binding
         .init_expr
         .as_ref()
-        .map(|expr| {
-            expr.replace(&format!("{}.clone()", consumed_var), consumed_var)
-        })
+        .map(|expr| expr.replace(&format!("{}.clone()", consumed_var), consumed_var))
         .unwrap_or_default();
 
     let description = format!(
@@ -401,7 +395,7 @@ fn create_clone_to_consume_finding(
         column: Some(column),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -593,7 +587,7 @@ fn create_loop_invariant_finding(
         column: Some(column),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -622,8 +616,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -701,7 +695,10 @@ fn process(data: String) {
     #[test]
     fn extract_cloned_expression_basic() {
         assert_eq!(extract_cloned_expression("data.clone()"), "data");
-        assert_eq!(extract_cloned_expression("self.field.clone()"), "self.field");
+        assert_eq!(
+            extract_cloned_expression("self.field.clone()"),
+            "self.field"
+        );
         assert_eq!(extract_cloned_expression("foo"), "foo");
     }
 
@@ -825,10 +822,7 @@ fn process(items: Vec<String>) {
             .filter(|b| b.is_loop_variable)
             .collect();
 
-        assert!(
-            !loop_vars.is_empty(),
-            "Should detect loop variable"
-        );
+        assert!(!loop_vars.is_empty(), "Should detect loop variable");
     }
 
     // ==================== Clone-to-Consume Pattern Tests ====================
@@ -898,10 +892,7 @@ fn process(items: &[i32], data: String) {
 
         let findings = rule.evaluate(&semantics, None).await;
 
-        assert!(
-            !findings.is_empty(),
-            "Should detect loop-invariant clone"
-        );
+        assert!(!findings.is_empty(), "Should detect loop-invariant clone");
 
         // The finding should be about loop-invariant clone
         let finding = &findings[0];
@@ -933,10 +924,7 @@ fn test_something() {
 
         let findings = rule.evaluate(&semantics, None).await;
 
-        assert!(
-            findings.is_empty(),
-            "Should skip clone in test function"
-        );
+        assert!(findings.is_empty(), "Should skip clone in test function");
     }
 
     #[tokio::test]
@@ -1051,14 +1039,8 @@ fn process(items: &[i32], data: String) {
             extract_cloned_expression("some_struct.nested.field.clone()"),
             "some_struct.nested.field"
         );
-        assert_eq!(
-            extract_cloned_expression("vec[0].clone()"),
-            "vec[0]"
-        );
-        assert_eq!(
-            extract_cloned_expression("(*ptr).clone()"),
-            "(*ptr)"
-        );
+        assert_eq!(extract_cloned_expression("vec[0].clone()"), "vec[0]");
+        assert_eq!(extract_cloned_expression("(*ptr).clone()"), "(*ptr)");
     }
 
     #[test]

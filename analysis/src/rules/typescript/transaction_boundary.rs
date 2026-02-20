@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -56,7 +56,10 @@ impl Rule for TypescriptTransactionBoundaryRule {
             // Check for ORM usage - Prisma, TypeORM, etc.
             let has_prisma = ts.imports.iter().any(|imp| imp.module.contains("prisma"));
             let has_typeorm = ts.imports.iter().any(|imp| imp.module.contains("typeorm"));
-            let has_sequelize = ts.imports.iter().any(|imp| imp.module.contains("sequelize"));
+            let has_sequelize = ts
+                .imports
+                .iter()
+                .any(|imp| imp.module.contains("sequelize"));
 
             if !has_prisma && !has_typeorm && !has_sequelize {
                 continue;
@@ -67,7 +70,7 @@ impl Rule for TypescriptTransactionBoundaryRule {
                 // Check the function body for multiple write operations
                 // This is a heuristic based on the function name patterns
                 let func_name_lower = func.name.to_lowercase();
-                
+
                 // Functions that typically need transactions
                 let needs_transaction = func_name_lower.contains("transfer")
                     || func_name_lower.contains("exchange")
@@ -98,7 +101,10 @@ impl Rule for TypescriptTransactionBoundaryRule {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: format!("// TODO: Wrap operations in transaction:\n// {}\n", wrapper),
+                        replacement: format!(
+                            "// TODO: Wrap operations in transaction:\n// {}\n",
+                            wrapper
+                        ),
                     }],
                 };
 

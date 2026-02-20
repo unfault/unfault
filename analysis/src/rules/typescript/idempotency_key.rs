@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -56,7 +56,7 @@ impl Rule for TypescriptMissingIdempotencyKeyRule {
             // Check for state-changing HTTP calls
             for http_call in &ts.http_calls {
                 let method_lower = http_call.method.to_lowercase();
-                
+
                 // Only check POST, PUT, PATCH (state-changing)
                 if method_lower != "post" && method_lower != "put" && method_lower != "patch" {
                     continue;
@@ -84,7 +84,8 @@ impl Rule for TypescriptMissingIdempotencyKeyRule {
                     description: Some(format!(
                         "HTTP {} call at line {} should include an idempotency key to ensure \
                          safe retries and prevent duplicate operations.",
-                        method_lower.to_uppercase(), line
+                        method_lower.to_uppercase(),
+                        line
                     )),
                     kind: FindingKind::ReliabilityRisk,
                     severity: Severity::Low,
@@ -96,7 +97,7 @@ impl Rule for TypescriptMissingIdempotencyKeyRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Add Idempotency-Key header".to_string()),
                     tags: vec!["reliability".into(), "idempotency".into(), "api".into()],

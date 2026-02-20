@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -62,10 +62,7 @@ impl Rule for TypescriptAsyncWithoutErrorHandlingRule {
             // Check async functions without try-catch
             for func in &ts.functions {
                 if func.is_async && !func.has_try_catch {
-                    let title = format!(
-                        "Async function `{}` lacks error handling",
-                        func.name
-                    );
+                    let title = format!("Async function `{}` lacks error handling", func.name);
 
                     let description = format!(
                         "The async function `{}` doesn't have a try-catch block. \
@@ -94,9 +91,9 @@ impl Rule for TypescriptAsyncWithoutErrorHandlingRule {
                         file_path: ts.path.clone(),
                         line: Some(func.location.range.start_line + 1),
                         column: Some(func.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![

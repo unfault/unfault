@@ -9,9 +9,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -142,7 +142,7 @@ impl Rule for GoUnhandledErrorGoroutineRule {
                     column: Some(goroutine.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -167,9 +167,12 @@ fn generate_error_handling_patch(goroutine: &GoroutineSpawn, file_id: FileId) ->
     let func_desc = if goroutine.is_anonymous {
         "anonymous function".to_string()
     } else {
-        goroutine.function_name.clone().unwrap_or_else(|| "goroutine".to_string())
+        goroutine
+            .function_name
+            .clone()
+            .unwrap_or_else(|| "goroutine".to_string())
     };
-    
+
     let replacement = format!(
         "go func() {{\n\
          \t\tdefer func() {{\n\
@@ -200,8 +203,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -315,8 +318,14 @@ func startWorker() {
         let findings = rule.evaluate(&semantics, None).await;
         for finding in &findings {
             if finding.rule_id == "go.unhandled_error_goroutine" {
-                assert!(finding.description.as_ref().map(|d| d.contains("error")).unwrap_or(false) 
-                    || finding.title.contains("error"));
+                assert!(
+                    finding
+                        .description
+                        .as_ref()
+                        .map(|d| d.contains("error"))
+                        .unwrap_or(false)
+                        || finding.title.contains("error")
+                );
             }
         }
     }

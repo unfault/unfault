@@ -9,9 +9,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -98,8 +98,7 @@ impl Rule for GoContextBackgroundRule {
                      - gRPC: context passed as first argument\n\
                      - Gin: `c.Request.Context()`\n\
                      - Echo: `c.Request().Context()`",
-                    ctx_usage.function_name,
-                    ctx_usage.context_type
+                    ctx_usage.function_name, ctx_usage.context_type
                 );
 
                 let patch = generate_context_replacement_patch(ctx_usage, *file_id);
@@ -190,8 +189,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

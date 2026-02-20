@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -122,7 +122,7 @@ impl Rule for TypescriptUnboundedCacheRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Use LRU cache with max size and TTL".to_string()),
                     tags: vec!["performance".into(), "memory".into(), "cache".into()],
@@ -180,7 +180,7 @@ function setValue(key: string, value: number): void {
         let rule = TypescriptUnboundedCacheRule::new();
         let (file_id, sem) = parse_and_build_semantics(source);
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
-        
+
         // Should detect the unbounded Map (no .delete or .clear calls)
         assert_eq!(findings.len(), 1);
         assert!(findings[0].title.contains("Unbounded"));
@@ -207,7 +207,7 @@ function debounce(key: string) {
         let rule = TypescriptUnboundedCacheRule::new();
         let (file_id, sem) = parse_and_build_semantics(source);
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
-        
+
         // Should NOT detect because .delete is called
         assert_eq!(findings.len(), 0, "Should not flag Map with cleanup logic");
     }
@@ -224,7 +224,7 @@ function clearCache(): void {
         let rule = TypescriptUnboundedCacheRule::new();
         let (file_id, sem) = parse_and_build_semantics(source);
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
-        
+
         // Should NOT detect because .clear is called
         assert_eq!(findings.len(), 0, "Should not flag Map with .clear() call");
     }

@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingKind, Severity};
@@ -121,12 +121,13 @@ impl Rule for RustUnboundedRetryRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(FilePatch {
                         file_id: *file_id,
                         hunks: vec![PatchHunk {
                             range: PatchRange::InsertBeforeLine { line },
-                            replacement: "// TODO: Use backoff crate for bounded retries".to_string(),
+                            replacement: "// TODO: Use backoff crate for bounded retries"
+                                .to_string(),
                         }],
                     }),
                     fix_preview: Some("use backoff::ExponentialBackoff;".to_string()),

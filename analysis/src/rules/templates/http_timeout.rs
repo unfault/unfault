@@ -281,8 +281,8 @@ pub struct PatchSuggestion {
 mod tests {
     use super::*;
     use crate::parse::ast::FileId;
-    use crate::semantics::common::http::{HttpCallBuilder, HttpMethod};
     use crate::semantics::common::CommonLocation;
+    use crate::semantics::common::http::{HttpCallBuilder, HttpMethod};
 
     fn make_location() -> CommonLocation {
         CommonLocation {

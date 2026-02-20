@@ -29,10 +29,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::ResultIgnoreStyle;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::ResultIgnoreStyle;
 use crate::types::context::Dimension;
 use crate::types::finding::{
     Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage,
@@ -72,7 +72,8 @@ impl Rule for RustIgnoredResultRule {
             benefits: vec![Benefit::Correctness, Benefit::Reliability],
             prerequisites: vec![],
             notes: Some(
-                "Ignoring errors hides failures; handle or explicitly document why it is safe.".to_string(),
+                "Ignoring errors hides failures; handle or explicitly document why it is safe."
+                    .to_string(),
             ),
         })
     }
@@ -121,7 +122,7 @@ impl Rule for RustIgnoredResultRule {
                 }
 
                 let line = result_ignore.location.range.start_line + 1;
-                
+
                 let (title, severity) = match result_ignore.ignore_style {
                     ResultIgnoreStyle::LetUnderscore => (
                         "Result explicitly discarded with `let _ = ...`".to_string(),
@@ -166,11 +167,16 @@ impl Rule for RustIgnoredResultRule {
                         ```",
                     result_ignore.expr_text,
                     line,
-                    result_ignore.function_name.as_deref().unwrap_or("<unknown>"),
+                    result_ignore
+                        .function_name
+                        .as_deref()
+                        .unwrap_or("<unknown>"),
                     match result_ignore.ignore_style {
-                        ResultIgnoreStyle::LetUnderscore => "explicitly discarded with `let _ = ...`",
+                        ResultIgnoreStyle::LetUnderscore =>
+                            "explicitly discarded with `let _ = ...`",
                         ResultIgnoreStyle::Statement => "possibly ignored as a statement",
-                        ResultIgnoreStyle::AssignUnderscore => "explicitly discarded with `_ = ...`",
+                        ResultIgnoreStyle::AssignUnderscore =>
+                            "explicitly discarded with `_ = ...`",
                     }
                 );
 
@@ -217,7 +223,8 @@ impl Rule for RustIgnoredResultRule {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Handle this Result/Option instead of ignoring".to_string(),
+                        replacement: "// TODO: Handle this Result/Option instead of ignoring"
+                            .to_string(),
                     }],
                 };
 
@@ -227,7 +234,7 @@ impl Rule for RustIgnoredResultRule {
                     description: Some(description),
                     kind: FindingKind::BehaviorThreat,
                     severity,
-                    confidence: 0.75,  // Lower confidence since we're using heuristics
+                    confidence: 0.75, // Lower confidence since we're using heuristics
                     dimension: Dimension::Correctness,
                     file_id: *file_id,
                     file_path: rust.path.clone(),
@@ -235,7 +242,7 @@ impl Rule for RustIgnoredResultRule {
                     column: Some(result_ignore.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -257,8 +264,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -346,9 +353,11 @@ fn process() -> Result<(), Error> {
             .filter(|f| f.rule_id == "rust.ignored_result")
             .collect();
         assert!(
-            ignored_findings.is_empty() || ignored_findings.iter().all(|f| 
-                !f.description.as_ref().map_or(false, |d| d.contains("write_all"))
-            ),
+            ignored_findings.is_empty()
+                || ignored_findings.iter().all(|f| !f
+                    .description
+                    .as_ref()
+                    .map_or(false, |d| d.contains("write_all"))),
             "Should not flag proper error handling with ?"
         );
     }

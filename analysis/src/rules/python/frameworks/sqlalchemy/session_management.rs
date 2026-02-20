@@ -56,7 +56,10 @@ impl Rule for SqlAlchemySessionManagementRule {
             // Check for SQLAlchemy imports
             let has_sqlalchemy = py.imports.iter().any(|imp| {
                 imp.module.contains("sqlalchemy")
-                    || imp.names.iter().any(|n| n == "Session" || n == "sessionmaker" || n == "create_engine")
+                    || imp
+                        .names
+                        .iter()
+                        .any(|n| n == "Session" || n == "sessionmaker" || n == "create_engine")
             });
 
             if !has_sqlalchemy {
@@ -77,35 +80,35 @@ impl Rule for SqlAlchemySessionManagementRule {
                 // Check if it's used with a context manager (with statement)
                 // We can't easily detect this from calls alone, so we check assignments
                 let is_in_with_context = py.assignments.iter().any(|a| {
-                    a.value_repr.contains(&call.function_call.callee_expr) && 
-                    (a.value_repr.contains("with") || a.target.starts_with("_"))
+                    a.value_repr.contains(&call.function_call.callee_expr)
+                        && (a.value_repr.contains("with") || a.target.starts_with("_"))
                 });
 
                 // Check if there's a corresponding close() call
                 let has_close_call = py.calls.iter().any(|c| {
-                    c.function_call.callee_expr.ends_with(".close") || c.function_call.callee_expr.ends_with(".remove")
+                    c.function_call.callee_expr.ends_with(".close")
+                        || c.function_call.callee_expr.ends_with(".remove")
                 });
 
                 // Check for try/finally pattern
                 let has_finally_cleanup = py.calls.iter().any(|c| {
-                    c.function_call.callee_expr.contains("close") || c.function_call.callee_expr.contains("remove")
+                    c.function_call.callee_expr.contains("close")
+                        || c.function_call.callee_expr.contains("remove")
                 });
 
                 if !is_in_with_context && !has_close_call && !has_finally_cleanup {
                     let title = "SQLAlchemy session may not be properly closed".to_string();
 
-                    let description = 
+                    let description =
                         "A SQLAlchemy Session is created but there's no visible close() call \
                          or context manager usage. Unclosed sessions can lead to connection \
                          leaks, exhausting the database connection pool. Use a context manager \
-                         (with statement) or ensure sessions are closed in a finally block.".to_string();
+                         (with statement) or ensure sessions are closed in a finally block."
+                            .to_string();
 
                     let fix_preview = generate_fix_preview();
 
-                    let patch = generate_session_patch(
-                        *file_id,
-                        call.function_call.location.line,
-                    );
+                    let patch = generate_session_patch(*file_id, call.function_call.location.line);
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
@@ -119,9 +122,9 @@ impl Rule for SqlAlchemySessionManagementRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -137,19 +140,24 @@ impl Rule for SqlAlchemySessionManagementRule {
 
             // Also check for engine.connect() without context manager
             for call in &py.calls {
-                if call.function_call.callee_expr.ends_with(".connect") || call.function_call.callee_expr.ends_with(".begin") {
+                if call.function_call.callee_expr.ends_with(".connect")
+                    || call.function_call.callee_expr.ends_with(".begin")
+                {
                     // Check if there's a corresponding close
                     let has_close = py.calls.iter().any(|c| {
-                        c.function_call.callee_expr.ends_with(".close") || c.function_call.callee_expr.ends_with(".commit") || c.function_call.callee_expr.ends_with(".rollback")
+                        c.function_call.callee_expr.ends_with(".close")
+                            || c.function_call.callee_expr.ends_with(".commit")
+                            || c.function_call.callee_expr.ends_with(".rollback")
                     });
 
                     if !has_close {
                         let title = "Database connection may not be properly closed".to_string();
 
-                        let description = 
+                        let description =
                             "A database connection is opened but may not be properly closed. \
                              Use a context manager to ensure connections are always returned \
-                             to the pool.".to_string();
+                             to the pool."
+                                .to_string();
 
                         let fix_preview = generate_connection_fix_preview();
 
@@ -165,9 +173,9 @@ impl Rule for SqlAlchemySessionManagementRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -251,7 +259,8 @@ def get_users(db: Session = Depends(get_db)):
 from sqlalchemy.orm import scoped_session
 
 Session = scoped_session(sessionmaker(bind=engine))
-# Call Session.remove() at the end of each request"#.to_string()
+# Call Session.remove() at the end of each request"#
+        .to_string()
 }
 
 /// Generate a fix preview for connection management.
@@ -277,7 +286,8 @@ connection = engine.connect()
 try:
     result = connection.execute(text("SELECT 1"))
 finally:
-    connection.close()  # Always close!"#.to_string()
+    connection.close()  # Always close!"#
+        .to_string()
 }
 
 #[cfg(test)]

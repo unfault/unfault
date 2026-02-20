@@ -60,9 +60,10 @@ impl Rule for FlaskHardcodedSecretKeyRule {
             };
 
             // Check for Flask imports or config files
-            let has_flask = py.imports.iter().any(|imp| {
-                imp.module == "flask" || imp.names.iter().any(|n| n == "Flask")
-            });
+            let has_flask = py
+                .imports
+                .iter()
+                .any(|imp| imp.module == "flask" || imp.names.iter().any(|n| n == "Flask"));
 
             let is_config_file = py.path.contains("config")
                 || py.path.contains("settings")
@@ -76,7 +77,7 @@ impl Rule for FlaskHardcodedSecretKeyRule {
             for assign in &py.assignments {
                 if assign.target == "SECRET_KEY" || assign.target.ends_with("SECRET_KEY") {
                     let value = assign.value_repr.trim();
-                    
+
                     // Check if it's a hardcoded string (not from environment)
                     let is_hardcoded = (value.starts_with('"') || value.starts_with('\''))
                         && !value.contains("os.environ")
@@ -105,12 +106,13 @@ impl Rule for FlaskHardcodedSecretKeyRule {
                             "Flask SECRET_KEY is hardcoded".to_string()
                         };
 
-                        let description = 
+                        let description =
                             "SECRET_KEY is hardcoded in the source code. This key is used to \
                              sign session cookies and other security-sensitive data. If exposed \
                              (e.g., in version control), attackers can forge sessions and \
                              potentially gain unauthorized access. Load SECRET_KEY from \
-                             environment variables or a secure secrets manager.".to_string();
+                             environment variables or a secure secrets manager."
+                                .to_string();
 
                         let fix_preview = generate_fix_preview();
 
@@ -134,9 +136,9 @@ impl Rule for FlaskHardcodedSecretKeyRule {
                             file_path: py.path.clone(),
                             line: Some(assign.location.range.start_line + 1),
                             column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -153,13 +155,15 @@ impl Rule for FlaskHardcodedSecretKeyRule {
 
             // Also check for app.secret_key = "..." pattern via calls
             for call in &py.calls {
-                if call.function_call.callee_expr.contains("secret_key") && call.args_repr.contains('"') {
+                if call.function_call.callee_expr.contains("secret_key")
+                    && call.args_repr.contains('"')
+                {
                     // This might be setting secret_key with a hardcoded value
                     let title = "Flask secret_key may be hardcoded".to_string();
 
-                    let description = 
-                        "A hardcoded string appears to be assigned to secret_key. \
-                         Load secret keys from environment variables instead.".to_string();
+                    let description = "A hardcoded string appears to be assigned to secret_key. \
+                         Load secret keys from environment variables instead."
+                        .to_string();
 
                     let fix_preview = generate_fix_preview();
 
@@ -175,16 +179,12 @@ impl Rule for FlaskHardcodedSecretKeyRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(fix_preview),
-                        tags: vec![
-                            "python".into(),
-                            "flask".into(),
-                            "secret-key".into(),
-                        ],
+                        tags: vec!["python".into(), "flask".into(), "secret-key".into()],
                     });
                 }
             }
@@ -199,21 +199,29 @@ impl Rule for FlaskHardcodedSecretKeyRule {
 }
 
 /// Generate patch for hardcoded SECRET_KEY - adds actual import and replacement code.
-fn generate_secret_key_patch(file_id: FileId, line: u32, imports: &[PyImport], import_insertion_line: u32) -> FilePatch {
+fn generate_secret_key_patch(
+    file_id: FileId,
+    line: u32,
+    imports: &[PyImport],
+    import_insertion_line: u32,
+) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Add os import at the top of the file only if not already imported
     if !has_os_import(imports) {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+            range: PatchRange::InsertBeforeLine {
+                line: import_insertion_line,
+            },
             replacement: "import os\n".to_string(),
         });
     }
-    
+
     // Add the secure replacement before the problematic line
     hunks.push(PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
-        replacement: "SECRET_KEY = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32)\n".to_string(),
+        replacement: "SECRET_KEY = os.environ.get('FLASK_SECRET_KEY') or os.urandom(32)\n"
+            .to_string(),
     });
 
     FilePatch { file_id, hunks }
@@ -255,7 +263,8 @@ app.config['SECRET_KEY'] = secrets['flask_secret_key']
 # - AWS Secrets Manager
 # - HashiCorp Vault
 # - Azure Key Vault
-# - Google Secret Manager"#.to_string()
+# - Google Secret Manager"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -364,6 +373,12 @@ SECRET_KEY = "hardcoded"
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(findings[0].fix_preview.is_some());
-        assert!(findings[0].fix_preview.as_ref().unwrap().contains("environ"));
+        assert!(
+            findings[0]
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("environ")
+        );
     }
 }

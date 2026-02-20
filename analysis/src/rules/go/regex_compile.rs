@@ -9,11 +9,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::go::model::{GoCallSite, GoFileSemantics};
 use crate::semantics::SourceSemantics;
+use crate::semantics::go::model::{GoCallSite, GoFileSemantics};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -112,10 +112,12 @@ impl Rule for GoRegexCompileRule {
                 if is_regex_compile_call(&call.function_call.callee_expr) {
                     // Check if this call is inside a function
                     if let Some(func_name) = find_enclosing_function_or_method(go, call) {
-                        let is_must_compile = call.function_call.callee_expr.contains("MustCompile");
+                        let is_must_compile =
+                            call.function_call.callee_expr.contains("MustCompile");
                         let pattern_arg = extract_pattern_arg(&call.args_repr);
-                        
-                        let full_call = format!("{}{}", call.function_call.callee_expr, call.args_repr);
+
+                        let full_call =
+                            format!("{}{}", call.function_call.callee_expr, call.args_repr);
 
                         let regex_info = RegexCompileInFunction {
                             callee: call.function_call.callee_expr.clone(),
@@ -129,12 +131,7 @@ impl Rule for GoRegexCompileRule {
                             full_call,
                         };
 
-                        findings.push(create_finding(
-                            self.id(),
-                            &regex_info,
-                            *file_id,
-                            &go.path,
-                        ));
+                        findings.push(create_finding(self.id(), &regex_info, *file_id, &go.path));
                     }
                 }
             }
@@ -146,7 +143,7 @@ impl Rule for GoRegexCompileRule {
 
 /// Check if a callee is a regex compile call
 fn is_regex_compile_call(callee: &str) -> bool {
-    callee == "regexp.Compile" 
+    callee == "regexp.Compile"
         || callee == "regexp.MustCompile"
         || callee == "regexp.CompilePOSIX"
         || callee == "regexp.MustCompilePOSIX"
@@ -155,27 +152,27 @@ fn is_regex_compile_call(callee: &str) -> bool {
 /// Find the enclosing function or method for a given call
 fn find_enclosing_function_or_method(go: &GoFileSemantics, call: &GoCallSite) -> Option<String> {
     let call_line = call.function_call.location.line;
-    
+
     // Check functions
     for func in &go.functions {
         let func_start = func.location.range.start_line;
         let func_end = func.location.range.end_line;
-        
+
         if call_line >= func_start && call_line <= func_end {
             return Some(func.name.clone());
         }
     }
-    
+
     // Check methods
     for method in &go.methods {
         let method_start = method.location.range.start_line;
         let method_end = method.location.range.end_line;
-        
+
         if call_line >= method_start && call_line <= method_end {
             return Some(format!("{}.{}", method.receiver_type, method.name));
         }
     }
-    
+
     None
 }
 
@@ -185,10 +182,10 @@ fn extract_pattern_arg(args_repr: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    
+
     // Remove parentheses
     let inner = trimmed.trim_start_matches('(').trim_end_matches(')').trim();
-    
+
     if inner.is_empty() {
         None
     } else {
@@ -211,13 +208,14 @@ fn suggest_constant_name(regex_info: &RegexCompileInFunction) -> String {
             return "phonePattern".to_string();
         }
     }
-    
+
     // Default: derive from function name
-    let base = regex_info.function_name
+    let base = regex_info
+        .function_name
         .split('.')
         .last()
         .unwrap_or(&regex_info.function_name);
-    
+
     // Convert to camelCase pattern name
     format!("{}Pattern", to_camel_case(base))
 }
@@ -226,7 +224,7 @@ fn suggest_constant_name(regex_info: &RegexCompileInFunction) -> String {
 fn to_camel_case(s: &str) -> String {
     let mut result = String::new();
     let mut capitalize_next = false;
-    
+
     for c in s.chars() {
         if c == '_' || c == '-' {
             capitalize_next = true;
@@ -237,7 +235,7 @@ fn to_camel_case(s: &str) -> String {
             result.push(c);
         }
     }
-    
+
     result
 }
 
@@ -252,15 +250,14 @@ fn create_finding(
     } else {
         "regexp.Compile()"
     };
-    
+
     let title = format!(
         "{} in function '{}' recompiles on every call",
-        compile_fn,
-        regex_info.function_name
+        compile_fn, regex_info.function_name
     );
 
     let suggested_name = suggest_constant_name(regex_info);
-    
+
     let description = format!(
         "The regex compilation '{}' inside function '{}' will recompile the pattern \
          on every function call. Move the {} call to package level as a \
@@ -292,7 +289,7 @@ fn create_finding(
         column: Some(regex_info.column),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -308,13 +305,13 @@ fn create_finding(
 fn generate_patch(regex_info: &RegexCompileInFunction, file_id: FileId) -> (FilePatch, String) {
     let suggested_name = suggest_constant_name(regex_info);
     let pattern_arg = regex_info.pattern_arg.as_deref().unwrap_or("`pattern`");
-    
+
     let compile_fn = if regex_info.is_must_compile {
         "regexp.MustCompile"
     } else {
         "regexp.Compile"
     };
-    
+
     // For the fix preview, show the before/after transformation
     let fix_preview = format!(
         r#"// Before (recompiles on every call):
@@ -330,28 +327,34 @@ func {}(...) {{
     // Use {} directly
     ...
 }}"#,
-        regex_info.function_name.split('.').last().unwrap_or(&regex_info.function_name),
+        regex_info
+            .function_name
+            .split('.')
+            .last()
+            .unwrap_or(&regex_info.function_name),
         compile_fn,
         pattern_arg,
         suggested_name,
         compile_fn,
         pattern_arg,
-        regex_info.function_name.split('.').last().unwrap_or(&regex_info.function_name),
+        regex_info
+            .function_name
+            .split('.')
+            .last()
+            .unwrap_or(&regex_info.function_name),
         suggested_name,
     );
 
     // The patch replaces the compile call with the suggested variable name
     let patch = FilePatch {
         file_id,
-        hunks: vec![
-            PatchHunk {
-                range: PatchRange::ReplaceBytes {
-                    start: regex_info.start_byte,
-                    end: regex_info.end_byte,
-                },
-                replacement: suggested_name.clone(),
+        hunks: vec![PatchHunk {
+            range: PatchRange::ReplaceBytes {
+                start: regex_info.start_byte,
+                end: regex_info.end_byte,
             },
-        ],
+            replacement: suggested_name.clone(),
+        }],
     };
 
     (patch, fix_preview)
@@ -424,10 +427,20 @@ func validateEmail(email string) bool {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 1, "Should detect regexp.MustCompile in function");
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should detect regexp.MustCompile in function"
+        );
         assert_eq!(findings[0].rule_id, "go.regex_compile");
-        assert!(findings[0].description.as_ref().unwrap().contains("validateEmail"));
+        assert!(
+            findings[0]
+                .description
+                .as_ref()
+                .unwrap()
+                .contains("validateEmail")
+        );
     }
 
     #[tokio::test]
@@ -450,8 +463,12 @@ func parseData(data string) (*regexp.Regexp, error) {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 1, "Should detect regexp.Compile in function");
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should detect regexp.Compile in function"
+        );
     }
 
     #[tokio::test]
@@ -472,8 +489,11 @@ func validateEmail(email string) bool {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.is_empty(), "Should not flag package-level regexp.MustCompile");
+
+        assert!(
+            findings.is_empty(),
+            "Should not flag package-level regexp.MustCompile"
+        );
     }
 
     #[tokio::test]
@@ -495,8 +515,12 @@ func parseAll(text string) {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 2, "Should detect both regexp.MustCompile calls");
+
+        assert_eq!(
+            findings.len(),
+            2,
+            "Should detect both regexp.MustCompile calls"
+        );
     }
 
     #[tokio::test]
@@ -518,8 +542,12 @@ func (v *Validator) Validate(text string) bool {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 1, "Should detect regexp.MustCompile in method");
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should detect regexp.MustCompile in method"
+        );
     }
 
     #[tokio::test]
@@ -560,10 +588,10 @@ func validate(text string) bool {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1);
         let finding = &findings[0];
-        
+
         assert_eq!(finding.rule_id, "go.regex_compile");
         assert!(matches!(finding.kind, FindingKind::PerformanceSmell));
         assert_eq!(finding.dimension, Dimension::Performance);
@@ -592,7 +620,7 @@ func mySpecialValidator(text string) bool {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1);
         let description = findings[0].description.as_ref().unwrap();
         assert!(description.contains("mySpecialValidator"));
@@ -652,7 +680,7 @@ func mySpecialValidator(text string) bool {
             end_byte: 150,
             full_call: "regexp.MustCompile(`\\d+`)".to_string(),
         };
-        
+
         let name = suggest_constant_name(&info);
         assert_eq!(name, "validateInputPattern");
     }

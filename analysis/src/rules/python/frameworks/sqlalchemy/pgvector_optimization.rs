@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -81,97 +81,99 @@ impl Rule for PgvectorOptimizationRule {
                 if !is_execute {
                     continue;
                 }
-                
+
                 let args = &call.args_repr;
 
                 // Check for cosine distance operator <=>
-                    if args.contains("<=>") {
-                        // Suggest using <#> for normalized vectors
-                        let title =
-                            "pgvector: Use inner product (<#>) instead of cosine (<=>)".to_string();
+                if args.contains("<=>") {
+                    // Suggest using <#> for normalized vectors
+                    let title =
+                        "pgvector: Use inner product (<#>) instead of cosine (<=>)".to_string();
 
-                        let description = 
-                            "For normalized vectors (like bge-small, sentence-transformers), \
+                    let description =
+                        "For normalized vectors (like bge-small, sentence-transformers), \
                              the negative inner product operator (<#>) is faster than cosine \
                              distance (<=>). Inner product equals cosine similarity for \
                              normalized vectors. Change: 1 - (embedding <=> query) to \
-                             -1 * (embedding <#> query) for better performance.".to_string();
+                             -1 * (embedding <#> query) for better performance."
+                            .to_string();
 
-                        let fix_preview = generate_operator_fix_preview();
+                    let fix_preview = generate_operator_fix_preview();
 
-                        // Generate patch replacing <=> with <#>
-                        let patch = generate_operator_patch(
-                            *file_id,
-                            call.function_call.location.line,
-                            Some(call.start_byte),
-                            Some(call.end_byte),
-                            &call.args_repr,
-                        );
+                    // Generate patch replacing <=> with <#>
+                    let patch = generate_operator_patch(
+                        *file_id,
+                        call.function_call.location.line,
+                        Some(call.start_byte),
+                        Some(call.end_byte),
+                        &call.args_repr,
+                    );
 
-                        findings.push(RuleFinding {
-                            rule_id: self.id().to_string(),
-                            title,
-                            description: Some(description),
-                            kind: FindingKind::PerformanceSmell,
-                            severity: Severity::Low,
-                            confidence: 0.75,
-                            dimension: Dimension::Performance,
-                            file_id: *file_id,
-                            file_path: py.path.clone(),
-                            line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column),
-                            end_line: None,
-                            end_column: None,
-            byte_range: None,
-                            patch,
-                            fix_preview: Some(fix_preview),
-                            tags: vec![
-                                "python".into(),
-                                "sqlalchemy".into(),
-                                "pgvector".into(),
-                                "performance".into(),
-                            ],
-                        });
-                    }
+                    findings.push(RuleFinding {
+                        rule_id: self.id().to_string(),
+                        title,
+                        description: Some(description),
+                        kind: FindingKind::PerformanceSmell,
+                        severity: Severity::Low,
+                        confidence: 0.75,
+                        dimension: Dimension::Performance,
+                        file_id: *file_id,
+                        file_path: py.path.clone(),
+                        line: Some(call.function_call.location.line),
+                        column: Some(call.function_call.location.column),
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
+                        patch,
+                        fix_preview: Some(fix_preview),
+                        tags: vec![
+                            "python".into(),
+                            "sqlalchemy".into(),
+                            "pgvector".into(),
+                            "performance".into(),
+                        ],
+                    });
+                }
 
-                    // Check for vector queries without LIMIT
-                    let has_order_by_vector = args.contains("ORDER BY")
-                        && (args.contains("<=>") || args.contains("<#>"));
-                    let has_limit = args.to_uppercase().contains("LIMIT");
+                // Check for vector queries without LIMIT
+                let has_order_by_vector =
+                    args.contains("ORDER BY") && (args.contains("<=>") || args.contains("<#>"));
+                let has_limit = args.to_uppercase().contains("LIMIT");
 
-                    if has_order_by_vector && !has_limit {
-                        findings.push(RuleFinding {
-                            rule_id: self.id().to_string(),
-                            title: "pgvector: Missing LIMIT on vector similarity query".to_string(),
-                            description: Some(
-                                "Vector similarity queries without LIMIT can be slow and \
+                if has_order_by_vector && !has_limit {
+                    findings.push(RuleFinding {
+                        rule_id: self.id().to_string(),
+                        title: "pgvector: Missing LIMIT on vector similarity query".to_string(),
+                        description: Some(
+                            "Vector similarity queries without LIMIT can be slow and \
                                  prevent pgvector's iterative scan optimization. Always use \
                                  LIMIT to enable efficient approximate nearest neighbor search \
-                                 with HNSW indexes.".to_string()
-                            ),
-                            kind: FindingKind::PerformanceSmell,
-                            severity: Severity::Medium,
-                            confidence: 0.80,
-                            dimension: Dimension::Performance,
-                            file_id: *file_id,
-                            file_path: py.path.clone(),
-                            line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column),
-                            end_line: None,
-                            end_column: None,
-            byte_range: None,
-                            patch: None,
-                            fix_preview: Some(generate_limit_fix_preview()),
-                            tags: vec![
-                                "python".into(),
-                                "sqlalchemy".into(),
-                                "pgvector".into(),
-                                "performance".into(),
-                            ],
-                });
-            }
-            
-            // Also check for index creation with vector_cosine_ops in call args
+                                 with HNSW indexes."
+                                .to_string(),
+                        ),
+                        kind: FindingKind::PerformanceSmell,
+                        severity: Severity::Medium,
+                        confidence: 0.80,
+                        dimension: Dimension::Performance,
+                        file_id: *file_id,
+                        file_path: py.path.clone(),
+                        line: Some(call.function_call.location.line),
+                        column: Some(call.function_call.location.column),
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
+                        patch: None,
+                        fix_preview: Some(generate_limit_fix_preview()),
+                        tags: vec![
+                            "python".into(),
+                            "sqlalchemy".into(),
+                            "pgvector".into(),
+                            "performance".into(),
+                        ],
+                    });
+                }
+
+                // Also check for index creation with vector_cosine_ops in call args
                 if args.contains("CREATE INDEX") && args.contains("vector_cosine_ops") {
                     let title =
                         "pgvector: Consider vector_ip_ops for normalized vectors".to_string();
@@ -180,7 +182,8 @@ impl Rule for PgvectorOptimizationRule {
                         "INDEX uses vector_cosine_ops. For normalized vectors (most embedding \
                          models produce normalized output), vector_ip_ops (inner product) is \
                          faster and equivalent to cosine similarity. Use vector_ip_ops unless \
-                         your vectors are NOT normalized.".to_string();
+                         your vectors are NOT normalized."
+                            .to_string();
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
@@ -196,7 +199,7 @@ impl Rule for PgvectorOptimizationRule {
                         column: Some(call.function_call.location.column),
                         end_line: None,
                         end_column: None,
-            byte_range: None,
+                        byte_range: None,
                         patch: None, // Don't auto-patch without exact byte positions
                         fix_preview: Some(generate_index_fix_preview()),
                         tags: vec![
@@ -235,7 +238,7 @@ fn generate_operator_patch(
              #   1 - (embedding <=> query) -> -1 * (embedding <#> query)\n\
              #   ORDER BY embedding <=> query -> ORDER BY embedding <#> query\n"
             .to_string();
-        
+
         // Don't modify the original code, just add a comment
         return Some(FilePatch {
             file_id,
@@ -282,7 +285,8 @@ query = """
 # 2. Change similarity calculation:
 #    - WAS: 1 - (embedding <=> query)
 #    - NOW: -1 * (embedding <#> query)
-# 3. Update index to use vector_ip_ops"#.to_string()
+# 3. Update index to use vector_ip_ops"#
+        .to_string()
 }
 
 /// Generate fix preview for missing LIMIT.
@@ -312,7 +316,8 @@ query = """
 # - pgvector uses "iterative scan" for filtered queries
 # - Without LIMIT, it must return ALL rows
 # - With LIMIT, it can stop early once enough results found
-# - HNSW index only fully utilized with ORDER BY + LIMIT"#.to_string()
+# - HNSW index only fully utilized with ORDER BY + LIMIT"#
+        .to_string()
 }
 
 /// Generate fix preview for index optimization.
@@ -340,7 +345,8 @@ WITH (m = 16, ef_construction = 64);
 # - bge-small-en-v1.5, bge-base-en-v1.5
 # - sentence-transformers models
 # - OpenAI text-embedding-3-small/large
-# - Cohere embed models"#.to_string()
+# - Cohere embed models"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -388,7 +394,10 @@ conn.execute(text("SELECT * FROM table WHERE embedding <=> query"))
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not fire without pgvector import");
+        assert!(
+            findings.is_empty(),
+            "Should not fire without pgvector import"
+        );
     }
 
     #[tokio::test]
@@ -404,7 +413,10 @@ conn.execute(text("SELECT * FROM t ORDER BY embedding <=> query"))
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect <=> usage with pgvector");
+        assert!(
+            !findings.is_empty(),
+            "Should detect <=> usage with pgvector"
+        );
         assert!(findings[0].title.contains("<#>") || findings[0].title.contains("inner product"));
     }
 
@@ -449,7 +461,10 @@ query = text(f"""
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect <=> usage in f-string with pgvector");
+        assert!(
+            !findings.is_empty(),
+            "Should detect <=> usage in f-string with pgvector"
+        );
     }
 
     #[tokio::test]
@@ -472,7 +487,10 @@ query = text(f"""
             .iter()
             .filter(|f| f.title.contains("LIMIT"))
             .collect();
-        assert!(!limit_findings.is_empty(), "Should detect missing LIMIT in f-string query");
+        assert!(
+            !limit_findings.is_empty(),
+            "Should detect missing LIMIT in f-string query"
+        );
     }
 
     #[test]

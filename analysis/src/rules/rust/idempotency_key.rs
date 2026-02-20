@@ -9,11 +9,14 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
-use crate::types::finding::{Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage, Severity};
+use crate::types::finding::{
+    Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage,
+    Severity,
+};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 
 /// Rule that detects missing idempotency key handling.
@@ -150,15 +153,16 @@ impl Rule for RustMissingIdempotencyKeyRule {
                          Ok(Json(result))\n\
                      }}\n\
                      ```",
-                    func.name,
-                    line
+                    func.name, line
                 );
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Add idempotency key handling (Idempotency-Key header)".to_string(),
+                        replacement:
+                            "// TODO: Add idempotency key handling (Idempotency-Key header)"
+                                .to_string(),
                     }],
                 };
 
@@ -176,9 +180,11 @@ impl Rule for RustMissingIdempotencyKeyRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
-                    fix_preview: Some("Header(idempotency_key): Header<Option<String>>".to_string()),
+                    fix_preview: Some(
+                        "Header(idempotency_key): Header<Option<String>>".to_string(),
+                    ),
                     tags: vec![
                         "rust".into(),
                         "idempotency".into(),
@@ -200,8 +206,8 @@ mod tests {
 
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     #[test]
@@ -237,7 +243,9 @@ async fn create_recipe(headers: HeaderMap) {
 
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            findings.iter().all(|f| f.rule_id != "rust.missing_idempotency_key"),
+            findings
+                .iter()
+                .all(|f| f.rule_id != "rust.missing_idempotency_key"),
             "should not report missing idempotency key when header is referenced"
         );
     }

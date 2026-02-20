@@ -56,9 +56,10 @@ impl Rule for SqlAlchemyLazyLoadingRule {
             // Check for SQLAlchemy imports
             let has_sqlalchemy = py.imports.iter().any(|imp| {
                 imp.module.contains("sqlalchemy")
-                    || imp.names.iter().any(|n| {
-                        n == "relationship" || n == "Session" || n == "Query"
-                    })
+                    || imp
+                        .names
+                        .iter()
+                        .any(|n| n == "relationship" || n == "Session" || n == "Query")
             });
 
             if !has_sqlalchemy {
@@ -74,14 +75,15 @@ impl Rule for SqlAlchemyLazyLoadingRule {
                 // Check for patterns like: item.related_items, user.posts, order.items
                 // These are typically relationship accesses that trigger lazy loading
                 let callee_parts: Vec<&str> = call.function_call.callee_expr.split('.').collect();
-                
+
                 if callee_parts.len() >= 2 {
                     // Check if this looks like a relationship access
                     // Common patterns: obj.relationship, obj.relationship.all(), obj.relationship.filter()
-                    let might_be_relationship = !call.function_call.callee_expr.starts_with("self.")
-                        && !is_builtin_or_common_method(&call.function_call.callee_expr)
-                        && !call.function_call.callee_expr.contains("session")
-                        && !call.function_call.callee_expr.contains("query");
+                    let might_be_relationship =
+                        !call.function_call.callee_expr.starts_with("self.")
+                            && !is_builtin_or_common_method(&call.function_call.callee_expr)
+                            && !call.function_call.callee_expr.contains("session")
+                            && !call.function_call.callee_expr.contains("query");
 
                     // Check if it's a query method that would trigger lazy load
                     let is_query_method = call.function_call.callee_expr.ends_with(".all")
@@ -103,10 +105,8 @@ impl Rule for SqlAlchemyLazyLoadingRule {
 
                         let fix_preview = generate_fix_preview();
 
-                        let patch = generate_lazy_loading_patch(
-                            *file_id,
-                            call.function_call.location.line,
-                        );
+                        let patch =
+                            generate_lazy_loading_patch(*file_id, call.function_call.location.line);
 
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
@@ -120,9 +120,9 @@ impl Rule for SqlAlchemyLazyLoadingRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -152,10 +152,11 @@ impl Rule for SqlAlchemyLazyLoadingRule {
                     if !has_eager_loading {
                         let title = "ORM query in loop without eager loading".to_string();
 
-                        let description = 
+                        let description =
                             "An ORM query is executed inside a loop without eager loading \
                              options. This can cause N+1 query problems. Consider using \
-                             joinedload() or selectinload() to fetch related data efficiently.".to_string();
+                             joinedload() or selectinload() to fetch related data efficiently."
+                                .to_string();
 
                         let fix_preview = generate_fix_preview();
 
@@ -171,9 +172,9 @@ impl Rule for SqlAlchemyLazyLoadingRule {
                             file_path: py.path.clone(),
                             line: Some(query.location.range.start_line + 1),
                             column: Some(query.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -199,15 +200,45 @@ impl Rule for SqlAlchemyLazyLoadingRule {
 /// Check if a method name is a builtin or common non-relationship method.
 fn is_builtin_or_common_method(callee: &str) -> bool {
     let common_methods = [
-        "append", "extend", "insert", "remove", "pop", "clear",
-        "index", "count", "sort", "reverse", "copy", "keys",
-        "values", "items", "get", "update", "setdefault",
-        "format", "strip", "split", "join", "replace",
-        "lower", "upper", "startswith", "endswith",
-        "print", "len", "str", "int", "float", "list", "dict",
-        "isinstance", "hasattr", "getattr", "setattr",
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "pop",
+        "clear",
+        "index",
+        "count",
+        "sort",
+        "reverse",
+        "copy",
+        "keys",
+        "values",
+        "items",
+        "get",
+        "update",
+        "setdefault",
+        "format",
+        "strip",
+        "split",
+        "join",
+        "replace",
+        "lower",
+        "upper",
+        "startswith",
+        "endswith",
+        "print",
+        "len",
+        "str",
+        "int",
+        "float",
+        "list",
+        "dict",
+        "isinstance",
+        "hasattr",
+        "getattr",
+        "setattr",
     ];
-    
+
     common_methods.iter().any(|m| callee.ends_with(m))
 }
 
@@ -269,7 +300,8 @@ class User(Base):
     profile = relationship("Profile", lazy="joined")
     
     # For large collections, use selectin
-    orders = relationship("Order", lazy="selectin")"#.to_string()
+    orders = relationship("Order", lazy="selectin")"#
+        .to_string()
 }
 
 #[cfg(test)]

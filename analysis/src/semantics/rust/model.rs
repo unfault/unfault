@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::parse::ast::{AstLocation, FileId, ParsedFile};
-use crate::semantics::common::{calls::FunctionCall, CommonLocation};
+use crate::semantics::common::{CommonLocation, calls::FunctionCall};
 use crate::semantics::rust::frameworks::RustFrameworkSummary;
 use crate::types::context::Language;
 

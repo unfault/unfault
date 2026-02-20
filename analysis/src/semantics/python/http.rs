@@ -186,7 +186,7 @@ fn collect_http_calls(file: &ParsedFile, root: Node, out: &mut Vec<HttpCallSite>
         if node.kind() == "call" {
             // Check if this call is wrapped in asyncio.to_thread/run_in_executor
             let is_thread_offloaded = check_thread_offload(file, node);
-            
+
             if let Some(mut site) = extract_http_call(
                 file,
                 node,
@@ -250,47 +250,47 @@ fn check_thread_offload(file: &ParsedFile, call_node: Node) -> bool {
     // - asyncio.to_thread(lambda: call())
     // - loop.run_in_executor(None, lambda: call())
     // - await asyncio.to_thread(...)
-    
+
     let mut current = call_node;
     let mut depth = 0;
     const MAX_DEPTH: i32 = 10; // Limit traversal depth
-    
+
     while let Some(parent) = current.parent() {
         depth += 1;
         if depth > MAX_DEPTH {
             break;
         }
-        
+
         // Check if parent is a call expression
         if parent.kind() == "call" {
             if let Some(func) = parent.child_by_field_name("function") {
                 let func_text = file.text_for_node(&func);
-                
+
                 // Check for asyncio.to_thread
                 if func_text == "asyncio.to_thread" {
                     return true;
                 }
-                
+
                 // Check for run_in_executor (could be loop.run_in_executor or asyncio.run_in_executor)
                 if func_text.ends_with("run_in_executor") {
                     return true;
                 }
-                
+
                 // Check for sync_to_async (Django channels)
                 if func_text.ends_with("sync_to_async") || func_text == "database_sync_to_async" {
                     return true;
                 }
-                
+
                 // Check for anyio.to_thread.run_sync
                 if func_text.contains("to_thread") && func_text.contains("run_sync") {
                     return true;
                 }
             }
         }
-        
+
         current = parent;
     }
-    
+
     false
 }
 
@@ -848,7 +848,10 @@ async def fetch():
 "#;
         let calls = parse_and_summarize_http(src);
         assert_eq!(calls.len(), 1);
-        assert!(calls[0].is_thread_offloaded, "Request inside asyncio.to_thread should be marked as thread offloaded");
+        assert!(
+            calls[0].is_thread_offloaded,
+            "Request inside asyncio.to_thread should be marked as thread offloaded"
+        );
     }
 
     #[test]
@@ -862,7 +865,10 @@ async def fetch():
 "#;
         let calls = parse_and_summarize_http(src);
         assert_eq!(calls.len(), 1);
-        assert!(calls[0].is_thread_offloaded, "Request inside run_in_executor should be marked as thread offloaded");
+        assert!(
+            calls[0].is_thread_offloaded,
+            "Request inside run_in_executor should be marked as thread offloaded"
+        );
     }
 
     #[test]
@@ -873,7 +879,10 @@ async def fetch():
 "#;
         let calls = parse_and_summarize_http(src);
         assert_eq!(calls.len(), 1);
-        assert!(!calls[0].is_thread_offloaded, "Direct request in async function should NOT be marked as thread offloaded");
+        assert!(
+            !calls[0].is_thread_offloaded,
+            "Direct request in async function should NOT be marked as thread offloaded"
+        );
     }
 
     #[test]
@@ -884,6 +893,9 @@ def fetch():
 "#;
         let calls = parse_and_summarize_http(src);
         assert_eq!(calls.len(), 1);
-        assert!(!calls[0].is_thread_offloaded, "Request in sync function should NOT be marked as thread offloaded");
+        assert!(
+            !calls[0].is_thread_offloaded,
+            "Request in sync function should NOT be marked as thread offloaded"
+        );
     }
 }

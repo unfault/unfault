@@ -94,7 +94,8 @@ impl Rule for DjangoSecureSettingsRule {
                                 description: Some(
                                     "SECURE_SSL_REDIRECT=False means HTTP requests won't be \
                                      redirected to HTTPS. In production, set this to True to \
-                                     ensure all traffic uses HTTPS.".to_string()
+                                     ensure all traffic uses HTTPS."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::High,
@@ -104,10 +105,14 @@ impl Rule for DjangoSecureSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "SECURE_SSL_REDIRECT = True")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "SECURE_SSL_REDIRECT = True",
+                                )),
                                 fix_preview: Some(generate_ssl_redirect_fix_preview()),
                                 tags: vec![
                                     "python".into(),
@@ -261,7 +266,8 @@ impl Rule for DjangoSecureSettingsRule {
                                 title: "CSRF_COOKIE_SECURE is set to False".to_string(),
                                 description: Some(
                                     "CSRF_COOKIE_SECURE=False allows CSRF cookies to be sent over \
-                                     HTTP. In production, set this to True.".to_string()
+                                     HTTP. In production, set this to True."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::High,
@@ -271,10 +277,14 @@ impl Rule for DjangoSecureSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "CSRF_COOKIE_SECURE = True")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "CSRF_COOKIE_SECURE = True",
+                                )),
                                 fix_preview: None,
                                 tags: vec![
                                     "python".into(),
@@ -291,7 +301,7 @@ impl Rule for DjangoSecureSettingsRule {
 
             // Check for missing security settings in production-like settings
             let is_prod_settings = py.path.contains("prod") || py.path.contains("production");
-            
+
             if is_prod_settings {
                 let mut missing_settings = Vec::new();
 
@@ -311,10 +321,14 @@ impl Rule for DjangoSecureSettingsRule {
                 if !missing_settings.is_empty() {
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
-                        title: format!("Missing security settings: {}", missing_settings.join(", ")),
+                        title: format!(
+                            "Missing security settings: {}",
+                            missing_settings.join(", ")
+                        ),
                         description: Some(
                             "Production settings are missing important security configurations. \
-                             Add these settings to harden your Django application.".to_string()
+                             Add these settings to harden your Django application."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -324,9 +338,9 @@ impl Rule for DjangoSecureSettingsRule {
                         file_path: py.path.clone(),
                         line: Some(1),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_all_secure_settings_fix_preview()),
                         tags: vec![
@@ -375,7 +389,8 @@ SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # For development, conditionally disable:
 import os
-SECURE_SSL_REDIRECT = os.environ.get('DJANGO_ENV') == 'production'"#.to_string()
+SECURE_SSL_REDIRECT = os.environ.get('DJANGO_ENV') == 'production'"#
+        .to_string()
 }
 
 /// Generate fix preview for HSTS settings.
@@ -393,7 +408,8 @@ SECURE_HSTS_PRELOAD = True
 
 # WARNING: Start with a lower value when first enabling HSTS
 # SECURE_HSTS_SECONDS = 3600  # 1 hour for testing
-# Then gradually increase to 31536000 (1 year)"#.to_string()
+# Then gradually increase to 31536000 (1 year)"#
+        .to_string()
 }
 
 /// Generate fix preview for X_FRAME_OPTIONS.
@@ -407,7 +423,8 @@ X_FRAME_OPTIONS = 'DENY'
 # X_FRAME_OPTIONS = 'SAMEORIGIN'
 
 # For more control, use Content-Security-Policy frame-ancestors:
-# SECURE_CONTENT_SECURITY_POLICY = "frame-ancestors 'self'"#.to_string()
+# SECURE_CONTENT_SECURITY_POLICY = "frame-ancestors 'self'"#
+        .to_string()
 }
 
 /// Generate fix preview for all secure settings.
@@ -444,7 +461,8 @@ if os.environ.get('DJANGO_ENV') != 'production':
     SECURE_SSL_REDIRECT = False
     SECURE_HSTS_SECONDS = 0
     SESSION_COOKIE_SECURE = False
-    CSRF_COOKIE_SECURE = False"#.to_string()
+    CSRF_COOKIE_SECURE = False"#
+        .to_string()
 }
 
 #[cfg(test)]

@@ -10,9 +10,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -121,7 +121,7 @@ impl Rule for GoDeferInLoopRule {
                     column: Some(defer_stmt.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -142,7 +142,7 @@ impl Rule for GoDeferInLoopRule {
 use crate::semantics::go::model::DeferStatement;
 
 /// Generate a patch to fix defer in loop.
-/// 
+///
 /// Suggests extracting to a helper function or using explicit cleanup.
 fn generate_defer_fix_patch(defer_stmt: &DeferStatement, file_id: FileId) -> FilePatch {
     // For common patterns like `defer f.Close()`, suggest removing defer
@@ -181,8 +181,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

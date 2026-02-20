@@ -2,14 +2,14 @@
 //!
 //! Detects context.WithCancel/WithTimeout where cancel function is not called.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -93,7 +93,8 @@ impl Rule for GoUncancelledContextRule {
                         title: "context.Background() in request handler".to_string(),
                         description: Some(
                             "Using context.Background() in a request handler loses request \
-                             scoping and cancellation. Use r.Context() or propagate from caller.".to_string()
+                             scoping and cancellation. Use r.Context() or propagate from caller."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -103,14 +104,17 @@ impl Rule for GoUncancelledContextRule {
                         file_path: go.path.clone(),
                         line: Some(ctx_usage.line),
                         column: Some(ctx_usage.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
-                                range: PatchRange::InsertBeforeLine { line: ctx_usage.line },
-                                replacement: "// Use request context: ctx := r.Context()".to_string(),
+                                range: PatchRange::InsertBeforeLine {
+                                    line: ctx_usage.line,
+                                },
+                                replacement: "// Use request context: ctx := r.Context()"
+                                    .to_string(),
                             }],
                         }),
                         fix_preview: Some("Use request context".to_string()),
@@ -121,9 +125,9 @@ impl Rule for GoUncancelledContextRule {
 
             // Check for defers that should have cancel calls
             let has_with_cancel = go.context_usages.iter().any(|c| {
-                c.context_type == "WithCancel" || 
-                c.context_type == "WithTimeout" || 
-                c.context_type == "WithDeadline"
+                c.context_type == "WithCancel"
+                    || c.context_type == "WithTimeout"
+                    || c.context_type == "WithDeadline"
             });
 
             if has_with_cancel {
@@ -132,17 +136,21 @@ impl Rule for GoUncancelledContextRule {
                 if !has_defer_cancel {
                     // Find the first WithCancel/WithTimeout
                     if let Some(ctx_usage) = go.context_usages.iter().find(|c| {
-                        c.context_type == "WithCancel" || 
-                        c.context_type == "WithTimeout" || 
-                        c.context_type == "WithDeadline"
+                        c.context_type == "WithCancel"
+                            || c.context_type == "WithTimeout"
+                            || c.context_type == "WithDeadline"
                     }) {
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
-                            title: format!("context.{}() without defer cancel()", ctx_usage.context_type),
+                            title: format!(
+                                "context.{}() without defer cancel()",
+                                ctx_usage.context_type
+                            ),
                             description: Some(
                                 "Context created with WithCancel/WithTimeout/WithDeadline must \
                                  have its cancel function called. Use defer cancel() immediately \
-                                 after creating the context to prevent resource leaks.".to_string()
+                                 after creating the context to prevent resource leaks."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::High,
@@ -152,13 +160,15 @@ impl Rule for GoUncancelledContextRule {
                             file_path: go.path.clone(),
                             line: Some(ctx_usage.line),
                             column: Some(ctx_usage.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
-                                    range: PatchRange::InsertAfterLine { line: ctx_usage.line },
+                                    range: PatchRange::InsertAfterLine {
+                                        line: ctx_usage.line,
+                                    },
                                     replacement: "defer cancel()".to_string(),
                                 }],
                             }),

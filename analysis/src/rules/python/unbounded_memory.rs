@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -59,7 +59,7 @@ impl Rule for PythonUnboundedMemoryOperationRule {
             };
 
             let import_line = py.import_insertion_line();
-            
+
             // Check all calls in the file for unbounded memory patterns
             for call in &py.calls {
                 if let Some(finding) = check_unbounded_pattern(
@@ -102,7 +102,10 @@ fn check_unbounded_pattern(
         (".readlines()", "readlines() loads all lines into memory"),
         ("pd.read_csv(", "read_csv() loads entire CSV into memory"),
         ("pd.read_json(", "read_json() loads entire JSON into memory"),
-        ("pd.read_excel(", "read_excel() loads entire Excel file into memory"),
+        (
+            "pd.read_excel(",
+            "read_excel() loads entire Excel file into memory",
+        ),
     ];
 
     let full_call = format!("{}{}", callee, args_repr);
@@ -154,9 +157,9 @@ fn check_unbounded_pattern(
                 file_path: file_path.to_string(),
                 line: Some(location.line),
                 column: Some(location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                end_line: None,
+                end_column: None,
+                byte_range: None,
                 patch: Some(patch),
                 fix_preview: Some(fix_preview),
                 tags: vec![
@@ -234,7 +237,9 @@ fn generate_unbounded_memory_patch(
         FilePatch {
             file_id,
             hunks: vec![PatchHunk {
-                range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+                range: PatchRange::InsertBeforeLine {
+                    line: import_insertion_line,
+                },
                 replacement: "# TODO: Add pagination or streaming to prevent OOM\n".to_string(),
             }],
         }
@@ -266,7 +271,8 @@ from sqlalchemy.orm import Session
 
 with Session(engine) as session:
     for user in session.execute(select(User)).scalars().yield_per(100):
-        process_user(user)"#.to_string(),
+        process_user(user)"#
+            .to_string(),
 
         ".fetchall()" => r#"# Bad: Loads all rows into memory
 cursor.execute("SELECT * FROM large_table")
@@ -284,7 +290,8 @@ while True:
 cursor = connection.cursor(name='server_cursor')
 cursor.execute("SELECT * FROM large_table")
 for row in cursor:
-    process_row(row)"#.to_string(),
+    process_row(row)"#
+            .to_string(),
 
         "list(" => r#"# Bad: Materializes entire iterator
 all_items = list(generate_items())  # Could be millions!
@@ -302,7 +309,8 @@ def chunked(iterable, size):
         yield chunk
 
 for chunk in chunked(generate_items(), 1000):
-    process_chunk(chunk)"#.to_string(),
+    process_chunk(chunk)"#
+            .to_string(),
 
         ".read()" => r#"# Bad: Reads entire file into memory
 with open('large_file.txt') as f:
@@ -316,7 +324,8 @@ with open('large_file.txt') as f:
 # Good: Read line by line
 with open('large_file.txt') as f:
     for line in f:
-        process_line(line)"#.to_string(),
+        process_line(line)"#
+            .to_string(),
 
         "json.load(" => r#"# Bad: Loads entire JSON into memory
 with open('large.json') as f:
@@ -333,7 +342,8 @@ with open('large.json', 'rb') as f:
 with open('data.jsonl') as f:
     for line in f:
         item = json.loads(line)
-        process_item(item)"#.to_string(),
+        process_item(item)"#
+            .to_string(),
 
         _ => r#"# General pattern: Avoid loading unbounded data into memory
 
@@ -352,7 +362,8 @@ def process_data():
 # Good: Use memory-efficient libraries
 # - Use pandas with chunksize parameter
 # - Use Dask for out-of-core computation
-# - Use Apache Arrow for memory-mapped files"#.to_string(),
+# - Use Apache Arrow for memory-mapped files"#
+            .to_string(),
     }
 }
 

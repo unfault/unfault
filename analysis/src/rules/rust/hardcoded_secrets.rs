@@ -25,8 +25,8 @@ use regex::Regex;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingKind, Severity};
@@ -156,7 +156,7 @@ impl Rule for RustHardcodedSecretsRule {
             // Check static/const declarations for suspicious names and values
             for static_decl in &rust.statics {
                 let name_lower = static_decl.name.to_lowercase();
-                
+
                 // Check if variable name suggests a secret
                 let is_secret_name = SECRET_NAME_PATTERNS
                     .iter()
@@ -223,9 +223,9 @@ impl Rule for RustHardcodedSecretsRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(static_decl.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -241,7 +241,7 @@ impl Rule for RustHardcodedSecretsRule {
             // Check call sites for patterns
             for call in &rust.calls {
                 let callee = &call.function_call.callee_expr;
-                
+
                 // Check for secret patterns in the call text
                 for (secret_type, pattern, advice) in &secret_patterns {
                     if pattern.is_match(callee) {
@@ -267,9 +267,9 @@ impl Rule for RustHardcodedSecretsRule {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(format!(
                                 "// Use environment variable instead:\n\
@@ -282,8 +282,8 @@ impl Rule for RustHardcodedSecretsRule {
                                 secret_type.to_lowercase().replace(' ', "-"),
                             ],
                         });
-                        
-                        break;  // Found one pattern, no need to check others
+
+                        break; // Found one pattern, no need to check others
                     }
                 }
             }
@@ -298,8 +298,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -339,7 +339,9 @@ const API_KEY: &str = "sk-1234567890abcdef";
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.hardcoded_secrets"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.hardcoded_secrets"),
             "Should detect API_KEY constant"
         );
     }
@@ -357,7 +359,9 @@ static DATABASE_PASSWORD: &str = "super_secret_password";
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.hardcoded_secrets"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.hardcoded_secrets"),
             "Should detect DATABASE_PASSWORD constant"
         );
     }
@@ -421,7 +425,7 @@ const SECRET_TOKEN: &str = "secret_value";
     fn secret_patterns_compile() {
         let patterns = get_secret_patterns();
         assert!(!patterns.is_empty());
-        
+
         for (name, _regex, advice) in patterns {
             assert!(!name.is_empty());
             assert!(!advice.is_empty());

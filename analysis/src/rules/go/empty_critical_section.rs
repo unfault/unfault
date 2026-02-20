@@ -9,9 +9,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -80,8 +80,7 @@ impl Rule for GoEmptyCriticalSectionRule {
                          code was accidentally removed or the locking logic is incorrect.\n\n\
                          If you intended to synchronize access to shared state, ensure \
                          the operations on that state are inside the critical section.",
-                        mutex_usage.mutex_var,
-                        mutex_usage.lock_line
+                        mutex_usage.mutex_var, mutex_usage.lock_line
                     );
 
                     findings.push(RuleFinding {
@@ -155,9 +154,9 @@ impl Rule for GoEmptyCriticalSectionRule {
                         file_path: go.path.clone(),
                         line: Some(mutex_usage.lock_line),
                         column: Some(mutex_usage.lock_column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(format!(
                             "// Before:\n\
@@ -211,8 +210,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -335,7 +334,14 @@ func buggy() {
         let findings = rule.evaluate(&semantics, None).await;
         for finding in &findings {
             if finding.rule_id == "go.empty_critical_section" {
-                assert!(finding.title.contains("Empty") || finding.description.as_ref().map(|d| d.contains("empty")).unwrap_or(false));
+                assert!(
+                    finding.title.contains("Empty")
+                        || finding
+                            .description
+                            .as_ref()
+                            .map(|d| d.contains("empty"))
+                            .unwrap_or(false)
+                );
             }
         }
     }
@@ -365,7 +371,10 @@ func test() {
         for finding in &findings {
             if finding.rule_id == "go.empty_critical_section" {
                 assert!(finding.tags.contains(&"go".to_string()));
-                assert!(finding.tags.contains(&"concurrency".to_string()) || finding.tags.contains(&"mutex".to_string()));
+                assert!(
+                    finding.tags.contains(&"concurrency".to_string())
+                        || finding.tags.contains(&"mutex".to_string())
+                );
             }
         }
     }

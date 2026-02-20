@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -68,8 +68,7 @@ impl Rule for TypescriptUnboundedConcurrencyRule {
                     // Check if arguments contain .map() - indicates unbounded array
                     let args_text = call.args_repr.to_lowercase();
                     if args_text.contains(".map(") && !args_text.contains("limit") {
-                        let title =
-                            format!("{} with .map() can overwhelm resources", call.callee);
+                        let title = format!("{} with .map() can overwhelm resources", call.callee);
 
                         let description = format!(
                             "Using {} with an array from .map() can launch unbounded concurrent operations. \
@@ -79,7 +78,8 @@ impl Rule for TypescriptUnboundedConcurrencyRule {
                         );
 
                         // Check if p-limit is already imported
-                        let has_plimit = ts.imports.iter().any(|imp| imp.module.contains("p-limit"));
+                        let has_plimit =
+                            ts.imports.iter().any(|imp| imp.module.contains("p-limit"));
 
                         let patch = if !has_plimit {
                             Some(FilePatch {
@@ -109,9 +109,9 @@ impl Rule for TypescriptUnboundedConcurrencyRule {
                             file_path: ts.path.clone(),
                             line: Some(call.location.range.start_line + 1),
                             column: Some(call.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch,
                             fix_preview: Some(fix_preview),
                             tags: vec![

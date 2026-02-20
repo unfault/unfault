@@ -9,10 +9,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::typescript::model::is_server_side_code;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::typescript::model::is_server_side_code;
 use crate::types::context::Dimension;
 use crate::types::finding::{
     Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage,
@@ -56,7 +56,9 @@ impl Rule for TypescriptHttpMissingTimeoutRule {
             decision_level: DecisionLevel::Code,
             benefits: vec![Benefit::Reliability, Benefit::Latency],
             prerequisites: vec![],
-            notes: Some("Time bounds are helpful even in demos; pick a sensible default.".to_string()),
+            notes: Some(
+                "Time bounds are helpful even in demos; pick a sensible default.".to_string(),
+            ),
         })
     }
 
@@ -125,7 +127,7 @@ impl Rule for TypescriptHttpMissingTimeoutRule {
                     column: Some(http_call.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -252,7 +254,10 @@ async function fetchData() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Client-side code should not trigger this rule");
+        assert!(
+            findings.is_empty(),
+            "Client-side code should not trigger this rule"
+        );
     }
 
     #[tokio::test]
@@ -330,6 +335,10 @@ fetch('https://api.example.com');
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert_eq!(findings.len(), 1, "NestJS imports indicate server-side code");
+        assert_eq!(
+            findings.len(),
+            1,
+            "NestJS imports indicate server-side code"
+        );
     }
 }

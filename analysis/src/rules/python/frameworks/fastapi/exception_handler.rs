@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::ImportInsertionType;
 use crate::types::context::Dimension;
@@ -61,8 +61,9 @@ impl Rule for FastApiExceptionHandlerRule {
             }
 
             // Use third_party_from_import for FastAPI/Starlette imports
-            let import_line = py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
-            
+            let import_line =
+                py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
+
             // Check each app for exception handlers
             for app in &fastapi.apps {
                 // Find exception handlers for this app
@@ -119,10 +120,7 @@ impl Rule for FastApiExceptionHandlerRule {
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
-                        title: format!(
-                            "FastAPI app `{}` has no exception handlers",
-                            app.var_name
-                        ),
+                        title: format!("FastAPI app `{}` has no exception handlers", app.var_name),
                         description: Some(
                             "FastAPI applications should have exception handlers registered \
                              for common error types like RequestValidationError and HTTPException. \
@@ -138,9 +136,9 @@ impl Rule for FastApiExceptionHandlerRule {
                         file_path: py.path.clone(),
                         line: Some(location.range.start_line + 1),
                         column: Some(location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(file_patch),
                         fix_preview: Some(format!(
                             "# Add exception handlers after app definition:\n{}",
@@ -172,7 +170,8 @@ impl Rule for FastApiExceptionHandlerRule {
                         // 1. Imports at the top of the file
                         // 2. Handler code after the app definition
                         let imports = generate_specific_imports(&missing_handlers);
-                        let handler_code = generate_specific_handler_code(&app.var_name, &missing_handlers);
+                        let handler_code =
+                            generate_specific_handler_code(&app.var_name, &missing_handlers);
 
                         let file_patch = FilePatch {
                             file_id: *file_id,
@@ -216,9 +215,9 @@ impl Rule for FastApiExceptionHandlerRule {
                             file_path: py.path.clone(),
                             line: Some(location.range.start_line + 1),
                             column: Some(location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(file_patch),
                             fix_preview: Some(format!(
                                 "# Add missing exception handlers:\n{}",
@@ -300,7 +299,9 @@ fn generate_specific_imports(missing: &[&str]) -> String {
                 imports.push("from fastapi.exceptions import RequestValidationError");
             }
             "HTTPException" => {
-                imports.push("from starlette.exceptions import HTTPException as StarletteHTTPException");
+                imports.push(
+                    "from starlette.exceptions import HTTPException as StarletteHTTPException",
+                );
             }
             _ => {}
         }
@@ -363,8 +364,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::python::model::PyFileSemantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::python::model::PyFileSemantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

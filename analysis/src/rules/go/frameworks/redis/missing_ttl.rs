@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -61,14 +61,17 @@ impl Rule for RedisMissingTtlRule {
 
             // Look for Set calls without TTL (third argument is 0 or missing)
             for call in &go_sem.calls {
-                let is_set_without_ttl = (call.function_call.callee_expr.contains(".Set") || call.function_call.callee_expr.ends_with("Set"))
+                let is_set_without_ttl = (call.function_call.callee_expr.contains(".Set")
+                    || call.function_call.callee_expr.ends_with("Set"))
                     && (call.args_repr.ends_with(", 0)")
                         || call.args_repr.ends_with(", 0, )")
                         || call.args_repr.contains(", 0)"));
 
                 // Also check for HSet, MSet without expiration
-                let is_hset = call.function_call.callee_expr.contains(".HSet") || call.function_call.callee_expr.ends_with("HSet");
-                let is_mset = call.function_call.callee_expr.contains(".MSet") || call.function_call.callee_expr.ends_with("MSet");
+                let is_hset = call.function_call.callee_expr.contains(".HSet")
+                    || call.function_call.callee_expr.ends_with("HSet");
+                let is_mset = call.function_call.callee_expr.contains(".MSet")
+                    || call.function_call.callee_expr.ends_with("MSet");
 
                 if is_set_without_ttl || is_hset || is_mset {
                     let line = call.function_call.location.line;
@@ -77,7 +80,8 @@ impl Rule for RedisMissingTtlRule {
                     if is_hset || is_mset {
                         let has_expire = go_sem.calls.iter().any(|c| {
                             let expire_line = c.function_call.location.line;
-                            (c.function_call.callee_expr.contains("Expire") || c.function_call.callee_expr.contains("ExpireAt"))
+                            (c.function_call.callee_expr.contains("Expire")
+                                || c.function_call.callee_expr.contains("ExpireAt"))
                                 && expire_line > call.function_call.location.line
                                 && expire_line <= call.function_call.location.line + 5
                         });
@@ -87,20 +91,20 @@ impl Rule for RedisMissingTtlRule {
                         }
                     }
 
-                    let op_name = call.function_call.callee_expr.split('.').last().unwrap_or("operation");
+                    let op_name = call
+                        .function_call
+                        .callee_expr
+                        .split('.')
+                        .last()
+                        .unwrap_or("operation");
 
-                    let title = format!(
-                        "Redis {} at line {} has no TTL",
-                        op_name,
-                        line
-                    );
+                    let title = format!("Redis {} at line {} has no TTL", op_name, line);
 
                     let description = format!(
                         "Redis {} at line {} has no TTL. Set an expiration to prevent \
                          unbounded memory growth. Keys without TTL accumulate indefinitely \
                          and can cause Redis to run out of memory.",
-                        op_name,
-                        line
+                        op_name, line
                     );
 
                     let patch = generate_ttl_patch(*file_id, line, &call.function_call.callee_expr);
@@ -117,17 +121,12 @@ impl Rule for RedisMissingTtlRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("// Add TTL to Redis operation".to_string()),
-                        tags: vec![
-                            "go".into(),
-                            "redis".into(),
-                            "ttl".into(),
-                            "memory".into(),
-                        ],
+                        tags: vec!["go".into(), "redis".into(), "ttl".into(), "memory".into()],
                     });
                 }
             }
@@ -142,15 +141,18 @@ impl Rule for RedisMissingTtlRule {
 }
 
 fn generate_ttl_patch(file_id: FileId, line: u32, callee: &str) -> FilePatch {
-    let replacement = if callee.contains("Set") && !callee.contains("HSet") && !callee.contains("MSet") {
-        r#"// Add TTL to Set operation:
+    let replacement =
+        if callee.contains("Set") && !callee.contains("HSet") && !callee.contains("MSet") {
+            r#"// Add TTL to Set operation:
 // err := rdb.Set(ctx, key, value, 24*time.Hour).Err()  // Use appropriate TTL
-"#.to_string()
-    } else {
-        r#"// Add TTL after operation:
+"#
+            .to_string()
+        } else {
+            r#"// Add TTL after operation:
 // rdb.Expire(ctx, key, 24*time.Hour)  // Set appropriate TTL
-"#.to_string()
-    };
+"#
+            .to_string()
+        };
 
     FilePatch {
         file_id,

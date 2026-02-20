@@ -55,15 +55,18 @@ impl Rule for DjangoMissingCsrfRule {
 
             // Check for @csrf_exempt decorator usage
             for call in &py.calls {
-                if call.function_call.callee_expr == "csrf_exempt" || call.function_call.callee_expr.ends_with(".csrf_exempt") {
+                if call.function_call.callee_expr == "csrf_exempt"
+                    || call.function_call.callee_expr.ends_with(".csrf_exempt")
+                {
                     let title = "CSRF protection disabled with @csrf_exempt".to_string();
 
-                    let description = 
+                    let description =
                         "The @csrf_exempt decorator disables CSRF protection for this view. \
                          This makes the view vulnerable to cross-site request forgery attacks. \
                          Only use this for views that genuinely need to accept requests from \
                          external sources (e.g., webhooks) and implement alternative security \
-                         measures.".to_string();
+                         measures."
+                            .to_string();
 
                     let fix_preview = generate_csrf_exempt_fix_preview();
 
@@ -79,9 +82,9 @@ impl Rule for DjangoMissingCsrfRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None, // Can't auto-fix without understanding the use case
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -110,10 +113,11 @@ impl Rule for DjangoMissingCsrfRule {
                         if !has_csrf_middleware {
                             let title = "Django CSRF middleware is missing".to_string();
 
-                            let description = 
+                            let description =
                                 "The MIDDLEWARE setting does not include CsrfViewMiddleware. \
                                  This leaves all views vulnerable to CSRF attacks. Add \
-                                 'django.middleware.csrf.CsrfViewMiddleware' to MIDDLEWARE.".to_string();
+                                 'django.middleware.csrf.CsrfViewMiddleware' to MIDDLEWARE."
+                                    .to_string();
 
                             let fix_preview = generate_middleware_fix_preview();
 
@@ -134,9 +138,9 @@ impl Rule for DjangoMissingCsrfRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
                                 patch: Some(patch),
                                 fix_preview: Some(fix_preview),
                                 tags: vec![
@@ -165,7 +169,9 @@ impl Rule for DjangoMissingCsrfRule {
 fn generate_middleware_patch(file_id: FileId, line: u32) -> FilePatch {
     let hunks = vec![PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
-        replacement: "# Note: Ensure 'django.middleware.csrf.CsrfViewMiddleware' is in MIDDLEWARE\n".to_string(),
+        replacement:
+            "# Note: Ensure 'django.middleware.csrf.CsrfViewMiddleware' is in MIDDLEWARE\n"
+                .to_string(),
     }];
 
     FilePatch { file_id, hunks }
@@ -207,7 +213,8 @@ def api_view(request):
     pass
 
 # Option 3: For internal APIs, use session auth with CSRF
-# Don't use @csrf_exempt - let Django handle CSRF normally"#.to_string()
+# Don't use @csrf_exempt - let Django handle CSRF normally"#
+        .to_string()
 }
 
 /// Generate a fix preview for missing middleware.
@@ -236,7 +243,8 @@ MIDDLEWARE = [
 #     method: 'POST',
 #     headers: {'X-CSRFToken': csrftoken},
 #     body: JSON.stringify(data)
-# });"#.to_string()
+# });"#
+        .to_string()
 }
 
 #[cfg(test)]

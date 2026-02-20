@@ -4,11 +4,11 @@
 //! implemented by each language's semantic model, enabling shared rule logic.
 
 pub mod async_ops;
+pub mod calls;
 pub mod db;
 pub mod frameworks;
 pub mod functions;
 pub mod http;
-pub mod calls;
 pub mod imports;
 
 use crate::parse::ast::{AstLocation, FileId};
@@ -54,9 +54,10 @@ pub trait CommonSemantics: Send + Sync {
 
     /// Check if any import matches a pattern
     fn has_import_matching(&self, pattern: &str) -> bool {
-        self.imports()
-            .iter()
-            .any(|i| i.module_path.contains(pattern) || i.items.iter().any(|item| item.name.contains(pattern)))
+        self.imports().iter().any(|i| {
+            i.module_path.contains(pattern)
+                || i.items.iter().any(|item| item.name.contains(pattern))
+        })
     }
 
     /// Find a function by name
@@ -66,7 +67,10 @@ pub trait CommonSemantics: Send + Sync {
 
     /// Get HTTP calls without timeout
     fn http_calls_without_timeout(&self) -> Vec<http::HttpCall> {
-        self.http_calls().into_iter().filter(|c| !c.has_timeout).collect()
+        self.http_calls()
+            .into_iter()
+            .filter(|c| !c.has_timeout)
+            .collect()
     }
 
     /// Get HTTP calls without retry logic

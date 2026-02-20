@@ -12,10 +12,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::typescript::model::is_server_side_code;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::typescript::model::is_server_side_code;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -89,7 +89,7 @@ impl Rule for TypescriptMissingStructuredLoggingRule {
             // Find console.log/warn/error calls
             for call in &ts.calls {
                 let callee_lower = call.callee.to_lowercase();
-                
+
                 if !callee_lower.starts_with("console.") {
                     continue;
                 }
@@ -127,7 +127,7 @@ impl Rule for TypescriptMissingStructuredLoggingRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Replace with pino/winston structured logger".to_string()),
                     tags: vec!["observability".into(), "logging".into()],
@@ -202,7 +202,10 @@ function showMessage() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Client-side code should not require structured logging");
+        assert!(
+            findings.is_empty(),
+            "Client-side code should not require structured logging"
+        );
     }
 
     #[tokio::test]
@@ -220,6 +223,9 @@ console.log('backup log');
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag when structured logger is imported");
+        assert!(
+            findings.is_empty(),
+            "Should not flag when structured logger is imported"
+        );
     }
 }

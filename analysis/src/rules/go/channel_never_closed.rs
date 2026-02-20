@@ -3,16 +3,16 @@
 //! Detects channels that are created and written to but never closed,
 //! which can cause goroutine leaks when receivers wait forever.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::go::model::ChannelOpKind;
 use crate::semantics::SourceSemantics;
+use crate::semantics::go::model::ChannelOpKind;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -58,19 +58,23 @@ impl Rule for GoChannelNeverClosedRule {
             };
 
             // Track channels: find sends and closes
-            let has_close = go.channel_ops.iter().any(|op| {
-                matches!(op.kind, ChannelOpKind::Close)
-            });
+            let has_close = go
+                .channel_ops
+                .iter()
+                .any(|op| matches!(op.kind, ChannelOpKind::Close));
 
             // Also check for close() calls in the source
-            let has_close_call = go.calls.iter().any(|c| c.function_call.callee_expr == "close");
+            let has_close_call = go
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "close");
 
             // Find channel sends that are not in a select statement
             for op in &go.channel_ops {
                 if matches!(op.kind, ChannelOpKind::Send) && !has_close && !has_close_call {
                     // Check if this is inside a goroutine that produces values
                     // This is a heuristic - if we see sends but no close, flag it
-                    
+
                     let title = "Channel send without corresponding close".to_string();
 
                     let description = format!(
@@ -88,7 +92,7 @@ impl Rule for GoChannelNeverClosedRule {
                     let replacement = format!(
                         "// TODO: Ensure channel is closed when done sending\n\
                          // defer close(ch) // Add this in the producer goroutine\n\
-                         {}", 
+                         {}",
                         op.text
                     );
 
@@ -115,9 +119,9 @@ impl Rule for GoChannelNeverClosedRule {
                         file_path: go.path.clone(),
                         line: Some(op.line),
                         column: Some(op.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("Add defer close(ch) in producer".to_string()),
                         tags: vec![
@@ -127,7 +131,7 @@ impl Rule for GoChannelNeverClosedRule {
                             "concurrency".into(),
                         ],
                     });
-                    
+
                     // Only one finding per file for this pattern
                     break;
                 }
@@ -143,8 +147,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -169,7 +173,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_channel_without_close() {
         let rule = GoChannelNeverClosedRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func producer() {
@@ -181,18 +186,24 @@ func producer() {
         // Missing: close(ch)
     }()
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect the missing close
-        assert!(findings.iter().any(|f| f.rule_id == "go.channel_never_closed"));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == "go.channel_never_closed")
+        );
     }
 
     #[tokio::test]
     async fn test_no_finding_when_close_present() {
         let rule = GoChannelNeverClosedRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func producer() {
@@ -204,12 +215,14 @@ func producer() {
         }
     }()
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag when close is present
-        let channel_findings: Vec<_> = findings.iter()
+        let channel_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.channel_never_closed")
             .collect();
         assert!(channel_findings.is_empty());

@@ -7,6 +7,7 @@ use crate::parse::ast::FileId;
 use crate::types::context::Language;
 
 use super::common::{
+    CommonLocation, CommonSemantics,
     annotations::{Annotation, AnnotationType},
     async_ops::{AsyncOperation, AsyncOperationType, AsyncRuntime},
     db::{DbLibrary, DbOperation, DbOperationType},
@@ -17,7 +18,6 @@ use super::common::{
     http::{HttpCall, HttpClientLibrary, HttpMethod},
     imports::{Import, ImportSource, ImportStyle, ImportedItem},
     route_patterns::{RouteFramework, RoutePattern},
-    CommonLocation, CommonSemantics,
 };
 
 use super::go::model::{GoCallSite, GoFileSemantics, GoFunction, GoImport, GoMethod};

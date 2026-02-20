@@ -80,10 +80,11 @@ impl Rule for DjangoAllowedHostsRule {
                     if value.contains("'*'") || value.contains("\"*\"") {
                         let title = "Django ALLOWED_HOSTS contains wildcard '*'".to_string();
 
-                        let description = 
+                        let description =
                             "ALLOWED_HOSTS contains '*' which allows any host header. \
                              This makes your application vulnerable to host header attacks \
-                             and cache poisoning. In production, specify exact hostnames.".to_string();
+                             and cache poisoning. In production, specify exact hostnames."
+                                .to_string();
 
                         let fix_preview = generate_wildcard_fix_preview();
 
@@ -99,9 +100,9 @@ impl Rule for DjangoAllowedHostsRule {
                             file_path: py.path.clone(),
                             line: Some(assign.location.range.start_line + 1),
                             column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -117,12 +118,13 @@ impl Rule for DjangoAllowedHostsRule {
                     if value == "[]" || value.trim() == "[]" {
                         let title = "Django ALLOWED_HOSTS is empty".to_string();
 
-                        let description = 
+                        let description =
                             "ALLOWED_HOSTS is an empty list. In production with DEBUG=False, \
-                             Django will reject all requests. Configure allowed hostnames.".to_string();
+                             Django will reject all requests. Configure allowed hostnames."
+                                .to_string();
 
                         let fix_preview = generate_empty_fix_preview();
-    
+
                         // Use stdlib_import since we're adding "import os"
                         let patch = generate_allowed_hosts_patch(
                             *file_id,
@@ -143,9 +145,9 @@ impl Rule for DjangoAllowedHostsRule {
                             file_path: py.path.clone(),
                             line: Some(assign.location.range.start_line + 1),
                             column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -162,15 +164,17 @@ impl Rule for DjangoAllowedHostsRule {
                         || value.contains("127.0.0.1")
                         || value.contains(".local");
 
-                    let is_prod_settings = py.path.contains("prod")
-                        || py.path.contains("production");
+                    let is_prod_settings =
+                        py.path.contains("prod") || py.path.contains("production");
 
                     if has_dev_hosts && is_prod_settings {
-                        let title = "Django production settings contain development hosts".to_string();
+                        let title =
+                            "Django production settings contain development hosts".to_string();
 
-                        let description = 
+                        let description =
                             "ALLOWED_HOSTS in production settings contains localhost or \
-                             development hostnames. Remove these for production deployments.".to_string();
+                             development hostnames. Remove these for production deployments."
+                                .to_string();
 
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
@@ -184,16 +188,12 @@ impl Rule for DjangoAllowedHostsRule {
                             file_path: py.path.clone(),
                             line: Some(assign.location.range.start_line + 1),
                             column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: None,
-                            tags: vec![
-                                "python".into(),
-                                "django".into(),
-                                "allowed-hosts".into(),
-                            ],
+                            tags: vec!["python".into(), "django".into(), "allowed-hosts".into()],
                         });
                     }
                 }
@@ -212,10 +212,10 @@ impl Rule for DjangoAllowedHostsRule {
                 if has_django_settings {
                     let title = "Django ALLOWED_HOSTS is not defined".to_string();
 
-                    let description = 
-                        "ALLOWED_HOSTS is not defined in this Django settings file. \
+                    let description = "ALLOWED_HOSTS is not defined in this Django settings file. \
                          When DEBUG=False, Django requires ALLOWED_HOSTS to be set. \
-                         Add ALLOWED_HOSTS with your production hostnames.".to_string();
+                         Add ALLOWED_HOSTS with your production hostnames."
+                        .to_string();
 
                     let fix_preview = generate_missing_fix_preview();
 
@@ -231,9 +231,9 @@ impl Rule for DjangoAllowedHostsRule {
                         file_path: py.path.clone(),
                         line: Some(1),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -256,21 +256,30 @@ impl Rule for DjangoAllowedHostsRule {
 }
 
 /// Generate patch for empty ALLOWED_HOSTS - adds actual import and configuration.
-fn generate_allowed_hosts_patch(file_id: FileId, line: u32, imports: &[PyImport], import_insertion_line: u32) -> FilePatch {
+fn generate_allowed_hosts_patch(
+    file_id: FileId,
+    line: u32,
+    imports: &[PyImport],
+    import_insertion_line: u32,
+) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Add os import at the top only if not already imported
     if !has_os_import(imports) {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+            range: PatchRange::InsertBeforeLine {
+                line: import_insertion_line,
+            },
             replacement: "import os\n".to_string(),
         });
     }
-    
+
     // Add environment-based ALLOWED_HOSTS configuration
     hunks.push(PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
-        replacement: "ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost').split(',')\n".to_string(),
+        replacement:
+            "ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost').split(',')\n"
+                .to_string(),
     });
 
     FilePatch { file_id, hunks }
@@ -308,7 +317,8 @@ ALLOWED_HOSTS = [
     os.environ.get('DJANGO_ALLOWED_HOST', 'localhost'),
     # Add health check endpoints
     'localhost',
-]"#.to_string()
+]"#
+    .to_string()
 }
 
 /// Generate fix preview for empty ALLOWED_HOSTS.
@@ -326,7 +336,8 @@ import os
 ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', '').split(',')
 
 # Filter empty strings:
-ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS if h.strip()]"#.to_string()
+ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS if h.strip()]"#
+        .to_string()
 }
 
 /// Generate fix preview for missing ALLOWED_HOSTS.
@@ -346,7 +357,8 @@ ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost').split(',')
 # With django-environ:
 import environ
 env = environ.Env()
-ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost'])"#.to_string()
+ALLOWED_HOSTS = env.list('ALLOWED_HOSTS', default=['localhost'])"#
+        .to_string()
 }
 
 #[cfg(test)]

@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::circuit_breaker;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -67,11 +67,8 @@ impl Rule for GoMissingCircuitBreakerRule {
             // Look for HTTP client calls
             for call in &go_sem.http_calls {
                 let line = call.location.range.start_line + 1;
-                
-                let title = format!(
-                    "HTTP client call at line {} lacks circuit breaker",
-                    line
-                );
+
+                let title = format!("HTTP client call at line {} lacks circuit breaker", line);
 
                 let description = format!(
                     "HTTP client call at line {} does not use a circuit breaker pattern. \
@@ -97,7 +94,7 @@ impl Rule for GoMissingCircuitBreakerRule {
                     column: Some(1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("// Use gobreaker for circuit breaker pattern".to_string()),
                     tags: vec![
@@ -127,7 +124,8 @@ fn generate_circuit_breaker_patch(file_id: FileId, line: u32) -> FilePatch {
 // result, err := cb.Execute(func() (interface{}, error) {
 //     return http.Get(url)
 // })
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

@@ -29,8 +29,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -130,9 +130,9 @@ impl Rule for RustNaiveDatetimeRule {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(use_stmt.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(format!(
                                 "// Replace:\n\
@@ -211,10 +211,13 @@ impl Rule for RustNaiveDatetimeRule {
                     if callee.contains(pattern) {
                         // Skip if file also uses safe patterns
                         let uses_safe = rust.calls.iter().any(|c| {
-                            SAFE_DATETIME_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
-                        }) || rust.uses.iter().any(|u| {
-                            SAFE_DATETIME_PATTERNS.iter().any(|p| u.path.contains(p))
-                        });
+                            SAFE_DATETIME_PATTERNS
+                                .iter()
+                                .any(|p| c.function_call.callee_expr.contains(p))
+                        }) || rust
+                            .uses
+                            .iter()
+                            .any(|u| SAFE_DATETIME_PATTERNS.iter().any(|p| u.path.contains(p)));
 
                         // Lower severity if also using safe patterns
                         let severity = if uses_safe {
@@ -282,8 +285,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -347,7 +350,7 @@ fn get_timestamp() -> DateTime<Utc> {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag timezone-aware datetime usage
         let naive_findings: Vec<_> = findings
             .iter()

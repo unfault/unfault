@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::circuit_breaker;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::circuit_breaker;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -62,7 +62,10 @@ impl Rule for PythonMissingCircuitBreakerRule {
             let has_circuit_breaker_import = py.imports.iter().any(|imp| {
                 imp.module == "circuitbreaker"
                     || imp.module == "pybreaker"
-                    || imp.names.iter().any(|n| n == "circuit" || n == "CircuitBreaker")
+                    || imp
+                        .names
+                        .iter()
+                        .any(|n| n == "circuit" || n == "CircuitBreaker")
             });
 
             if has_circuit_breaker_import {
@@ -114,7 +117,7 @@ impl Rule for PythonMissingCircuitBreakerRule {
                     column: Some(call.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -256,7 +259,10 @@ def fetch_data():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "python.resilience.missing_circuit_breaker");
+        assert_eq!(
+            findings[0].rule_id,
+            "python.resilience.missing_circuit_breaker"
+        );
     }
 
     #[tokio::test]
@@ -299,6 +305,12 @@ def fetch_data():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(findings[0].fix_preview.is_some());
-        assert!(findings[0].fix_preview.as_ref().unwrap().contains("circuitbreaker"));
+        assert!(
+            findings[0]
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("circuitbreaker")
+        );
     }
 }

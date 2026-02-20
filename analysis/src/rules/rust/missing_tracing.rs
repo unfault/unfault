@@ -28,10 +28,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::Visibility;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::Visibility;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -64,7 +64,10 @@ fn has_tracing_attribute(attributes: &[String]) -> bool {
 }
 
 /// Check if function body contains tracing calls
-fn has_tracing_calls(func_name: &str, rust: &crate::semantics::rust::model::RustFileSemantics) -> bool {
+fn has_tracing_calls(
+    func_name: &str,
+    rust: &crate::semantics::rust::model::RustFileSemantics,
+) -> bool {
     rust.macro_invocations.iter().any(|m| {
         m.function_name.as_deref() == Some(func_name)
             && (m.name.starts_with("tracing::")
@@ -176,8 +179,7 @@ impl Rule for RustMissingTracingRule {
                          // ...\n\
                      }}\n\
                      ```",
-                    func.name,
-                    line
+                    func.name, line
                 );
 
                 let fix_preview = format!(
@@ -211,14 +213,10 @@ impl Rule for RustMissingTracingRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
-                    tags: vec![
-                        "rust".into(),
-                        "observability".into(),
-                        "tracing".into(),
-                    ],
+                    tags: vec!["rust".into(), "observability".into(), "tracing".into()],
                 });
             }
         }
@@ -232,8 +230,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -326,10 +324,7 @@ fn private_helper() {
             .iter()
             .filter(|f| f.rule_id == "rust.missing_tracing")
             .collect();
-        assert!(
-            tracing_findings.is_empty(),
-            "Should skip private functions"
-        );
+        assert!(tracing_findings.is_empty(), "Should skip private functions");
     }
 
     #[tokio::test]
@@ -353,10 +348,7 @@ pub fn test_something() {
             .iter()
             .filter(|f| f.rule_id == "rust.missing_tracing")
             .collect();
-        assert!(
-            tracing_findings.is_empty(),
-            "Should skip test functions"
-        );
+        assert!(tracing_findings.is_empty(), "Should skip test functions");
     }
 
     #[tokio::test]

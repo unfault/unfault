@@ -101,7 +101,11 @@ pub fn summarize_fastapi(file: &ParsedFile) -> Option<FastApiFileSummary> {
     collect_fastapi_routes(file, root, &mut routes);
     collect_fastapi_exception_handlers(file, root, &mut exception_handlers);
 
-    if apps.is_empty() && middlewares.is_empty() && routes.is_empty() && exception_handlers.is_empty() {
+    if apps.is_empty()
+        && middlewares.is_empty()
+        && routes.is_empty()
+        && exception_handlers.is_empty()
+    {
         return None;
     }
 
@@ -474,7 +478,7 @@ fn extract_fastapi_route(file: &ParsedFile, decorated_def: Node) -> Option<FastA
     }
 
     let func_def = func_def?;
-    
+
     // Detect async by checking if the function text starts with "async def"
     // This is the same heuristic used in http.rs
     let fn_text = file.text_for_node(&func_def);
@@ -496,10 +500,10 @@ fn extract_fastapi_route(file: &ParsedFile, decorated_def: Node) -> Option<FastA
             let has_try_except = body_has_try_except(body);
 
             let location = file.location_for_node(&decorated_def);
-            
+
             // Get decorator location (just the decorator line, not the whole function)
             let decorator_location = file.location_for_node(decorator);
-            
+
             // Extract handler parameters with their type annotations
             let handler_params = extract_handler_params(file, &func_def);
 
@@ -553,7 +557,7 @@ fn extract_handler_params(file: &ParsedFile, func_def: &Node) -> Vec<RouteParam>
                     let type_annotation = param_node
                         .child_by_field_name("type")
                         .map(|t| file.text_for_node(&t));
-                    
+
                     if let Some(name) = name {
                         if !name.is_empty() && name != "self" {
                             params.push(RouteParam {
@@ -595,7 +599,7 @@ fn extract_handler_params(file: &ParsedFile, func_def: &Node) -> Vec<RouteParam>
                     let type_annotation = param_node
                         .child_by_field_name("type")
                         .map(|t| file.text_for_node(&t));
-                    
+
                     if let Some(name) = name {
                         if !name.is_empty() && name != "self" {
                             params.push(RouteParam {
@@ -629,11 +633,11 @@ fn parse_typed_param_text(text: &str) -> Option<(String, String)> {
     let colon_idx = text.find(':')?;
     let name = text[..colon_idx].trim().to_string();
     let type_ann = text[colon_idx + 1..].trim().to_string();
-    
+
     if name.is_empty() || type_ann.is_empty() {
         return None;
     }
-    
+
     Some((name, type_ann))
 }
 
@@ -642,7 +646,7 @@ fn parse_typed_default_param_text(text: &str) -> Option<(String, String)> {
     let colon_idx = text.find(':')?;
     let name = text[..colon_idx].trim().to_string();
     let rest = &text[colon_idx + 1..];
-    
+
     // Find the '=' for default value
     if let Some(eq_idx) = rest.find('=') {
         let type_ann = rest[..eq_idx].trim().to_string();
@@ -1290,8 +1294,12 @@ async def create_item(item: dict):
         let summary = summary.unwrap();
 
         assert_eq!(summary.routes.len(), 2);
-        
-        let methods: Vec<&str> = summary.routes.iter().map(|r| r.http_method.as_str()).collect();
+
+        let methods: Vec<&str> = summary
+            .routes
+            .iter()
+            .map(|r| r.http_method.as_str())
+            .collect();
         assert!(methods.contains(&"GET"));
         assert!(methods.contains(&"POST"));
     }
@@ -1369,8 +1377,12 @@ async def patch_handler():
         let summary = summary.unwrap();
 
         assert_eq!(summary.routes.len(), 5);
-        
-        let methods: Vec<&str> = summary.routes.iter().map(|r| r.http_method.as_str()).collect();
+
+        let methods: Vec<&str> = summary
+            .routes
+            .iter()
+            .map(|r| r.http_method.as_str())
+            .collect();
         assert!(methods.contains(&"GET"));
         assert!(methods.contains(&"POST"));
         assert!(methods.contains(&"PUT"));
@@ -1458,8 +1470,14 @@ async def validation_handler(request: Request, exc: RequestValidationError):
 
         assert_eq!(summary.exception_handlers.len(), 1);
         assert_eq!(summary.exception_handlers[0].app_var_name, "app");
-        assert_eq!(summary.exception_handlers[0].exception_type, "RequestValidationError");
-        assert_eq!(summary.exception_handlers[0].handler_name, "validation_handler");
+        assert_eq!(
+            summary.exception_handlers[0].exception_type,
+            "RequestValidationError"
+        );
+        assert_eq!(
+            summary.exception_handlers[0].handler_name,
+            "validation_handler"
+        );
     }
 
     #[test]
@@ -1484,8 +1502,10 @@ async def http_handler(request: Request, exc: HTTPException):
         let summary = summary.unwrap();
 
         assert_eq!(summary.exception_handlers.len(), 2);
-        
-        let types: Vec<&str> = summary.exception_handlers.iter()
+
+        let types: Vec<&str> = summary
+            .exception_handlers
+            .iter()
             .map(|h| h.exception_type.as_str())
             .collect();
         assert!(types.contains(&"RequestValidationError"));
@@ -1528,7 +1548,11 @@ async def http_handler(request: Request, exc):
         let summary = summary.unwrap();
 
         assert_eq!(summary.exception_handlers.len(), 1);
-        assert!(summary.exception_handlers[0].exception_type.contains("HTTPException"));
+        assert!(
+            summary.exception_handlers[0]
+                .exception_type
+                .contains("HTTPException")
+        );
     }
 
     #[test]
@@ -1629,10 +1653,10 @@ def update_item(item_id: int, item: ItemUpdate):
         assert_eq!(summary.routes.len(), 1);
         let params = &summary.routes[0].handler_params;
         assert_eq!(params.len(), 2);
-        
+
         assert_eq!(params[0].name, "item_id");
         assert_eq!(params[0].type_annotation, Some("int".to_string()));
-        
+
         assert_eq!(params[1].name, "item");
         assert_eq!(params[1].type_annotation, Some("ItemUpdate".to_string()));
     }
@@ -1678,7 +1702,10 @@ async def diagnostics(request: DiagnosticsRequest):
         let params = &summary.routes[0].handler_params;
         assert_eq!(params.len(), 1);
         assert_eq!(params[0].name, "request");
-        assert_eq!(params[0].type_annotation, Some("DiagnosticsRequest".to_string()));
+        assert_eq!(
+            params[0].type_annotation,
+            Some("DiagnosticsRequest".to_string())
+        );
     }
 
     #[test]
@@ -1699,10 +1726,10 @@ def create_item(item: ItemCreate, notify: bool = True):
         assert_eq!(summary.routes.len(), 1);
         let params = &summary.routes[0].handler_params;
         assert_eq!(params.len(), 2);
-        
+
         assert_eq!(params[0].name, "item");
         assert_eq!(params[0].type_annotation, Some("ItemCreate".to_string()));
-        
+
         assert_eq!(params[1].name, "notify");
         assert_eq!(params[1].type_annotation, Some("bool".to_string()));
     }
@@ -1726,11 +1753,11 @@ def receive_data(data: dict):
 
         assert_eq!(summary.routes.len(), 1);
         let route = &summary.routes[0];
-        
+
         // decorator_location should only cover the decorator line (line 5, 0-indexed)
         assert_eq!(route.decorator_location.range.start_line, 5);
         assert_eq!(route.decorator_location.range.end_line, 5);
-        
+
         // location should cover the entire decorated function
         assert_eq!(route.location.range.start_line, 5);
         // end_line should be after the function body

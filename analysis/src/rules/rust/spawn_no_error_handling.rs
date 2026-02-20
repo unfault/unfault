@@ -27,10 +27,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::SpawnType;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::SpawnType;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -92,10 +92,7 @@ impl Rule for RustSpawnNoErrorHandlingRule {
                         SpawnType::Other(name) => name,
                     };
 
-                    let title = format!(
-                        "{} without capturing JoinHandle",
-                        spawn_name
-                    );
+                    let title = format!("{} without capturing JoinHandle", spawn_name);
 
                     let description = format!(
                         "`{}` at line {} discards the JoinHandle, making it impossible \
@@ -162,9 +159,9 @@ impl Rule for RustSpawnNoErrorHandlingRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(spawn.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -187,8 +184,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -230,7 +227,7 @@ async fn start() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Note: Detection depends on spawn detection in semantics
         assert!(findings.is_empty() || !findings.is_empty());
     }
@@ -254,9 +251,12 @@ async fn start() {
 
         // If handle is captured, no finding should be generated for uncaptured
         // Note: may still have findings for other reasons
-        assert!(findings.iter().all(|f| {
-            !f.title.contains("without capturing")
-        }) || findings.is_empty());
+        assert!(
+            findings
+                .iter()
+                .all(|f| { !f.title.contains("without capturing") })
+                || findings.is_empty()
+        );
     }
 
     #[tokio::test]

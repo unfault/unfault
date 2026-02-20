@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -85,7 +85,10 @@ impl Rule for SqlxMissingPoolTimeoutRule {
                 // Check if timeout configuration is present nearby
                 let has_acquire_timeout = rust.calls.iter().any(|c| {
                     c.function_call.callee_expr.contains("acquire_timeout")
-                        && (c.function_call.location.line as i64 - call.function_call.location.line as i64).abs() < 10
+                        && (c.function_call.location.line as i64
+                            - call.function_call.location.line as i64)
+                            .abs()
+                            < 10
                 });
 
                 if has_acquire_timeout {
@@ -122,21 +125,22 @@ impl Rule for SqlxMissingPoolTimeoutRule {
                     line
                 );
 
-                let fix_preview = 
-                    "use sqlx::postgres::PgPoolOptions;\n\
+                let fix_preview = "use sqlx::postgres::PgPoolOptions;\n\
                      use std::time::Duration;\n\n\
                      let pool = PgPoolOptions::new()\n    \
                          .max_connections(5)\n    \
                          .acquire_timeout(Duration::from_secs(5))\n    \
                          .idle_timeout(Duration::from_secs(300))\n    \
                          .connect(&database_url)\n    \
-                         .await?;".to_string();
+                         .await?;"
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Add acquire_timeout to pool configuration".to_string(),
+                        replacement: "// TODO: Add acquire_timeout to pool configuration"
+                            .to_string(),
                     }],
                 };
 
@@ -154,7 +158,7 @@ impl Rule for SqlxMissingPoolTimeoutRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -219,9 +223,10 @@ impl Rule for SqlxQueryWithoutTimeoutRule {
             }
 
             // Check if tokio timeout is available
-            let uses_tokio_timeout = rust.uses.iter().any(|u| {
-                u.path.contains("tokio::time::timeout") || u.path.contains("timeout")
-            });
+            let uses_tokio_timeout = rust
+                .uses
+                .iter()
+                .any(|u| u.path.contains("tokio::time::timeout") || u.path.contains("timeout"));
 
             // Look for query execution patterns
             for call in &rust.calls {
@@ -280,15 +285,15 @@ impl Rule for SqlxQueryWithoutTimeoutRule {
                     line
                 );
 
-                let fix_preview = 
-                    "use tokio::time::{timeout, Duration};\n\n\
+                let fix_preview = "use tokio::time::{timeout, Duration};\n\n\
                      let result = timeout(\n    \
                          Duration::from_secs(5),\n    \
                          sqlx::query_as::<_, User>(\"SELECT * FROM users\")\n        \
                              .fetch_all(&pool)\n\
                      )\n\
                      .await\n\
-                     .map_err(|_| AppError::QueryTimeout)??;".to_string();
+                     .map_err(|_| AppError::QueryTimeout)??;"
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
@@ -312,7 +317,7 @@ impl Rule for SqlxQueryWithoutTimeoutRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -378,7 +383,8 @@ impl Rule for SqlxMissingTransactionRule {
 
             // Check for transaction usage
             let uses_transactions = rust.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("begin()") || c.function_call.callee_expr.contains("transaction")
+                c.function_call.callee_expr.contains("begin()")
+                    || c.function_call.callee_expr.contains("transaction")
             });
 
             if uses_transactions {
@@ -449,10 +455,10 @@ impl Rule for SqlxMissingTransactionRule {
                     writes_in_func.len()
                 );
 
-                let fix_preview = 
-                    "let mut tx = pool.begin().await?;\n\n\
+                let fix_preview = "let mut tx = pool.begin().await?;\n\n\
                      // ... database operations using &mut *tx ...\n\n\
-                     tx.commit().await?;".to_string();
+                     tx.commit().await?;"
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
@@ -476,7 +482,7 @@ impl Rule for SqlxMissingTransactionRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -498,8 +504,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -569,7 +575,9 @@ async fn create_pool() -> sqlx::Pool<sqlx::Postgres> {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.sqlx.missing_pool_timeout"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.sqlx.missing_pool_timeout"),
             "Should detect missing pool timeout"
         );
     }

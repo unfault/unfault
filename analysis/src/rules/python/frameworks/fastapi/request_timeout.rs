@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::{ImportInsertionType, PyImport};
 use crate::types::context::Dimension;
@@ -15,7 +15,8 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 /// Check if BaseHTTPMiddleware is already imported from starlette
 fn has_base_http_middleware_import(imports: &[PyImport]) -> bool {
     imports.iter().any(|imp| {
-        (imp.module == "starlette.middleware.base" && imp.names.iter().any(|n| n == "BaseHTTPMiddleware"))
+        (imp.module == "starlette.middleware.base"
+            && imp.names.iter().any(|n| n == "BaseHTTPMiddleware"))
             || imp.names.iter().any(|n| n == "BaseHTTPMiddleware")
     })
 }
@@ -95,18 +96,20 @@ impl Rule for FastApiRequestTimeoutRule {
             // 2. Custom timeout middleware
             // 3. asyncio.timeout usage in middleware
             let has_timeout_middleware = py.imports.iter().any(|imp| {
-                imp.module.contains("timeout")
-                    || imp.names.iter().any(|n| n.contains("Timeout"))
+                imp.module.contains("timeout") || imp.names.iter().any(|n| n.contains("Timeout"))
             }) || py.calls.iter().any(|call| {
                 call.function_call.callee_expr.contains("add_middleware")
-                    && call.args.iter().any(|arg| {
-                        arg.value_repr.contains("Timeout")
-                    })
+                    && call
+                        .args
+                        .iter()
+                        .any(|arg| arg.value_repr.contains("Timeout"))
             });
 
             // Also check for ASGIMiddleware or similar patterns
             let has_asgi_timeout = py.imports.iter().any(|imp| {
-                imp.names.iter().any(|n| n == "ASGIMiddleware" || n == "TimeoutMiddleware")
+                imp.names
+                    .iter()
+                    .any(|n| n == "ASGIMiddleware" || n == "TimeoutMiddleware")
             });
 
             if has_timeout_middleware || has_asgi_timeout {
@@ -116,15 +119,16 @@ impl Rule for FastApiRequestTimeoutRule {
             // For mixed imports (stdlib + third-party), use stdlib_import line
             // since asyncio should be at the top
             let import_line = py.import_insertion_line_for(ImportInsertionType::stdlib_import());
-            
+
             // Check each app for timeout middleware
             for app in &fastapi.apps {
                 // Check if this specific app has timeout middleware
                 let app_has_timeout = py.calls.iter().any(|call| {
                     call.function_call.callee_expr == format!("{}.add_middleware", app.var_name)
-                        && call.args.iter().any(|arg| {
-                            arg.value_repr.contains("Timeout")
-                        })
+                        && call
+                            .args
+                            .iter()
+                            .any(|arg| arg.value_repr.contains("Timeout"))
                 });
 
                 if app_has_timeout {
@@ -139,7 +143,7 @@ impl Rule for FastApiRequestTimeoutRule {
                 let middleware_call = generate_timeout_middleware_call(&app.var_name);
 
                 let mut hunks = Vec::new();
-                
+
                 // Hunk 1: Add imports at the top of the file (only if needed)
                 if !imports.is_empty() {
                     hunks.push(PatchHunk {
@@ -147,20 +151,20 @@ impl Rule for FastApiRequestTimeoutRule {
                         replacement: imports.clone(),
                     });
                 }
-                
+
                 // Hunk 2: Add middleware class BEFORE the app definition
                 // (so the class is defined before it's used)
                 hunks.push(PatchHunk {
                     range: PatchRange::InsertBeforeLine {
-                        line: location.range.start_line + 1,  // Convert 0-based to 1-based
+                        line: location.range.start_line + 1, // Convert 0-based to 1-based
                     },
                     replacement: middleware_class.clone(),
                 });
-                
+
                 // Hunk 3: Add middleware call AFTER the app definition
                 hunks.push(PatchHunk {
                     range: PatchRange::InsertAfterLine {
-                        line: location.range.end_line + 1,  // Convert 0-based to 1-based
+                        line: location.range.end_line + 1, // Convert 0-based to 1-based
                     },
                     replacement: middleware_call.clone(),
                 });
@@ -170,7 +174,8 @@ impl Rule for FastApiRequestTimeoutRule {
                     hunks,
                 };
 
-                let patch_content = format!("{}\n{}\n{}", imports, middleware_class, middleware_call);
+                let patch_content =
+                    format!("{}\n{}\n{}", imports, middleware_class, middleware_call);
 
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),
@@ -197,7 +202,7 @@ impl Rule for FastApiRequestTimeoutRule {
                     column: Some(location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(file_patch),
                     fix_preview: Some(format!(
                         "# Add request timeout middleware:\n{}",
@@ -226,17 +231,19 @@ impl Rule for FastApiRequestTimeoutRule {
 /// Only includes imports that are not already present.
 fn generate_timeout_imports(existing_imports: &[PyImport]) -> String {
     let mut import_lines = Vec::new();
-    
+
     // Standard library imports first
     if !has_asyncio_import(existing_imports) {
         import_lines.push("import asyncio");
     }
     // typing imports for type annotations
     import_lines.push("from typing import Callable");
-    
+
     // Starlette imports
     if !has_base_http_middleware_import(existing_imports) {
-        import_lines.push("from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint");
+        import_lines.push(
+            "from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint",
+        );
     }
     if !has_request_import(existing_imports) {
         import_lines.push("from starlette.requests import Request");
@@ -244,7 +251,7 @@ fn generate_timeout_imports(existing_imports: &[PyImport]) -> String {
     if !has_json_response_import(existing_imports) {
         import_lines.push("from starlette.responses import JSONResponse, Response");
     }
-    
+
     if import_lines.is_empty() {
         String::new()
     } else {
@@ -354,7 +361,10 @@ class TimeoutMiddleware(BaseHTTPMiddleware):
 
 /// Generate the middleware registration call.
 fn generate_timeout_middleware_call(app_var: &str) -> String {
-    format!("{}.add_middleware(TimeoutMiddleware, timeout=30.0)\n", app_var)
+    format!(
+        "{}.add_middleware(TimeoutMiddleware, timeout=30.0)\n",
+        app_var
+    )
 }
 
 #[cfg(test)]
@@ -362,8 +372,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::python::model::PyFileSemantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::python::model::PyFileSemantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -552,7 +562,11 @@ app = FastAPI()
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
         let patch = findings[0].patch.as_ref().unwrap();
-        assert_eq!(patch.hunks.len(), 3, "Should have import hunk + middleware class hunk + middleware call hunk");
+        assert_eq!(
+            patch.hunks.len(),
+            3,
+            "Should have import hunk + middleware class hunk + middleware call hunk"
+        );
     }
 
     #[tokio::test]
@@ -641,35 +655,39 @@ app2 = FastAPI()
         assert!(imports.contains("asyncio"));
         assert!(imports.contains("JSONResponse"));
     }
-    
+
     #[test]
     fn generate_timeout_imports_skips_already_present() {
         use crate::parse::ast::{AstLocation, TextRange};
         use crate::semantics::python::model::{ImportCategory, ImportStyle};
-        
+
         // Simulate asyncio already imported
-        let existing_imports = vec![
-            PyImport {
-                module: "asyncio".to_string(),
-                names: vec![],
-                alias: None,
-                style: ImportStyle::Import,
-                category: ImportCategory::Stdlib,
-                is_module_level: true,
-                location: AstLocation {
-                    file_id: FileId(1),
-                    range: TextRange {
-                        start_line: 0,
-                        start_col: 0,
-                        end_line: 0,
-                        end_col: 0,
-                    },
+        let existing_imports = vec![PyImport {
+            module: "asyncio".to_string(),
+            names: vec![],
+            alias: None,
+            style: ImportStyle::Import,
+            category: ImportCategory::Stdlib,
+            is_module_level: true,
+            location: AstLocation {
+                file_id: FileId(1),
+                range: TextRange {
+                    start_line: 0,
+                    start_col: 0,
+                    end_line: 0,
+                    end_col: 0,
                 },
             },
-        ];
+        }];
         let imports = generate_timeout_imports(&existing_imports);
-        assert!(!imports.contains("import asyncio"), "Should not include already imported asyncio");
-        assert!(imports.contains("BaseHTTPMiddleware"), "Should still include BaseHTTPMiddleware");
+        assert!(
+            !imports.contains("import asyncio"),
+            "Should not include already imported asyncio"
+        );
+        assert!(
+            imports.contains("BaseHTTPMiddleware"),
+            "Should still include BaseHTTPMiddleware"
+        );
     }
 
     #[test]
@@ -697,7 +715,7 @@ app2 = FastAPI()
     #[tokio::test]
     async fn patch_places_middleware_call_after_app_definition() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = FastApiRequestTimeoutRule::new();
         // Source code similar to what user reported
         let src = r#"from fastapi import FastAPI
@@ -713,21 +731,27 @@ def root():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().expect("should have patch");
         let patched = apply_file_patch(src, patch);
-        
+
         // After the fix, the patched code should have:
         // 1. Imports at the top
         // 2. TimeoutMiddleware class definition BEFORE app = FastAPI(...)
         // 3. app.add_middleware(...) AFTER app = FastAPI(...)
-        
+
         // Find the positions of key elements
         // Note: We look for the actual middleware call line, not the docstring example
-        let app_def_pos = patched.find("app = FastAPI").expect("should have app definition");
-        let add_middleware_pos = patched.find("\napp.add_middleware(TimeoutMiddleware").expect("should have add_middleware call (at start of line)");
-        let class_def_pos = patched.find("class TimeoutMiddleware").expect("should have class definition");
-        
+        let app_def_pos = patched
+            .find("app = FastAPI")
+            .expect("should have app definition");
+        let add_middleware_pos = patched
+            .find("\napp.add_middleware(TimeoutMiddleware")
+            .expect("should have add_middleware call (at start of line)");
+        let class_def_pos = patched
+            .find("class TimeoutMiddleware")
+            .expect("should have class definition");
+
         // Verify the order:
         // class definition comes BEFORE app definition
         assert!(
@@ -737,7 +761,7 @@ def root():
             class_def_pos,
             app_def_pos
         );
-        
+
         // add_middleware call comes AFTER app definition
         assert!(
             add_middleware_pos > app_def_pos,
@@ -761,32 +785,48 @@ def root():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().expect("should have patch");
         assert_eq!(patch.hunks.len(), 3);
-        
+
         // Hunk 0: imports - should be inserted at top (line 1)
         match &patch.hunks[0].range {
             PatchRange::InsertBeforeLine { line } => {
-                assert!(*line <= 2, "Import hunk should be near top of file, got line {}", line);
+                assert!(
+                    *line <= 2,
+                    "Import hunk should be near top of file, got line {}",
+                    line
+                );
             }
             other => panic!("Expected InsertBeforeLine for imports, got {:?}", other),
         }
-        
+
         // Hunk 1: middleware class - should be inserted BEFORE app definition (line 3)
         match &patch.hunks[1].range {
             PatchRange::InsertBeforeLine { line } => {
-                assert_eq!(*line, 3, "Middleware class should be inserted before app definition at line 3");
+                assert_eq!(
+                    *line, 3,
+                    "Middleware class should be inserted before app definition at line 3"
+                );
             }
-            other => panic!("Expected InsertBeforeLine for middleware class, got {:?}", other),
+            other => panic!(
+                "Expected InsertBeforeLine for middleware class, got {:?}",
+                other
+            ),
         }
-        
+
         // Hunk 2: middleware call - should be inserted AFTER app definition (line 3)
         match &patch.hunks[2].range {
             PatchRange::InsertAfterLine { line } => {
-                assert_eq!(*line, 3, "Middleware call should be inserted after app definition at line 3");
+                assert_eq!(
+                    *line, 3,
+                    "Middleware call should be inserted after app definition at line 3"
+                );
             }
-            other => panic!("Expected InsertAfterLine for middleware call, got {:?}", other),
+            other => panic!(
+                "Expected InsertAfterLine for middleware call, got {:?}",
+                other
+            ),
         }
     }
 }

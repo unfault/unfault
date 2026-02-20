@@ -28,12 +28,15 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::rust::RustFileSemantics;
 use crate::types::context::Dimension;
-use crate::types::finding::{Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage, Severity};
+use crate::types::finding::{
+    Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage,
+    Severity,
+};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 
 /// Check if tokio::time timeout is already imported
@@ -61,7 +64,7 @@ impl RustMissingAsyncTimeoutRule {
 /// Patterns that indicate external async calls needing timeouts
 const EXTERNAL_CALL_PATTERNS: &[&str] = &[
     ".send().await",
-    ".get(", 
+    ".get(",
     ".post(",
     ".put(",
     ".delete(",
@@ -108,7 +111,8 @@ impl Rule for RustMissingAsyncTimeoutRule {
             benefits: vec![Benefit::Reliability, Benefit::Latency],
             prerequisites: vec!["Pick sensible time budgets for operations".to_string()],
             notes: Some(
-                "Timeouts are almost always appropriate; tune values as the service matures.".to_string(),
+                "Timeouts are almost always appropriate; tune values as the service matures."
+                    .to_string(),
             ),
         })
     }
@@ -142,14 +146,16 @@ impl Rule for RustMissingAsyncTimeoutRule {
                 // We check if:
                 // 1. There's a `timeout` method call in the file (on any callee)
                 // 2. The file has reqwest usage (either via imports or via fully-qualified calls)
-                let file_has_reqwest_timeout = rust.calls.iter().any(|c| {
-                    c.method_name.as_deref() == Some("timeout")
-                }) && (rust.uses.iter().any(|u| {
-                    u.path.contains("reqwest")
-                        || u.path.starts_with("reqwest::")
-                }) || rust.calls.iter().any(|c| {
-                    c.function_call.callee_expr.contains("reqwest::")
-                }));
+                let file_has_reqwest_timeout =
+                    rust.calls
+                        .iter()
+                        .any(|c| c.method_name.as_deref() == Some("timeout"))
+                        && (rust.uses.iter().any(|u| {
+                            u.path.contains("reqwest") || u.path.starts_with("reqwest::")
+                        }) || rust
+                            .calls
+                            .iter()
+                            .any(|c| c.function_call.callee_expr.contains("reqwest::")));
 
                 // Check await points in the function
                 for await_point in &rust.async_info.await_points {
@@ -161,24 +167,23 @@ impl Rule for RustMissingAsyncTimeoutRule {
                     let expr = &await_point.expr;
 
                     // Check if this is an external call pattern
-                    let is_external_call = EXTERNAL_CALL_PATTERNS
-                        .iter()
-                        .any(|p| expr.contains(p));
+                    let is_external_call = EXTERNAL_CALL_PATTERNS.iter().any(|p| expr.contains(p));
 
                     if !is_external_call {
                         continue;
                     }
 
                     // Check if timeout is already applied
-                    let has_timeout = TIMEOUT_PATTERNS
-                        .iter()
-                        .any(|p| expr.contains(p));
+                    let has_timeout = TIMEOUT_PATTERNS.iter().any(|p| expr.contains(p));
 
                     // Treat reqwest client-level `.timeout(...)` as satisfying the requirement.
                     //
                     // Note: formatting can split `.send()` and `.await` across lines.
-                    let looks_like_send_await = expr.contains(".send(") || expr.contains(".send()") || expr.contains(".send\n");
-                    let has_timeout = has_timeout || (file_has_reqwest_timeout && looks_like_send_await);
+                    let looks_like_send_await = expr.contains(".send(")
+                        || expr.contains(".send()")
+                        || expr.contains(".send\n");
+                    let has_timeout =
+                        has_timeout || (file_has_reqwest_timeout && looks_like_send_await);
 
                     if has_timeout {
                         continue;
@@ -186,10 +191,7 @@ impl Rule for RustMissingAsyncTimeoutRule {
 
                     let line = await_point.location.range.start_line + 1;
 
-                    let title = format!(
-                        "Async operation without timeout in '{}'",
-                        func.name
-                    );
+                    let title = format!("Async operation without timeout in '{}'", func.name);
 
                     let description = format!(
                         "The async call at line {} does not have a timeout wrapper.\n\n\
@@ -224,7 +226,7 @@ impl Rule for RustMissingAsyncTimeoutRule {
                     );
 
                     let mut hunks = Vec::new();
-                    
+
                     // Only add import if not already present
                     if !has_tokio_timeout_import(rust) {
                         hunks.push(PatchHunk {
@@ -232,12 +234,13 @@ impl Rule for RustMissingAsyncTimeoutRule {
                             replacement: "use tokio::time::{timeout, Duration};\n".to_string(),
                         });
                     }
-                    
+
                     hunks.push(PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Add timeout wrapper around this async call\n".to_string(),
+                        replacement: "// TODO: Add timeout wrapper around this async call\n"
+                            .to_string(),
                     });
-                    
+
                     let patch = FilePatch {
                         file_id: *file_id,
                         hunks,
@@ -255,9 +258,9 @@ impl Rule for RustMissingAsyncTimeoutRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(await_point.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -280,8 +283,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -347,7 +350,9 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
         );
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.missing_async_timeout"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.missing_async_timeout"),
             "should flag reqwest send().await without timeout"
         );
     }
@@ -371,7 +376,9 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
         );
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            !findings.iter().any(|f| f.rule_id == "rust.missing_async_timeout"),
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "rust.missing_async_timeout"),
             "should not flag when reqwest client is configured with timeout"
         );
     }
@@ -398,7 +405,9 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
         );
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            !findings.iter().any(|f| f.rule_id == "rust.missing_async_timeout"),
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "rust.missing_async_timeout"),
             "should not flag when reqwest client is configured with timeout and send/await are split across lines"
         );
     }
@@ -422,7 +431,9 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
         );
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            !findings.iter().any(|f| f.rule_id == "rust.missing_async_timeout"),
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "rust.missing_async_timeout"),
             "should not flag when reqwest client is configured with timeout using fully-qualified calls"
         );
     }
@@ -455,7 +466,9 @@ async fn get_recipe(id: String) {
         );
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            !findings.iter().any(|f| f.rule_id == "rust.missing_async_timeout"),
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "rust.missing_async_timeout"),
             "should not flag when reqwest client builder is wrapped in match and has timeout"
         );
     }
@@ -490,7 +503,9 @@ async fn get_recipe(id: String) {
         );
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            !findings.iter().any(|f| f.rule_id == "rust.missing_async_timeout"),
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "rust.missing_async_timeout"),
             "should not flag when reqwest client has timeout and chained calls are used"
         );
     }
@@ -528,7 +543,9 @@ async fn get_recipe(id: String) {
         );
         let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
         assert!(
-            !findings.iter().any(|f| f.rule_id == "rust.missing_async_timeout"),
+            !findings
+                .iter()
+                .any(|f| f.rule_id == "rust.missing_async_timeout"),
             "should not flag exact rustee pattern"
         );
     }

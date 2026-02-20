@@ -11,11 +11,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::hardcoded_secrets;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::python::model::{PyCallSite, PyFileSemantics};
 use crate::semantics::SourceSemantics;
+use crate::semantics::python::model::{PyCallSite, PyFileSemantics};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -61,7 +61,7 @@ impl Rule for PythonUnsafeEvalRule {
             for call in &py.calls {
                 let callee = &call.function_call.callee_expr;
                 let args = &call.args_repr;
-                
+
                 // Get the enclosing function's parameter names for taint analysis
                 let enclosing_params = get_enclosing_function_params(py, call);
 
@@ -85,12 +85,16 @@ impl Rule for PythonUnsafeEvalRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column as u32),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(EVAL_FIX.to_string()),
-                        tags: vec!["security".to_string(), "code-injection".to_string(), "rce".to_string()],
+                        tags: vec![
+                            "security".to_string(),
+                            "code-injection".to_string(),
+                            "rce".to_string(),
+                        ],
                     });
                 }
 
@@ -113,12 +117,16 @@ impl Rule for PythonUnsafeEvalRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column as u32),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(EXEC_FIX.to_string()),
-                        tags: vec!["security".to_string(), "code-injection".to_string(), "rce".to_string()],
+                        tags: vec![
+                            "security".to_string(),
+                            "code-injection".to_string(),
+                            "rce".to_string(),
+                        ],
                     });
                 }
 
@@ -189,12 +197,12 @@ impl Rule for PythonUnsafeEvalRule {
                         let attr_arg = parts[1].trim();
                         // Strip parentheses that might wrap the argument
                         let attr_arg = attr_arg.trim_end_matches(')');
-                        
+
                         // If it's a string literal, it's safe
                         if attr_arg.starts_with('"') || attr_arg.starts_with('\'') {
                             continue;
                         }
-                        
+
                         // Only flag if the variable is directly a function parameter (user input)
                         // Variables that come from intermediate sources like dict.get() are not flagged
                         // as they are typically constrained by the dictionary keys
@@ -234,12 +242,12 @@ impl Rule for PythonUnsafeEvalRule {
                         let attr_arg = parts[1].trim();
                         // Strip parentheses that might wrap the argument
                         let attr_arg = attr_arg.trim_end_matches(')');
-                        
+
                         // If it's a string literal, it's safe
                         if attr_arg.starts_with('"') || attr_arg.starts_with('\'') {
                             continue;
                         }
-                        
+
                         // Only flag if the variable is directly a function parameter (user input)
                         if is_user_input(&enclosing_params, attr_arg) {
                             findings.push(RuleFinding {
@@ -271,7 +279,11 @@ impl Rule for PythonUnsafeEvalRule {
                 }
 
                 // Check for pickle.loads() - always potentially unsafe
-                if callee == "pickle.loads" || callee == "pickle.load" || callee == "cPickle.loads" || callee == "cPickle.load" {
+                if callee == "pickle.loads"
+                    || callee == "pickle.load"
+                    || callee == "cPickle.loads"
+                    || callee == "cPickle.load"
+                {
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "Unsafe pickle deserialization".to_string(),
@@ -425,7 +437,7 @@ fn is_user_input(params: &HashSet<String>, var_name: &str) -> bool {
     if params.contains(var_name) {
         return true;
     }
-    
+
     // Attribute access on a parameter (e.g., request.body, user.name)
     // This catches patterns like `getattr(obj, request.attr_name)`
     if let Some(dot_pos) = var_name.find('.') {
@@ -434,7 +446,7 @@ fn is_user_input(params: &HashSet<String>, var_name: &str) -> bool {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -449,7 +461,7 @@ fn generate_yaml_safe_load_patch(call: &PyCallSite, file_id: FileId) -> FilePatc
     } else {
         &call.args_repr
     };
-    
+
     // Replace yaml.load with yaml.safe_load, keeping the same arguments
     let replacement = format!("yaml.safe_load({})", args_trimmed);
 
@@ -615,7 +627,8 @@ mod tests {
         let file_id = FileId(1);
         let parsed = parse_python_file(file_id, &sf).expect("parsing should succeed");
         let mut sem = PyFileSemantics::from_parsed(&parsed);
-        sem.analyze_frameworks(&parsed).expect("framework analysis should succeed");
+        sem.analyze_frameworks(&parsed)
+            .expect("framework analysis should succeed");
         (file_id, Arc::new(SourceSemantics::Python(sem)))
     }
 
@@ -645,11 +658,15 @@ data = yaml.load(yaml_string)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let yaml_findings: Vec<_> = findings.iter()
+        let yaml_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("YAML"))
             .collect();
-        
-        assert!(!yaml_findings.is_empty(), "Should detect unsafe yaml.load()");
+
+        assert!(
+            !yaml_findings.is_empty(),
+            "Should detect unsafe yaml.load()"
+        );
         assert!(yaml_findings[0].patch.is_some(), "Should have a patch");
     }
 
@@ -665,10 +682,11 @@ data = yaml.safe_load(yaml_string)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let yaml_findings: Vec<_> = findings.iter()
+        let yaml_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("YAML"))
             .collect();
-        
+
         assert!(yaml_findings.is_empty(), "Should not flag yaml.safe_load()");
     }
 
@@ -684,11 +702,15 @@ data = yaml.load(yaml_string, Loader=yaml.SafeLoader)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let yaml_findings: Vec<_> = findings.iter()
+        let yaml_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("YAML"))
             .collect();
-        
-        assert!(yaml_findings.is_empty(), "Should not flag yaml.load() with SafeLoader");
+
+        assert!(
+            yaml_findings.is_empty(),
+            "Should not flag yaml.load() with SafeLoader"
+        );
     }
 
     // ==================== YAML Patch Tests ====================
@@ -701,15 +723,22 @@ data = yaml.load(yaml_string, Loader=yaml.SafeLoader)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let yaml_finding = findings.iter()
+        let yaml_finding = findings
+            .iter()
             .find(|f| f.title.contains("YAML"))
             .expect("Should detect unsafe yaml.load()");
-        
+
         let patch = yaml_finding.patch.as_ref().expect("Should have a patch");
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("yaml.safe_load(yaml_string)"), "Patched code should use yaml.safe_load()");
-        assert!(!patched.contains("yaml.load(yaml_string)"), "Patched code should not contain yaml.load()");
+
+        assert!(
+            patched.contains("yaml.safe_load(yaml_string)"),
+            "Patched code should use yaml.safe_load()"
+        );
+        assert!(
+            !patched.contains("yaml.load(yaml_string)"),
+            "Patched code should not contain yaml.load()"
+        );
     }
 
     #[tokio::test]
@@ -720,17 +749,22 @@ data = yaml.load(yaml_string, Loader=yaml.SafeLoader)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let yaml_finding = findings.iter()
+        let yaml_finding = findings
+            .iter()
             .find(|f| f.title.contains("YAML"))
             .expect("Should detect unsafe yaml.load()");
-        
+
         let patch = yaml_finding.patch.as_ref().expect("Should have a patch");
-        
+
         // Verify that one hunk is ReplaceBytes (the actual fix)
-        let has_replace_bytes = patch.hunks.iter().any(|h| {
-            matches!(h.range, PatchRange::ReplaceBytes { .. })
-        });
-        assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+        let has_replace_bytes = patch
+            .hunks
+            .iter()
+            .any(|h| matches!(h.range, PatchRange::ReplaceBytes { .. }));
+        assert!(
+            has_replace_bytes,
+            "Patch should use ReplaceBytes for actual code replacement"
+        );
     }
 
     // ==================== Other Detection Tests ====================
@@ -743,10 +777,11 @@ data = yaml.load(yaml_string, Loader=yaml.SafeLoader)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let eval_findings: Vec<_> = findings.iter()
+        let eval_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("eval"))
             .collect();
-        
+
         assert!(!eval_findings.is_empty(), "Should detect eval()");
     }
 
@@ -758,10 +793,11 @@ data = yaml.load(yaml_string, Loader=yaml.SafeLoader)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let exec_findings: Vec<_> = findings.iter()
+        let exec_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("exec"))
             .collect();
-        
+
         assert!(!exec_findings.is_empty(), "Should detect exec()");
     }
 
@@ -777,10 +813,11 @@ data = pickle.loads(user_data)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let pickle_findings: Vec<_> = findings.iter()
+        let pickle_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("pickle"))
             .collect();
-        
+
         assert!(!pickle_findings.is_empty(), "Should detect pickle.loads()");
     }
 
@@ -796,11 +833,15 @@ subprocess.run(cmd, shell=True)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let shell_findings: Vec<_> = findings.iter()
+        let shell_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("shell"))
             .collect();
-        
-        assert!(!shell_findings.is_empty(), "Should detect subprocess with shell=True");
+
+        assert!(
+            !shell_findings.is_empty(),
+            "Should detect subprocess with shell=True"
+        );
     }
 
     // ==================== getattr/setattr Taint Analysis Tests ====================
@@ -816,12 +857,15 @@ def get_attribute(obj, attr_name):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let getattr_findings: Vec<_> = findings.iter()
+        let getattr_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("getattr"))
             .collect();
-        
-        assert!(!getattr_findings.is_empty(),
-            "Should flag getattr() when attribute name is directly from function parameter");
+
+        assert!(
+            !getattr_findings.is_empty(),
+            "Should flag getattr() when attribute name is directly from function parameter"
+        );
     }
 
     #[tokio::test]
@@ -839,12 +883,15 @@ def get_language(language_id):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let getattr_findings: Vec<_> = findings.iter()
+        let getattr_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("getattr"))
             .collect();
-        
-        assert!(getattr_findings.is_empty(),
-            "Should NOT flag getattr() when attribute name comes from intermediate variable (dict lookup)");
+
+        assert!(
+            getattr_findings.is_empty(),
+            "Should NOT flag getattr() when attribute name comes from intermediate variable (dict lookup)"
+        );
     }
 
     #[tokio::test]
@@ -858,12 +905,15 @@ def get_name(obj):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let getattr_findings: Vec<_> = findings.iter()
+        let getattr_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("getattr"))
             .collect();
-        
-        assert!(getattr_findings.is_empty(),
-            "Should NOT flag getattr() with literal string attribute name");
+
+        assert!(
+            getattr_findings.is_empty(),
+            "Should NOT flag getattr() with literal string attribute name"
+        );
     }
 
     #[tokio::test]
@@ -877,12 +927,15 @@ def get_dynamic_attr(obj, request):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let getattr_findings: Vec<_> = findings.iter()
+        let getattr_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("getattr"))
             .collect();
-        
-        assert!(!getattr_findings.is_empty(),
-            "Should flag getattr() when attribute name is accessed from a parameter (request.attr_name)");
+
+        assert!(
+            !getattr_findings.is_empty(),
+            "Should flag getattr() when attribute name is accessed from a parameter (request.attr_name)"
+        );
     }
 
     #[tokio::test]
@@ -896,12 +949,15 @@ def set_attribute(obj, attr_name, value):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let setattr_findings: Vec<_> = findings.iter()
+        let setattr_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("setattr"))
             .collect();
-        
-        assert!(!setattr_findings.is_empty(),
-            "Should flag setattr() when attribute name is directly from function parameter");
+
+        assert!(
+            !setattr_findings.is_empty(),
+            "Should flag setattr() when attribute name is directly from function parameter"
+        );
     }
 
     #[tokio::test]
@@ -918,12 +974,15 @@ def safe_set(obj, attr_name, value):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let setattr_findings: Vec<_> = findings.iter()
+        let setattr_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("setattr"))
             .collect();
-        
-        assert!(setattr_findings.is_empty(),
-            "Should NOT flag setattr() when attribute name comes from intermediate variable");
+
+        assert!(
+            setattr_findings.is_empty(),
+            "Should NOT flag setattr() when attribute name comes from intermediate variable"
+        );
     }
 
     #[tokio::test]
@@ -939,11 +998,14 @@ result = getattr(os, some_var)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let getattr_findings: Vec<_> = findings.iter()
+        let getattr_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("getattr"))
             .collect();
-        
-        assert!(getattr_findings.is_empty(),
-            "Should NOT flag getattr() at module level (no function parameters to taint-track)");
+
+        assert!(
+            getattr_findings.is_empty(),
+            "Should NOT flag getattr() at module level (no function parameters to taint-track)"
+        );
     }
 }

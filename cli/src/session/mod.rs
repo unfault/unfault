@@ -44,18 +44,18 @@ pub mod workspace;
 pub mod workspace_id;
 pub mod workspace_settings;
 
-pub use graph_builder::{build_local_graph, SerializableGraph};
+pub use graph_builder::{SerializableGraph, build_local_graph};
 pub use header_extractor::{FileHeader, HeaderExtractor, HeaderExtractorConfig};
-pub use ir_builder::{build_ir, build_ir_cached, IrBuildResult};
+pub use ir_builder::{IrBuildResult, build_ir, build_ir_cached};
 pub use patch_applier::{PatchApplier, PatchStats};
 pub use semantics_cache::{CacheStats, SemanticsCache};
 pub use workspace::{
     DetectedFramework, ProgressCallback, ScanProgress, WorkspaceInfo, WorkspaceScanner,
 };
 pub use workspace_id::{
-    compute_workspace_id, get_git_remote, normalize_git_remote, MetaFileInfo, WorkspaceIdResult,
-    WorkspaceIdSource,
+    MetaFileInfo, WorkspaceIdResult, WorkspaceIdSource, compute_workspace_id, get_git_remote,
+    normalize_git_remote,
 };
 pub use workspace_settings::{
-    load_settings, LoadedSettings, RuleSettings, SettingsSource, WorkspaceSettings,
+    LoadedSettings, RuleSettings, SettingsSource, WorkspaceSettings, load_settings,
 };

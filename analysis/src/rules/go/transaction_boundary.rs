@@ -2,14 +2,14 @@
 //!
 //! Detects database transactions that span too long or aren't properly committed/rolled back.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::transaction_boundary;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -54,10 +54,10 @@ impl Rule for GoTransactionBoundaryRule {
 
             // Check for database imports
             let uses_db = go.imports.iter().any(|imp| {
-                imp.path.contains("database/sql") ||
-                imp.path.contains("gorm") ||
-                imp.path.contains("sqlx") ||
-                imp.path.contains("pgx")
+                imp.path.contains("database/sql")
+                    || imp.path.contains("gorm")
+                    || imp.path.contains("sqlx")
+                    || imp.path.contains("pgx")
             });
 
             if !uses_db {
@@ -74,8 +74,11 @@ impl Rule for GoTransactionBoundaryRule {
 
             for call in &go.calls {
                 let callee = &call.function_call.callee_expr;
-                
-                if callee.ends_with(".Begin") || callee.ends_with(".BeginTx") || callee.contains("Transaction") {
+
+                if callee.ends_with(".Begin")
+                    || callee.ends_with(".BeginTx")
+                    || callee.contains("Transaction")
+                {
                     has_begin = true;
                     begin_call_location = Some(&call.function_call.location);
                 }
@@ -85,10 +88,11 @@ impl Rule for GoTransactionBoundaryRule {
                 if callee.ends_with(".Rollback") {
                     has_rollback = true;
                 }
-                
+
                 // Check for HTTP calls
-                if callee.starts_with("http.") && 
-                   (callee.contains("Get") || callee.contains("Post") || callee.contains("Do")) {
+                if callee.starts_with("http.")
+                    && (callee.contains("Get") || callee.contains("Post") || callee.contains("Do"))
+                {
                     has_http_call = true;
                 }
             }
@@ -114,7 +118,8 @@ impl Rule for GoTransactionBoundaryRule {
                             description: Some(
                                 "Database transactions should have 'defer tx.Rollback()' \
                                  immediately after Begin to ensure cleanup on panic or \
-                                 early return. Rollback after Commit is a no-op.".to_string()
+                                 early return. Rollback after Commit is a no-op."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::High,
@@ -124,15 +129,16 @@ impl Rule for GoTransactionBoundaryRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
                                     range: PatchRange::InsertAfterLine { line },
-                                    replacement: 
-"\tdefer tx.Rollback() // Safe: no-op if Commit() succeeds".to_string(),
+                                    replacement:
+                                        "\tdefer tx.Rollback() // Safe: no-op if Commit() succeeds"
+                                            .to_string(),
                                 }],
                             }),
                             fix_preview: Some("Add defer tx.Rollback()".to_string()),
@@ -147,7 +153,8 @@ impl Rule for GoTransactionBoundaryRule {
                             title: "Transaction never committed".to_string(),
                             description: Some(
                                 "Transaction is started but never committed. Ensure \
-                                 tx.Commit() is called on the success path.".to_string()
+                                 tx.Commit() is called on the success path."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::High,
@@ -157,14 +164,16 @@ impl Rule for GoTransactionBoundaryRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
                                     range: PatchRange::InsertBeforeLine { line },
-                                    replacement: "// Add tx.Commit() at the end of successful operations".to_string(),
+                                    replacement:
+                                        "// Add tx.Commit() at the end of successful operations"
+                                            .to_string(),
                                 }],
                             }),
                             fix_preview: Some("Add tx.Commit()".to_string()),

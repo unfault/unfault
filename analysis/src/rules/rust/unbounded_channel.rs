@@ -22,8 +22,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -47,8 +47,14 @@ impl RustUnboundedChannelRule {
 const UNBOUNDED_PATTERNS: &[(&str, &str)] = &[
     ("unbounded_channel", "tokio::sync::mpsc::channel(N)"),
     ("mpsc::unbounded_channel", "tokio::sync::mpsc::channel(N)"),
-    ("std::sync::mpsc::channel", "tokio::sync::mpsc::channel(N) or crossbeam::bounded(N)"),
-    ("crossbeam_channel::unbounded", "crossbeam_channel::bounded(N)"),
+    (
+        "std::sync::mpsc::channel",
+        "tokio::sync::mpsc::channel(N) or crossbeam::bounded(N)",
+    ),
+    (
+        "crossbeam_channel::unbounded",
+        "crossbeam_channel::bounded(N)",
+    ),
     ("flume::unbounded", "flume::bounded(N)"),
     ("async_channel::unbounded", "async_channel::bounded(N)"),
 ];
@@ -83,7 +89,7 @@ impl Rule for RustUnboundedChannelRule {
             // Check call sites for unbounded channel patterns
             for call in &rust.calls {
                 let callee = &call.function_call.callee_expr;
-                
+
                 for (pattern, alternative) in UNBOUNDED_PATTERNS {
                     if callee.contains(pattern) {
                         let line = call.function_call.location.line;
@@ -142,9 +148,9 @@ impl Rule for RustUnboundedChannelRule {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -154,7 +160,7 @@ impl Rule for RustUnboundedChannelRule {
                                 "unbounded".into(),
                             ],
                         });
-                        
+
                         break;
                     }
                 }
@@ -162,8 +168,8 @@ impl Rule for RustUnboundedChannelRule {
 
             // Also check uses for imports of unbounded channels
             for use_stmt in &rust.uses {
-                if use_stmt.path.contains("unbounded_channel") 
-                   || use_stmt.path.contains("unbounded")
+                if use_stmt.path.contains("unbounded_channel")
+                    || use_stmt.path.contains("unbounded")
                 {
                     let line = use_stmt.location.range.start_line + 1;
 
@@ -176,23 +182,19 @@ impl Rule for RustUnboundedChannelRule {
                             use_stmt.path, line
                         )),
                         kind: FindingKind::PerformanceSmell,
-                        severity: Severity::Low,  // Just import, not necessarily used
+                        severity: Severity::Low, // Just import, not necessarily used
                         confidence: 0.70,
                         dimension: Dimension::Scalability,
                         file_id: *file_id,
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(use_stmt.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: None,
-                        tags: vec![
-                            "rust".into(),
-                            "channel".into(),
-                            "import".into(),
-                        ],
+                        tags: vec!["rust".into(), "channel".into(), "import".into()],
                     });
                 }
             }
@@ -207,8 +209,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

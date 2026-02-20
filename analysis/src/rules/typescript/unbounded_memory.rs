@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -65,28 +65,28 @@ impl Rule for TypescriptUnboundedMemoryRule {
             // The source is available via the parsed file, but we need to get it from somewhere
             // For now, we'll check suppression in the semantic model if available
 
-        // Check for unbounded array operations
-        for call in &ts.calls {
-            let is_unbounded = call.callee.ends_with(".push")
-                || call.callee.ends_with(".concat")
-                || call.callee.ends_with(".slice")
-                || (call.callee == "Array" && call.args_repr.contains("fill"))
-                || call.callee.ends_with(".from");
+            // Check for unbounded array operations
+            for call in &ts.calls {
+                let is_unbounded = call.callee.ends_with(".push")
+                    || call.callee.ends_with(".concat")
+                    || call.callee.ends_with(".slice")
+                    || (call.callee == "Array" && call.args_repr.contains("fill"))
+                    || call.callee.ends_with(".from");
 
-            if !is_unbounded {
-                continue;
-            }
+                if !is_unbounded {
+                    continue;
+                }
 
-            // Check if it's inside a loop (using the in_loop field from semantic model)
-            if !call.in_loop {
-                continue;
-            }
+                // Check if it's inside a loop (using the in_loop field from semantic model)
+                if !call.in_loop {
+                    continue;
+                }
 
-            let line = call.location.range.start_line + 1;
-            let column = call.location.range.start_col + 1;
+                let line = call.location.range.start_line + 1;
+                let column = call.location.range.start_col + 1;
 
-            // Suppression is handled centrally in session.rs
-            // The patch adds a suppression marker comment that will be recognized by the centralized filter
+                // Suppression is handled centrally in session.rs
+                // The patch adds a suppression marker comment that will be recognized by the centralized filter
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {

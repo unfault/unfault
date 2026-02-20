@@ -9,11 +9,14 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
-use crate::types::finding::{Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage, Severity};
+use crate::types::finding::{
+    Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage,
+    Severity,
+};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 
 /// Rule that detects HTTP calls without circuit breaker protection.
@@ -147,8 +150,7 @@ impl Rule for RustMissingCircuitBreakerRule {
                     line
                 );
 
-                let fix_preview = 
-                    "use failsafe::{Config, CircuitBreaker};\n\n\
+                let fix_preview = "use failsafe::{Config, CircuitBreaker};\n\n\
                      let circuit_breaker = Config::new()\n    \
                          .failure_threshold(3)\n    \
                          .success_threshold(2)\n    \
@@ -156,13 +158,16 @@ impl Rule for RustMissingCircuitBreakerRule {
                          .build();\n\n\
                      let response = circuit_breaker.call(|| async {\n    \
                          client.get(url).send().await\n\
-                     }).await?;".to_string();
+                     }).await?;"
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Add circuit breaker - use failsafe or recloser crate".to_string(),
+                        replacement:
+                            "// TODO: Add circuit breaker - use failsafe or recloser crate"
+                                .to_string(),
                     }],
                 };
 
@@ -180,7 +185,7 @@ impl Rule for RustMissingCircuitBreakerRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![

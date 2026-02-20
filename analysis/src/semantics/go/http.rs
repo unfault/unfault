@@ -144,9 +144,7 @@ fn extract_http_call(
         // Check for net/http client calls
         if object_text == "http" {
             match method_name.as_str() {
-                "Get" | "Post" | "PostForm" | "Head" => {
-                    (HttpClientKind::NetHttp, method_name)
-                }
+                "Get" | "Post" | "PostForm" | "Head" => (HttpClientKind::NetHttp, method_name),
                 _ => return None,
             }
         } else if object_text.ends_with("Client") || object_text.contains("client") {

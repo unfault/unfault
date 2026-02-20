@@ -73,7 +73,10 @@ impl Rule for SqlAlchemyQueryTimeoutRule {
                 let is_engine_creation = call.function_call.callee_expr == "create_engine"
                     || call.function_call.callee_expr.ends_with(".create_engine")
                     || call.function_call.callee_expr == "create_async_engine"
-                    || call.function_call.callee_expr.ends_with(".create_async_engine");
+                    || call
+                        .function_call
+                        .callee_expr
+                        .ends_with(".create_async_engine");
 
                 if is_engine_creation {
                     let args = &call.args_repr;
@@ -81,17 +84,19 @@ impl Rule for SqlAlchemyQueryTimeoutRule {
                     // Check for timeout configuration
                     let has_connect_args = args.contains("connect_args");
                     let has_execution_options = args.contains("execution_options");
-                    let has_timeout_in_url = args.contains("connect_timeout")
-                        || args.contains("timeout");
+                    let has_timeout_in_url =
+                        args.contains("connect_timeout") || args.contains("timeout");
 
                     if !has_connect_args && !has_execution_options && !has_timeout_in_url {
-                        let title = "SQLAlchemy engine missing query/connection timeout".to_string();
+                        let title =
+                            "SQLAlchemy engine missing query/connection timeout".to_string();
 
-                        let description = 
+                        let description =
                             "SQLAlchemy engine is created without timeout configuration. \
                              Queries can run indefinitely, blocking connections and causing \
                              resource exhaustion. Configure connect_args with timeout settings \
-                             or use execution_options for statement timeouts.".to_string();
+                             or use execution_options for statement timeouts."
+                                .to_string();
 
                         let fix_preview = generate_engine_timeout_fix_preview();
 
@@ -116,9 +121,9 @@ impl Rule for SqlAlchemyQueryTimeoutRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -143,8 +148,8 @@ impl Rule for SqlAlchemyQueryTimeoutRule {
                     let args = &call.args_repr;
 
                     // Check if execution_options with timeout is used
-                    let has_timeout = args.contains("timeout")
-                        || args.contains("execution_options");
+                    let has_timeout =
+                        args.contains("timeout") || args.contains("execution_options");
 
                     // Check if this is likely a SQLAlchemy call
                     let is_likely_sqlalchemy = call.function_call.callee_expr.contains("session")
@@ -161,7 +166,8 @@ impl Rule for SqlAlchemyQueryTimeoutRule {
                                 "Database query is executed without a timeout. Long-running \
                                  queries can block connections and cause cascading failures. \
                                  Use execution_options(timeout=...) or configure statement \
-                                 timeout at the engine level.".to_string()
+                                 timeout at the engine level."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::Low,
@@ -171,9 +177,9 @@ impl Rule for SqlAlchemyQueryTimeoutRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(generate_query_timeout_fix_preview()),
                             tags: vec![
@@ -210,15 +216,15 @@ fn generate_timeout_patch(
     if let (Some(start), Some(end)) = (start_byte, end_byte) {
         // Parse existing args and add timeout configuration
         let args_inner = args.trim().trim_start_matches('(').trim_end_matches(')');
-        
+
         let timeout_config = "connect_args={'connect_timeout': 10}";
-        
+
         let new_call = if args_inner.is_empty() {
             format!("{}({})", callee, timeout_config)
         } else {
             format!("{}({}, {})", callee, args_inner, timeout_config)
         };
-        
+
         return FilePatch {
             file_id,
             hunks: vec![PatchHunk {
@@ -227,7 +233,7 @@ fn generate_timeout_patch(
             }],
         };
     }
-    
+
     // Fallback to comment patch
     let hunks = vec![PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
@@ -296,7 +302,8 @@ engine = create_engine(
         'connect_timeout': int(os.environ.get('DB_CONNECT_TIMEOUT', 10)),
         'options': f'-c statement_timeout={os.environ.get("DB_STATEMENT_TIMEOUT", 30000)}'
     }
-)"#.to_string()
+)"#
+    .to_string()
 }
 
 /// Generate fix preview for query timeout.
@@ -338,7 +345,8 @@ with engine.connect() as conn:
     result = conn.execute(text("SELECT * FROM large_table"))
 
 # For critical queries, always set explicit timeouts
-# to prevent runaway queries from blocking resources"#.to_string()
+# to prevent runaway queries from blocking resources"#
+        .to_string()
 }
 
 #[cfg(test)]

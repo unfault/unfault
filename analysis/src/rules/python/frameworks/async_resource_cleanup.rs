@@ -10,9 +10,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -75,7 +75,7 @@ impl Rule for PythonAsyncResourceCleanupRule {
             // Look for assignments that create async clients without context managers
             for assignment in &py.assignments {
                 let value = &assignment.value_repr;
-                
+
                 // Check for httpx.AsyncClient() or aiohttp.ClientSession()
                 let is_async_client = value.contains("httpx.AsyncClient(")
                     || value.contains("AsyncClient(")
@@ -93,12 +93,7 @@ impl Rule for PythonAsyncResourceCleanupRule {
                 let line = location.range.start_line + 1; // Convert to 1-based
 
                 // Generate a patch to wrap with async with
-                let patch = generate_context_manager_patch(
-                    *file_id,
-                    target,
-                    value,
-                    line,
-                );
+                let patch = generate_context_manager_patch(*file_id, target, value, line);
 
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),
@@ -122,7 +117,7 @@ impl Rule for PythonAsyncResourceCleanupRule {
                     column: Some(location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(format!(
                         "async with {} as {}:\n    # Use {} here",
@@ -136,7 +131,7 @@ impl Rule for PythonAsyncResourceCleanupRule {
             // without being wrapped in async with
             for call in &py.calls {
                 let callee = &call.function_call.callee_expr;
-                
+
                 // Check for direct async client creation calls
                 let is_async_client_call = callee == "httpx.AsyncClient"
                     || callee == "AsyncClient"
@@ -151,21 +146,16 @@ impl Rule for PythonAsyncResourceCleanupRule {
 
                 // Check if this call is already part of an assignment we've flagged
                 // by looking at the line
-                let already_flagged = findings.iter().any(|f| {
-                    f.file_id == *file_id
-                        && f.line == Some(call_line)
-                });
+                let already_flagged = findings
+                    .iter()
+                    .any(|f| f.file_id == *file_id && f.line == Some(call_line));
 
                 if already_flagged {
                     continue;
                 }
 
                 // This is a standalone async client creation - flag it
-                let patch = generate_standalone_call_patch(
-                    *file_id,
-                    callee,
-                    call_line,
-                );
+                let patch = generate_standalone_call_patch(*file_id, callee, call_line);
 
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),
@@ -189,7 +179,7 @@ impl Rule for PythonAsyncResourceCleanupRule {
                     column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(format!(
                         "async with {}() as client:\n    # Use client here",
@@ -215,7 +205,7 @@ fn generate_context_manager_patch(
     // Into: async with httpx.AsyncClient() as client:
     //           # Use client here - move your code inside this block
     //           pass
-    
+
     let new_code = format!(
         "# TODO: Replace the line below with this context manager:\n\
          # async with {} as {}:\n\
@@ -234,11 +224,7 @@ fn generate_context_manager_patch(
 }
 
 /// Generate a patch for standalone async client creation calls.
-fn generate_standalone_call_patch(
-    file_id: FileId,
-    callee: &str,
-    line: u32,
-) -> FilePatch {
+fn generate_standalone_call_patch(file_id: FileId, callee: &str, line: u32) -> FilePatch {
     let suggestion = format!(
         "# TODO: Use context manager instead:\n\
          # async with {}() as client:\n\
@@ -293,7 +279,10 @@ async def fetch():
         let rule = PythonAsyncResourceCleanupRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect httpx.AsyncClient without context manager");
+        assert!(
+            !findings.is_empty(),
+            "Should detect httpx.AsyncClient without context manager"
+        );
         assert!(findings[0].title.contains("AsyncClient") || findings[0].title.contains("client"));
     }
 
@@ -311,7 +300,10 @@ async def fetch():
         let rule = PythonAsyncResourceCleanupRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect aiohttp.ClientSession without context manager");
+        assert!(
+            !findings.is_empty(),
+            "Should detect aiohttp.ClientSession without context manager"
+        );
     }
 
     #[tokio::test]
@@ -328,7 +320,10 @@ async def fetch():
         let rule = PythonAsyncResourceCleanupRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect AsyncClient without context manager");
+        assert!(
+            !findings.is_empty(),
+            "Should detect AsyncClient without context manager"
+        );
     }
 
     #[tokio::test]
@@ -345,7 +340,10 @@ async def fetch():
         let rule = PythonAsyncResourceCleanupRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect ClientSession without context manager");
+        assert!(
+            !findings.is_empty(),
+            "Should detect ClientSession without context manager"
+        );
     }
 
     #[tokio::test]
@@ -442,7 +440,7 @@ async def fetch():
 
         assert!(!findings.is_empty());
         assert!(findings[0].patch.is_some(), "Should generate a patch");
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         assert!(!patch.hunks.is_empty());
         assert!(patch.hunks[0].replacement.contains("async with"));
@@ -494,7 +492,10 @@ async def fetch():
         let rule = PythonAsyncResourceCleanupRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect AsyncClient with parameters");
+        assert!(
+            !findings.is_empty(),
+            "Should detect AsyncClient with parameters"
+        );
     }
 
     #[tokio::test]
@@ -510,7 +511,10 @@ async def fetch():
         let rule = PythonAsyncResourceCleanupRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect ClientSession with parameters");
+        assert!(
+            !findings.is_empty(),
+            "Should detect ClientSession with parameters"
+        );
     }
 
     #[tokio::test]
@@ -537,10 +541,10 @@ async def fetch2():
             language: Language::Python,
             content: src2.to_string(),
         };
-        
+
         let parsed1 = parse_python_file(FileId(1), &sf1).unwrap();
         let parsed2 = parse_python_file(FileId(2), &sf2).unwrap();
-        
+
         let mut sem1 = PyFileSemantics::from_parsed(&parsed1);
         let mut sem2 = PyFileSemantics::from_parsed(&parsed2);
         sem1.analyze_frameworks(&parsed1).unwrap();

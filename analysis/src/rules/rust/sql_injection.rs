@@ -30,8 +30,8 @@ use regex::Regex;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingKind, Severity};
@@ -105,14 +105,20 @@ impl RustSqlInjectionRule {
 
         // If SQL appears within an escaped string literal (documentation/examples),
         // it's not actual SQL being built. Look for patterns like \"SELECT
-        if text.contains("\\\"SELECT") || text.contains("\\\"INSERT")
-            || text.contains("\\\"UPDATE") || text.contains("\\\"DELETE") {
+        if text.contains("\\\"SELECT")
+            || text.contains("\\\"INSERT")
+            || text.contains("\\\"UPDATE")
+            || text.contains("\\\"DELETE")
+        {
             return true;
         }
 
         // Common documentation patterns
-        if text.contains("Example:") || text.contains("Instead of:")
-            || text.contains("// Use:") || text.contains("Safe alternative") {
+        if text.contains("Example:")
+            || text.contains("Instead of:")
+            || text.contains("// Use:")
+            || text.contains("Safe alternative")
+        {
             return true;
         }
 
@@ -123,8 +129,10 @@ impl RustSqlInjectionRule {
     fn is_format_sql(&self, text: &str) -> bool {
         if text.contains("format!") && self.contains_sql(text) {
             // Check for common safe patterns
-            !text.contains("$1") && !text.contains("$2")
-                && !text.contains(":name") && !text.contains(":id")
+            !text.contains("$1")
+                && !text.contains("$2")
+                && !text.contains(":name")
+                && !text.contains(":id")
         } else {
             false
         }
@@ -218,18 +226,19 @@ impl Rule for RustSqlInjectionRule {
                     macro_inv.function_name.as_deref().unwrap_or("<unknown>")
                 );
 
-                let fix_preview = 
-                    "// Use parameterized queries instead of format!:\n\
+                let fix_preview = "// Use parameterized queries instead of format!:\n\
                      sqlx::query(\"SELECT * FROM table WHERE col = $1\")\n    \
                          .bind(value)\n    \
                          .fetch_one(&pool)\n    \
-                         .await?;".to_string();
+                         .await?;"
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// SECURITY: Replace format!() with parameterized query".to_string(),
+                        replacement: "// SECURITY: Replace format!() with parameterized query"
+                            .to_string(),
                     }],
                 };
 
@@ -247,7 +256,7 @@ impl Rule for RustSqlInjectionRule {
                     column: Some(macro_inv.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -263,16 +272,19 @@ impl Rule for RustSqlInjectionRule {
             for call in &rust.calls {
                 // Look for patterns like client.execute() with format! or string concat
                 let callee_lower = call.function_call.callee_expr.to_lowercase();
-                
-                if !(callee_lower.contains(".execute(") 
+
+                if !(callee_lower.contains(".execute(")
                     || callee_lower.contains(".query(")
                     || callee_lower.contains("raw_sql(")
-                    || callee_lower.contains("sql(")) {
+                    || callee_lower.contains("sql("))
+                {
                     continue;
                 }
 
                 // Check if there's a format! or concat in the call
-                if !self.is_format_sql(&call.function_call.callee_expr) && !self.is_concat_sql(&call.function_call.callee_expr) {
+                if !self.is_format_sql(&call.function_call.callee_expr)
+                    && !self.is_concat_sql(&call.function_call.callee_expr)
+                {
                     continue;
                 }
 
@@ -296,14 +308,10 @@ impl Rule for RustSqlInjectionRule {
                     column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: None,
                     fix_preview: None,
-                    tags: vec![
-                        "rust".into(),
-                        "security".into(),
-                        "sql-injection".into(),
-                    ],
+                    tags: vec!["rust".into(), "security".into(), "sql-injection".into()],
                 });
             }
         }
@@ -317,8 +325,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -573,10 +581,7 @@ fn test_query() {
             .iter()
             .filter(|f| f.rule_id == "rust.sql_injection")
             .collect();
-        assert!(
-            sql_findings.is_empty(),
-            "Should skip test functions"
-        );
+        assert!(sql_findings.is_empty(), "Should skip test functions");
     }
 
     #[tokio::test]

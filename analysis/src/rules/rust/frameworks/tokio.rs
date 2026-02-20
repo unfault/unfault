@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingKind, Severity};
@@ -71,9 +71,10 @@ impl Rule for TokioMissingGracefulShutdownRule {
 
             // Check if this looks like a main entry point
             let has_main = rust.functions.iter().any(|f| f.name == "main");
-            let has_tokio_main = rust.macro_invocations.iter().any(|m| {
-                m.name.contains("tokio::main") || m.name == "main"
-            });
+            let has_tokio_main = rust
+                .macro_invocations
+                .iter()
+                .any(|m| m.name.contains("tokio::main") || m.name == "main");
 
             if !has_main && !has_tokio_main {
                 continue;
@@ -145,7 +146,7 @@ impl Rule for TokioMissingGracefulShutdownRule {
                     line
                 );
 
-                let fix_preview = 
+                let fix_preview =
                     "use tokio::signal;\n\n\
                      async fn shutdown_signal() {\n    \
                          let ctrl_c = async {\n        \
@@ -172,7 +173,9 @@ impl Rule for TokioMissingGracefulShutdownRule {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Implement graceful shutdown - use tokio::signal::ctrl_c()".to_string(),
+                        replacement:
+                            "// TODO: Implement graceful shutdown - use tokio::signal::ctrl_c()"
+                                .to_string(),
                     }],
                 };
 
@@ -190,7 +193,7 @@ impl Rule for TokioMissingGracefulShutdownRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -256,8 +259,7 @@ impl Rule for TokioMissingRuntimeConfigRule {
 
             // Look for #[tokio::main] without configuration
             let has_simple_tokio_main = rust.macro_invocations.iter().any(|m| {
-                let is_tokio_main =
-                    m.name == "tokio::main" || m.name.contains("tokio :: main");
+                let is_tokio_main = m.name == "tokio::main" || m.name.contains("tokio :: main");
 
                 // Check if it has configuration parameters
                 let has_config = m.args.contains("flavor")
@@ -309,17 +311,19 @@ impl Rule for TokioMissingRuntimeConfigRule {
                     line
                 );
 
-                let fix_preview =
-                    "#[tokio::main(flavor = \"multi_thread\", worker_threads = 4)]\n\
+                let fix_preview = "#[tokio::main(flavor = \"multi_thread\", worker_threads = 4)]\n\
                      async fn main() {\n    \
                          // ...\n\
-                     }".to_string();
+                     }"
+                .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Configure Tokio runtime - add flavor and worker_threads".to_string(),
+                        replacement:
+                            "// TODO: Configure Tokio runtime - add flavor and worker_threads"
+                                .to_string(),
                     }],
                 };
 
@@ -337,7 +341,7 @@ impl Rule for TokioMissingRuntimeConfigRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -359,8 +363,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -426,7 +430,9 @@ async fn main() {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.tokio.missing_graceful_shutdown"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.tokio.missing_graceful_shutdown"),
             "Should detect missing graceful shutdown"
         );
     }

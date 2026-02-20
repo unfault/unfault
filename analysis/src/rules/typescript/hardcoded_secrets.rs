@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -64,8 +64,20 @@ impl TypescriptHardcodedSecretsRule {
         }
 
         let secret_prefixes = [
-            "sk-", "pk_", "sk_", "xoxb-", "xoxp-", "ghp_", "gho_", "ghu_", "ghs_", "github_pat",
-            "Bearer ", "Basic ", "eyJ", "AKIA",
+            "sk-",
+            "pk_",
+            "sk_",
+            "xoxb-",
+            "xoxp-",
+            "ghp_",
+            "gho_",
+            "ghu_",
+            "ghs_",
+            "github_pat",
+            "Bearer ",
+            "Basic ",
+            "eyJ",
+            "AKIA",
         ];
 
         for prefix in &secret_prefixes {
@@ -151,7 +163,11 @@ impl Rule for TypescriptHardcodedSecretsRule {
                             },
                             replacement: format!(
                                 "{} {} = process.env.{} || '';",
-                                if var.is_exported { "export const" } else { "const" },
+                                if var.is_exported {
+                                    "export const"
+                                } else {
+                                    "const"
+                                },
                                 var.name,
                                 env_var_name
                             ),
@@ -175,9 +191,9 @@ impl Rule for TypescriptHardcodedSecretsRule {
                         file_path: ts.path.clone(),
                         line: Some(var.location.range.start_line + 1),
                         column: Some(var.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -212,16 +228,12 @@ impl Rule for TypescriptHardcodedSecretsRule {
                         file_path: ts.path.clone(),
                         line: Some(var.location.range.start_line + 1),
                         column: Some(var.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: None,
-                        tags: vec![
-                            "typescript".into(),
-                            "security".into(),
-                            "secrets".into(),
-                        ],
+                        tags: vec!["typescript".into(), "security".into(), "secrets".into()],
                     });
                 }
             }

@@ -28,8 +28,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::rust::RustFileSemantics;
 use crate::types::context::Dimension;
@@ -39,7 +39,8 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 /// Check if CancellationToken is already imported
 fn has_cancellation_token_import(rust: &RustFileSemantics) -> bool {
     rust.uses.iter().any(|u| {
-        u.path.contains("CancellationToken") || u.path.contains("tokio_util::sync::CancellationToken")
+        u.path.contains("CancellationToken")
+            || u.path.contains("tokio_util::sync::CancellationToken")
     })
 }
 
@@ -103,18 +104,22 @@ impl Rule for RustUncancelledTasksRule {
 
             // Check if file has any cancellation patterns
             let has_cancellation = rust.calls.iter().any(|c| {
-                CANCELLATION_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
-            }) || rust.uses.iter().any(|u| {
-                CANCELLATION_PATTERNS.iter().any(|p| u.path.contains(p))
-            });
+                CANCELLATION_PATTERNS
+                    .iter()
+                    .any(|p| c.function_call.callee_expr.contains(p))
+            }) || rust
+                .uses
+                .iter()
+                .any(|u| CANCELLATION_PATTERNS.iter().any(|p| u.path.contains(p)));
 
             // Check spawn calls
             for spawn_call in &rust.async_info.spawn_calls {
                 // Skip spawns in test functions
                 let func_name = spawn_call.function_name.clone().unwrap_or_default();
-                let in_test = rust.functions.iter().any(|f| {
-                    f.name == func_name && (f.is_test || f.has_test_attribute)
-                });
+                let in_test = rust
+                    .functions
+                    .iter()
+                    .any(|f| f.name == func_name && (f.is_test || f.has_test_attribute));
 
                 if in_test {
                     continue;
@@ -146,9 +151,9 @@ impl Rule for RustUncancelledTasksRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(spawn_call.location.range.start_col),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(create_handle_capture_patch(line, *file_id)),
                         fix_preview: Some(create_handle_fix_preview()),
                         tags: vec![
@@ -189,9 +194,9 @@ impl Rule for RustUncancelledTasksRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(spawn_call.location.range.start_col),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(create_cancellation_patch(line, *file_id, rust)),
                         fix_preview: Some(create_cancellation_fix_preview()),
                         tags: vec![
@@ -216,7 +221,8 @@ fn create_handle_capture_patch(line: u32, file_id: FileId) -> FilePatch {
         hunks: vec![PatchHunk {
             range: PatchRange::InsertBeforeLine { line },
             replacement: "// TODO: Capture spawn handle for cancellation\n\
-                         // let handle = ".to_string(),
+                         // let handle = "
+                .to_string(),
         }],
     }
 }
@@ -231,12 +237,13 @@ let handle = tokio::spawn(background_work());
 
 // On shutdown:
 handle.abort();
-// Or: handle.await.unwrap();"#.to_string()
+// Or: handle.await.unwrap();"#
+        .to_string()
 }
 
 fn create_cancellation_patch(line: u32, file_id: FileId, rust: &RustFileSemantics) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Only add import if not already present
     if !has_cancellation_token_import(rust) {
         hunks.push(PatchHunk {
@@ -244,12 +251,12 @@ fn create_cancellation_patch(line: u32, file_id: FileId, rust: &RustFileSemantic
             replacement: "use tokio_util::sync::CancellationToken;\n".to_string(),
         });
     }
-    
+
     hunks.push(PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
         replacement: "// TODO: Add cancellation support to this spawn\n".to_string(),
     });
-    
+
     FilePatch { file_id, hunks }
 }
 
@@ -274,7 +281,8 @@ let handle = tokio::spawn(async move {
 
 // On shutdown:
 cancel_token.cancel();
-handle.await.ok();"#.to_string()
+handle.await.ok();"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -282,8 +290,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

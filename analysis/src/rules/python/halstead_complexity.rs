@@ -36,11 +36,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::python::model::PyFileSemantics;
 use crate::semantics::SourceSemantics;
+use crate::semantics::python::model::PyFileSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 
@@ -169,29 +169,22 @@ impl HalsteadMetrics {
 #[allow(dead_code)]
 const PYTHON_OPERATORS: &[&str] = &[
     // Arithmetic
-    "+", "-", "*", "/", "//", "%", "**", "@",
-    // Comparison
-    "==", "!=", "<", ">", "<=", ">=",
-    // Assignment
-    "=", "+=", "-=", "*=", "/=", "//=", "%=", "**=", "@=",
-    "&=", "|=", "^=", ">>=", "<<=", ":=",
+    "+", "-", "*", "/", "//", "%", "**", "@", // Comparison
+    "==", "!=", "<", ">", "<=", ">=", // Assignment
+    "=", "+=", "-=", "*=", "/=", "//=", "%=", "**=", "@=", "&=", "|=", "^=", ">>=", "<<=", ":=",
     // Bitwise
-    "&", "|", "^", "~", "<<", ">>",
-    // Logical (as node kinds)
-    "and", "or", "not",
-    // Membership/identity (as node kinds)
-    "in", "is",
-    // Structural
+    "&", "|", "^", "~", "<<", ">>", // Logical (as node kinds)
+    "and", "or", "not", // Membership/identity (as node kinds)
+    "in", "is", // Structural
     "(", ")", "[", "]", "{", "}", ",", ":", ";", ".", "->",
 ];
 
 /// Python keywords that count as operators
 #[allow(dead_code)]
 const PYTHON_KEYWORD_OPERATORS: &[&str] = &[
-    "if", "elif", "else", "for", "while", "try", "except", "finally",
-    "with", "return", "yield", "pass", "break", "continue", "raise",
-    "assert", "def", "class", "lambda", "import", "from", "as",
-    "global", "nonlocal", "del", "async", "await",
+    "if", "elif", "else", "for", "while", "try", "except", "finally", "with", "return", "yield",
+    "pass", "break", "continue", "raise", "assert", "def", "class", "lambda", "import", "from",
+    "as", "global", "nonlocal", "del", "async", "await",
 ];
 
 #[async_trait]
@@ -232,8 +225,12 @@ impl Rule for PythonHalsteadComplexityRule {
             // In a full implementation, we'd re-parse or cache the AST
             for func in &py.functions {
                 // Skip small functions
-                let line_count = func.location.range.end_line
-                    .saturating_sub(func.location.range.start_line) + 1;
+                let line_count = func
+                    .location
+                    .range
+                    .end_line
+                    .saturating_sub(func.location.range.start_line)
+                    + 1;
                 if line_count < 5 {
                     continue;
                 }
@@ -277,38 +274,42 @@ fn is_test_file(path: &str) -> bool {
 }
 
 /// Estimate Halstead metrics from function metadata.
-/// 
+///
 /// This is a heuristic approach based on:
 /// - Parameter count
 /// - Function line count
 /// - Body hash (as a proxy for complexity)
-/// 
+///
 /// A full implementation would walk the actual AST.
 fn estimate_halstead_from_function(
     func: &crate::semantics::python::model::PyFunction,
     _py: &PyFileSemantics,
 ) -> HalsteadMetrics {
-    let line_count = func.location.range.end_line
-        .saturating_sub(func.location.range.start_line) + 1;
-    
+    let line_count = func
+        .location
+        .range
+        .end_line
+        .saturating_sub(func.location.range.start_line)
+        + 1;
+
     // Heuristic estimation based on function size
     // Average Python line has ~2-3 operators and ~3-4 operands
     let estimated_operators_per_line = 2.5;
     let estimated_operands_per_line = 3.5;
-    
+
     let total_operators = (line_count as f64 * estimated_operators_per_line) as usize;
     let total_operands = (line_count as f64 * estimated_operands_per_line) as usize;
-    
+
     // Distinct operators/operands are typically much smaller
     // Typically distinct = sqrt(total) to 2*sqrt(total)
     let distinct_operators = ((total_operators as f64).sqrt() * 1.5) as usize;
     let distinct_operands = ((total_operands as f64).sqrt() * 2.0) as usize;
-    
+
     // Add contributions from parameters
     let param_operands = func.params.len();
     let total_operands = total_operands + param_operands;
     let distinct_operands = distinct_operands + param_operands;
-    
+
     HalsteadMetrics::compute(
         distinct_operators.max(1),
         distinct_operands.max(1),
@@ -318,18 +319,22 @@ fn estimate_halstead_from_function(
 }
 
 /// Compute Halstead metrics by walking an AST node.
-/// 
+///
 /// This is the proper implementation that counts actual operators and operands.
-pub fn compute_halstead_from_ast(
-    node: &tree_sitter::Node,
-    source: &str,
-) -> HalsteadMetrics {
+pub fn compute_halstead_from_ast(node: &tree_sitter::Node, source: &str) -> HalsteadMetrics {
     let mut operators: HashSet<String> = HashSet::new();
     let mut operands: HashSet<String> = HashSet::new();
     let mut total_operators = 0usize;
     let mut total_operands = 0usize;
 
-    walk_ast_for_halstead(node, source, &mut operators, &mut operands, &mut total_operators, &mut total_operands);
+    walk_ast_for_halstead(
+        node,
+        source,
+        &mut operators,
+        &mut operands,
+        &mut total_operators,
+        &mut total_operands,
+    );
 
     HalsteadMetrics::compute(
         operators.len().max(1),
@@ -354,35 +359,111 @@ fn walk_ast_for_halstead(
     // Classify node as operator or operand
     match kind {
         // Operators (keywords and control flow)
-        "if" | "elif" | "else" | "for" | "while" | "try" | "except" | "finally"
-        | "with" | "return" | "yield" | "pass" | "break" | "continue" | "raise"
-        | "assert" | "def" | "class" | "lambda" | "import" | "from" | "as"
-        | "global" | "nonlocal" | "del" | "async" | "await"
-        | "if_statement" | "for_statement" | "while_statement" | "try_statement"
-        | "with_statement" | "return_statement" | "raise_statement"
-        | "assert_statement" | "function_definition" | "class_definition"
-        | "import_statement" | "import_from_statement" => {
+        "if"
+        | "elif"
+        | "else"
+        | "for"
+        | "while"
+        | "try"
+        | "except"
+        | "finally"
+        | "with"
+        | "return"
+        | "yield"
+        | "pass"
+        | "break"
+        | "continue"
+        | "raise"
+        | "assert"
+        | "def"
+        | "class"
+        | "lambda"
+        | "import"
+        | "from"
+        | "as"
+        | "global"
+        | "nonlocal"
+        | "del"
+        | "async"
+        | "await"
+        | "if_statement"
+        | "for_statement"
+        | "while_statement"
+        | "try_statement"
+        | "with_statement"
+        | "return_statement"
+        | "raise_statement"
+        | "assert_statement"
+        | "function_definition"
+        | "class_definition"
+        | "import_statement"
+        | "import_from_statement" => {
             operators.insert(kind.to_string());
             *total_operators += 1;
         }
 
         // Binary operators
-        "+" | "-" | "*" | "/" | "//" | "%" | "**" | "@"
-        | "==" | "!=" | "<" | ">" | "<=" | ">="
-        | "&" | "|" | "^" | "~" | "<<" | ">>"
-        | "and" | "or" | "not" | "in" | "is"
-        | "binary_operator" | "boolean_operator" | "comparison_operator"
+        "+"
+        | "-"
+        | "*"
+        | "/"
+        | "//"
+        | "%"
+        | "**"
+        | "@"
+        | "=="
+        | "!="
+        | "<"
+        | ">"
+        | "<="
+        | ">="
+        | "&"
+        | "|"
+        | "^"
+        | "~"
+        | "<<"
+        | ">>"
+        | "and"
+        | "or"
+        | "not"
+        | "in"
+        | "is"
+        | "binary_operator"
+        | "boolean_operator"
+        | "comparison_operator"
         | "not_operator" => {
-            let op_text = if text.len() < 10 { text.clone() } else { kind.to_string() };
+            let op_text = if text.len() < 10 {
+                text.clone()
+            } else {
+                kind.to_string()
+            };
             operators.insert(op_text);
             *total_operators += 1;
         }
 
         // Assignment operators
-        "=" | "+=" | "-=" | "*=" | "/=" | "//=" | "%=" | "**=" | "@="
-        | "&=" | "|=" | "^=" | ">>=" | "<<=" | ":="
-        | "assignment" | "augmented_assignment" => {
-            let op_text = if text.len() < 5 { text.clone() } else { kind.to_string() };
+        "="
+        | "+="
+        | "-="
+        | "*="
+        | "/="
+        | "//="
+        | "%="
+        | "**="
+        | "@="
+        | "&="
+        | "|="
+        | "^="
+        | ">>="
+        | "<<="
+        | ":="
+        | "assignment"
+        | "augmented_assignment" => {
+            let op_text = if text.len() < 5 {
+                text.clone()
+            } else {
+                kind.to_string()
+            };
             operators.insert(op_text);
             *total_operators += 1;
         }
@@ -439,7 +520,14 @@ fn walk_ast_for_halstead(
     let child_count = node.child_count();
     for i in 0..child_count {
         if let Some(child) = node.child(i) {
-            walk_ast_for_halstead(&child, source, operators, operands, total_operators, total_operands);
+            walk_ast_for_halstead(
+                &child,
+                source,
+                operators,
+                operands,
+                total_operators,
+                total_operands,
+            );
         }
     }
 }
@@ -526,7 +614,7 @@ fn create_finding(
         column: Some(1),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         // No auto-patch for complexity - requires human judgment
         patch: None,
         fix_preview: None,
@@ -548,7 +636,7 @@ mod tests {
     #[test]
     fn halstead_metrics_compute_basic() {
         let metrics = HalsteadMetrics::compute(10, 15, 50, 80);
-        
+
         assert_eq!(metrics.distinct_operators, 10);
         assert_eq!(metrics.distinct_operands, 15);
         assert_eq!(metrics.total_operators, 50);
@@ -614,7 +702,7 @@ mod tests {
             total_operands: 120,
             vocabulary: 35,
             program_length: 200,
-            volume: 1200.0, // Above medium, below high
+            volume: 1200.0,   // Above medium, below high
             difficulty: 25.0, // Below medium threshold
             effort: 30000.0,
             time_seconds: 1666.0,
@@ -698,14 +786,16 @@ mod tests {
     fn compute_halstead_from_ast_counts_operators() {
         // Create a simple Python parser to test
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_python::LANGUAGE.into()).unwrap();
-        
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+
         let source = "x = 1 + 2";
         let tree = parser.parse(source, None).unwrap();
         let root = tree.root_node();
-        
+
         let metrics = compute_halstead_from_ast(&root, source);
-        
+
         // Should have operators: =, +
         assert!(metrics.distinct_operators >= 2);
         // Should have operands: x, 1, 2
@@ -715,17 +805,19 @@ mod tests {
     #[test]
     fn compute_halstead_from_ast_handles_function() {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_python::LANGUAGE.into()).unwrap();
-        
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+
         let source = r#"
 def add(a, b):
     return a + b
 "#;
         let tree = parser.parse(source, None).unwrap();
         let root = tree.root_node();
-        
+
         let metrics = compute_halstead_from_ast(&root, source);
-        
+
         // Should have multiple operators and operands
         assert!(metrics.total_operators > 0);
         assert!(metrics.total_operands > 0);
@@ -735,8 +827,10 @@ def add(a, b):
     #[test]
     fn compute_halstead_from_ast_complex_function() {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_python::LANGUAGE.into()).unwrap();
-        
+        parser
+            .set_language(&tree_sitter_python::LANGUAGE.into())
+            .unwrap();
+
         let source = r#"
 def process(items, threshold):
     results = []
@@ -750,9 +844,9 @@ def process(items, threshold):
 "#;
         let tree = parser.parse(source, None).unwrap();
         let root = tree.root_node();
-        
+
         let metrics = compute_halstead_from_ast(&root, source);
-        
+
         // Complex function should have higher metrics
         assert!(metrics.vocabulary > 10);
         assert!(metrics.program_length > 20);
@@ -773,7 +867,7 @@ def process(items, threshold):
             &metrics,
             Severity::High,
         );
-        
+
         assert_eq!(finding.dimension, Dimension::Maintainability);
     }
 
@@ -789,7 +883,7 @@ def process(items, threshold):
             &metrics,
             Severity::Medium,
         );
-        
+
         assert!(finding.tags.contains(&"halstead".to_string()));
         assert!(finding.tags.contains(&"complexity".to_string()));
         assert!(finding.tags.contains(&"maintainability".to_string()));
@@ -807,7 +901,7 @@ def process(items, threshold):
             &metrics,
             Severity::Medium,
         );
-        
+
         // Complexity issues require human judgment to fix
         assert!(finding.patch.is_none());
     }
@@ -824,7 +918,7 @@ def process(items, threshold):
             &metrics,
             Severity::Medium,
         );
-        
+
         assert!(finding.title.contains("my_function"));
         assert!(finding.title.contains("Volume"));
         assert!(finding.title.contains("Difficulty"));

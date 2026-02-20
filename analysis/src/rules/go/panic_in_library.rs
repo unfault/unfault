@@ -3,14 +3,14 @@
 //! Detects panic() calls in library code (non-main packages), which is
 //! generally an antipattern. Libraries should return errors instead.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -82,18 +82,21 @@ impl Rule for GoPanicInLibraryRule {
             // Look for panic calls
             for call in &go.calls {
                 let is_panic_call = PANIC_PATTERNS.iter().any(|p| {
-                    call.function_call.callee_expr == p.trim_end_matches('(') || 
-                    call.function_call.callee_expr.ends_with(p.trim_end_matches('('))
+                    call.function_call.callee_expr == p.trim_end_matches('(')
+                        || call
+                            .function_call
+                            .callee_expr
+                            .ends_with(p.trim_end_matches('('))
                 });
 
                 if is_panic_call || call.function_call.callee_expr == "panic" {
                     let line = call.function_call.location.line;
-                    
+
                     // Check if this is in an init() function (more acceptable)
                     let in_init = go.functions.iter().any(|f| {
-                        f.name == "init" && 
-                        f.location.range.start_line < call.function_call.location.line &&
-                        f.location.range.start_line + 50 > call.function_call.location.line
+                        f.name == "init"
+                            && f.location.range.start_line < call.function_call.location.line
+                            && f.location.range.start_line + 50 > call.function_call.location.line
                     });
 
                     // Different severity for init() vs regular functions
@@ -167,9 +170,9 @@ impl Rule for GoPanicInLibraryRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("Return error instead of panic".to_string()),
                         tags: vec![
@@ -187,11 +190,8 @@ impl Rule for GoPanicInLibraryRule {
                 if func.name.starts_with("Must") && !func.returns_error {
                     // Check if this function likely panics (no error return)
                     let line = func.location.range.start_line + 1;
-                    
-                    let title = format!(
-                        "Must* function '{}' in library may panic",
-                        func.name
-                    );
+
+                    let title = format!("Must* function '{}' in library may panic", func.name);
 
                     let description = format!(
                         "Function '{}' at line {} follows the Must* naming convention which \
@@ -224,16 +224,12 @@ impl Rule for GoPanicInLibraryRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some("Provide non-panicking alternative".to_string()),
-                        tags: vec![
-                            "go".into(),
-                            "panic".into(),
-                            "must-function".into(),
-                        ],
+                        tags: vec!["go".into(), "panic".into(), "must-function".into()],
                     });
                 }
             }
@@ -248,8 +244,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -274,7 +270,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_panic_in_library() {
         let rule = GoPanicInLibraryRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package mylib
 
 func Process(x int) int {
@@ -283,10 +280,11 @@ func Process(x int) int {
     }
     return x * 2
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(findings.iter().any(|f| f.rule_id == "go.panic_in_library"));
     }
 
@@ -304,17 +302,19 @@ func main() {
         panic(err)
     }
 }
-"#.to_string(),
+"#
+            .to_string(),
         };
         let file_id = FileId(1);
         let parsed = parse_go_file(file_id, &sf).expect("parsing should succeed");
         let sem = build_go_semantics(&parsed).expect("semantics should build");
         let semantics = vec![(file_id, Arc::new(SourceSemantics::Go(sem)))];
-        
+
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag main package
-        let panic_findings: Vec<_> = findings.iter()
+        let panic_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.panic_in_library")
             .collect();
         assert!(panic_findings.is_empty());

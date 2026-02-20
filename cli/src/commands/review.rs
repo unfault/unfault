@@ -32,11 +32,11 @@ use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use crate::output::IrFinding;
 use crate::exit_codes::*;
+use crate::output::IrFinding;
 use crate::session::{
-    PatchApplier, ScanProgress, WorkspaceScanner, build_ir_cached,
-    compute_workspace_id, get_git_remote,
+    PatchApplier, ScanProgress, WorkspaceScanner, build_ir_cached, compute_workspace_id,
+    get_git_remote,
 };
 
 /// Arguments for the review command
@@ -145,7 +145,11 @@ impl ScanDisplayState {
         lines += 1;
 
         // File count line (always show, even if 0)
-        let file_word = if self.file_count == 1 { "file" } else { "files" };
+        let file_word = if self.file_count == 1 {
+            "file"
+        } else {
+            "files"
+        };
         eprintln!(
             "  Found {} matching source {}",
             self.file_count.to_string().bright_green(),
@@ -581,27 +585,27 @@ const MAX_WIDTH: usize = 80;
 fn wrap_text(s: &str, first_line_max: usize, continuation_indent: &str) -> Vec<String> {
     let mut lines = Vec::new();
     let words: Vec<&str> = s.split_whitespace().collect();
-    
+
     if words.is_empty() {
         return vec![String::new()];
     }
-    
+
     let cont_max = MAX_WIDTH.saturating_sub(continuation_indent.len());
-    
+
     let mut current_line = String::new();
     let mut current_max = first_line_max;
-    
+
     for word in words {
         let word_len = word.len();
         let current_len = current_line.len();
-        
+
         // Check if we need to start a new line
         let would_fit = if current_len == 0 {
             word_len <= current_max
         } else {
             current_len + 1 + word_len <= current_max
         };
-        
+
         if !would_fit && current_len > 0 {
             // Push the current line
             lines.push(current_line);
@@ -609,7 +613,7 @@ fn wrap_text(s: &str, first_line_max: usize, continuation_indent: &str) -> Vec<S
             current_line = String::new();
             current_max = cont_max;
         }
-        
+
         // Add the word to the current line
         if current_line.is_empty() {
             // If word is longer than max width, we need to hard-break it
@@ -630,12 +634,12 @@ fn wrap_text(s: &str, first_line_max: usize, continuation_indent: &str) -> Vec<S
             current_line.push_str(word);
         }
     }
-    
+
     // Don't forget the last line
     if !current_line.is_empty() {
         lines.push(current_line);
     }
-    
+
     lines
 }
 
@@ -666,7 +670,11 @@ fn render_session_overview(context: &ReviewOutputContext) {
     }
 
     // Line 6: Files reviewed with timing
-    let file_word = if context.file_count == 1 { "file" } else { "files" };
+    let file_word = if context.file_count == 1 {
+        "file"
+    } else {
+        "files"
+    };
     println!(
         "  {}: {} {} · parse {}ms · engine {}ms",
         "Reviewed".dimmed(),
@@ -738,7 +746,7 @@ fn display_ir_findings(
     } else {
         String::new()
     };
-    
+
     // Find terminal width for right-alignment (default to 80)
     let found_text = format!(
         "{} Found {} issue{}",
@@ -746,7 +754,7 @@ fn display_ir_findings(
         total_findings,
         if total_findings == 1 { "" } else { "s" }
     );
-    
+
     if fix_hint.is_empty() {
         println!(
             "{} Found {} issue{}",
@@ -767,7 +775,7 @@ fn display_ir_findings(
             width = padding
         );
     }
-    
+
     // Severity breakdown line (like landing page: "4 high · 10 medium · 5 low")
     let summary = compute_severity_summary(findings);
     println!("{}", format_severity_breakdown(&summary));
@@ -934,18 +942,14 @@ fn display_ir_findings_grouped(findings: &[IrFinding]) {
             let prefix_len = 5 + rule_id.len(); // "   [" + rule_id + "] "
             let first_line_max = MAX_WIDTH.saturating_sub(prefix_len);
             let continuation_indent = "      "; // 6 spaces for continuation lines
-            
+
             let wrapped_lines = wrap_text(&title, first_line_max, continuation_indent);
-            
+
             // Print first line with the rule_id prefix
             if let Some(first_line) = wrapped_lines.first() {
-                println!(
-                    "   [{}] {}",
-                    rule_id.cyan(),
-                    first_line.dimmed()
-                );
+                println!("   [{}] {}", rule_id.cyan(), first_line.dimmed());
             }
-            
+
             // Print continuation lines with indent
             for line in wrapped_lines.iter().skip(1) {
                 println!("{}{}", continuation_indent, line.dimmed());
@@ -953,4 +957,3 @@ fn display_ir_findings_grouped(findings: &[IrFinding]) {
         }
     }
 }
-

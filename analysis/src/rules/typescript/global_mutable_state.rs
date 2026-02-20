@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -101,10 +101,7 @@ impl Rule for TypescriptGlobalMutableStateRule {
                     global.location.range.start_line + 1,
                 );
 
-                let title = format!(
-                    "Module-level mutable state `{}`",
-                    global.variable_name
-                );
+                let title = format!("Module-level mutable state `{}`", global.variable_name);
 
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),
@@ -120,7 +117,7 @@ impl Rule for TypescriptGlobalMutableStateRule {
                     column: Some(global.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -211,10 +208,7 @@ fn generate_smart_fix(
         file_id,
         hunks: vec![PatchHunk {
             range: PatchRange::InsertBeforeLine { line },
-            replacement: format!(
-                "// {} - reviewed and accepted\n",
-                SUPPRESSION_MARKER
-            ),
+            replacement: format!("// {} - reviewed and accepted\n", SUPPRESSION_MARKER),
         }],
     };
     let fix_preview = format!("Mark `{}` as reviewed", var_name);
@@ -241,21 +235,21 @@ fn generate_smart_fix(
 /// - Null/undefined literals: `null`, `undefined`
 fn is_primitive_literal(value: &str) -> bool {
     let trimmed = value.trim();
-    
+
     if trimmed.is_empty() {
         return false;
     }
-    
+
     // Boolean literals
     if trimmed == "true" || trimmed == "false" {
         return true;
     }
-    
+
     // Null/undefined literals
     if trimmed == "null" || trimmed == "undefined" {
         return false; // null is handled specially by the rule, undefined could be intentional
     }
-    
+
     // String literals (single, double quotes, or template literals)
     if (trimmed.starts_with('"') && trimmed.ends_with('"'))
         || (trimmed.starts_with('\'') && trimmed.ends_with('\''))
@@ -263,24 +257,24 @@ fn is_primitive_literal(value: &str) -> bool {
     {
         return true;
     }
-    
+
     // Numeric literals (including negative, hex, binary, octal, scientific notation)
     // Try to parse as a number - handle various formats
     if is_numeric_literal(trimmed) {
         return true;
     }
-    
+
     false
 }
 
 /// Check if a string represents a numeric literal in JavaScript/TypeScript.
 fn is_numeric_literal(s: &str) -> bool {
     let s = s.trim();
-    
+
     if s.is_empty() {
         return false;
     }
-    
+
     // Handle negative/positive sign prefix
     let s = if let Some(rest) = s.strip_prefix('-') {
         rest
@@ -289,35 +283,35 @@ fn is_numeric_literal(s: &str) -> bool {
     } else {
         s
     };
-    
+
     if s.is_empty() {
         return false;
     }
-    
+
     // Hex: 0x or 0X
     if s.starts_with("0x") || s.starts_with("0X") {
         return s[2..].chars().all(|c| c.is_ascii_hexdigit());
     }
-    
+
     // Binary: 0b or 0B
     if s.starts_with("0b") || s.starts_with("0B") {
         return s[2..].chars().all(|c| c == '0' || c == '1');
     }
-    
+
     // Octal: 0o or 0O
     if s.starts_with("0o") || s.starts_with("0O") {
         return s[2..].chars().all(|c| c >= '0' && c <= '7');
     }
-    
+
     // BigInt literals
     let s = s.strip_suffix('n').unwrap_or(s);
-    
+
     // Regular decimal, possibly with scientific notation
     // Allow: digits, one decimal point, one 'e' or 'E' followed by optional sign and digits
     let mut has_dot = false;
     let mut has_exp = false;
     let mut chars = s.chars().peekable();
-    
+
     while let Some(c) = chars.next() {
         match c {
             '0'..='9' | '_' => continue, // digits and numeric separators
@@ -332,7 +326,7 @@ fn is_numeric_literal(s: &str) -> bool {
             _ => return false,
         }
     }
-    
+
     true
 }
 
@@ -401,7 +395,8 @@ mod tests {
     #[tokio::test]
     async fn evaluate_ignores_const() {
         let rule = TypescriptGlobalMutableStateRule::new();
-        let (file_id, sem) = parse_and_build_semantics("const CONFIG = { apiUrl: 'http://example.com' };");
+        let (file_id, sem) =
+            parse_and_build_semantics("const CONFIG = { apiUrl: 'http://example.com' };");
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
@@ -431,7 +426,10 @@ function increment() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "boolean literals should not trigger the rule");
+        assert!(
+            findings.is_empty(),
+            "boolean literals should not trigger the rule"
+        );
     }
 
     #[tokio::test]
@@ -441,7 +439,10 @@ function increment() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "true literal should not trigger the rule");
+        assert!(
+            findings.is_empty(),
+            "true literal should not trigger the rule"
+        );
     }
 
     #[tokio::test]
@@ -451,7 +452,10 @@ function increment() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "number literals should not trigger the rule");
+        assert!(
+            findings.is_empty(),
+            "number literals should not trigger the rule"
+        );
     }
 
     #[tokio::test]
@@ -461,7 +465,10 @@ function increment() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "string literals should not trigger the rule");
+        assert!(
+            findings.is_empty(),
+            "string literals should not trigger the rule"
+        );
     }
 
     #[tokio::test]

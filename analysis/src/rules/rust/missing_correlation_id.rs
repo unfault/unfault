@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{
@@ -121,10 +121,7 @@ impl Rule for RustMissingCorrelationIdRule {
 
                 let line = func.location.range.start_line + 1;
 
-                let title = format!(
-                    "Handler '{}' doesn't propagate correlation ID",
-                    func.name
-                );
+                let title = format!("Handler '{}' doesn't propagate correlation ID", func.name);
 
                 let description = format!(
                     "The HTTP handler '{}' at line {} doesn't extract or propagate a correlation ID.\n\n\
@@ -158,15 +155,15 @@ impl Rule for RustMissingCorrelationIdRule {
                          next.run(request).await\n\
                      }}\n\
                      ```",
-                    func.name,
-                    line
+                    func.name, line
                 );
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Extract and propagate correlation ID (X-Request-ID)".to_string(),
+                        replacement: "// TODO: Extract and propagate correlation ID (X-Request-ID)"
+                            .to_string(),
                     }],
                 };
 
@@ -184,9 +181,11 @@ impl Rule for RustMissingCorrelationIdRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
-                    fix_preview: Some("let correlation_id = req.headers().get(\"x-request-id\")...".to_string()),
+                    fix_preview: Some(
+                        "let correlation_id = req.headers().get(\"x-request-id\")...".to_string(),
+                    ),
                     tags: vec![
                         "rust".into(),
                         "correlation-id".into(),

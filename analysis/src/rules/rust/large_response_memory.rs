@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -109,7 +109,9 @@ impl Rule for RustLargeResponseMemoryRule {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Consider streaming large responses with bytes_stream()".to_string(),
+                        replacement:
+                            "// TODO: Consider streaming large responses with bytes_stream()"
+                                .to_string(),
                     }],
                 };
 
@@ -127,7 +129,7 @@ impl Rule for RustLargeResponseMemoryRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("let stream = response.bytes_stream();".to_string()),
                     tags: vec![

@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::graceful_shutdown;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::graceful_shutdown;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::PyImport;
@@ -98,19 +98,17 @@ impl Rule for PythonMissingGracefulShutdownRule {
 
             // Check if signal handling is already present
             let has_signal_handling = py.imports.iter().any(|imp| {
-                imp.module == "signal"
-                    || imp.names.iter().any(|n| n == "signal" || n == "SIGTERM")
+                imp.module == "signal" || imp.names.iter().any(|n| n == "signal" || n == "SIGTERM")
             });
 
             // Check for FastAPI lifespan context manager (check function names)
-            let has_lifespan = py.functions.iter().any(|f| {
-                f.name.contains("lifespan") || f.name.contains("shutdown")
-            });
+            let has_lifespan = py
+                .functions
+                .iter()
+                .any(|f| f.name.contains("lifespan") || f.name.contains("shutdown"));
 
             // Check for atexit registration
-            let has_atexit = py.imports.iter().any(|imp| {
-                imp.module == "atexit"
-            });
+            let has_atexit = py.imports.iter().any(|imp| imp.module == "atexit");
 
             if has_signal_handling || has_lifespan || has_atexit {
                 continue;
@@ -118,11 +116,12 @@ impl Rule for PythonMissingGracefulShutdownRule {
 
             let title = "Web application lacks graceful shutdown handling".to_string();
 
-            let description = 
+            let description =
                 "This web application does not handle SIGTERM signal for graceful shutdown. \
                  During deployments, Kubernetes sends SIGTERM to allow apps to finish in-flight \
                  requests. Without handling it, requests are dropped mid-processing, causing \
-                 user-visible errors and potential data corruption.".to_string();
+                 user-visible errors and potential data corruption."
+                    .to_string();
 
             let fix_preview = generate_fix_preview(is_fastapi);
 
@@ -146,9 +145,9 @@ impl Rule for PythonMissingGracefulShutdownRule {
                 file_path: py.path.clone(),
                 line: Some(1),
                 column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                end_line: None,
+                end_column: None,
+                byte_range: None,
                 patch: Some(patch),
                 fix_preview: Some(fix_preview),
                 tags: vec![
@@ -184,7 +183,7 @@ fn generate_graceful_shutdown_patch(
         if !has_logging_import(imports) {
             import_parts.push("import logging");
         }
-        
+
         let mut import_str = String::new();
         if !import_parts.is_empty() {
             import_str = import_parts.join("\n");
@@ -194,7 +193,7 @@ fn generate_graceful_shutdown_patch(
         if !has_logging_import(imports) {
             import_str.push_str("\nlogger = logging.getLogger(__name__)\n");
         }
-        
+
         if !import_str.is_empty() {
             hunks.push(PatchHunk {
                 range: PatchRange::InsertBeforeLine { line: import_line },
@@ -214,7 +213,9 @@ async def lifespan(app):
 
 "#;
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_line + 4 },
+            range: PatchRange::InsertBeforeLine {
+                line: import_line + 4,
+            },
             replacement: lifespan_code.to_string(),
         });
     } else {
@@ -230,7 +231,7 @@ async def lifespan(app):
         if !has_logging_import(imports) {
             import_parts.push("import logging");
         }
-        
+
         let mut import_str = String::new();
         if !import_parts.is_empty() {
             import_str = import_parts.join("\n");
@@ -240,7 +241,7 @@ async def lifespan(app):
         if !has_logging_import(imports) {
             import_str.push_str("\nlogger = logging.getLogger(__name__)\n");
         }
-        
+
         if !import_str.is_empty() {
             hunks.push(PatchHunk {
                 range: PatchRange::InsertBeforeLine { line: import_line },
@@ -260,7 +261,9 @@ signal.signal(signal.SIGINT, graceful_shutdown)
 
 "#;
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_line + 5 },
+            range: PatchRange::InsertBeforeLine {
+                line: import_line + 5,
+            },
             replacement: signal_code.to_string(),
         });
     }
@@ -293,7 +296,8 @@ app = FastAPI(lifespan=lifespan)
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Shutting down gracefully")
-    # Cleanup logic here"#.to_string()
+    # Cleanup logic here"#
+            .to_string()
     } else {
         r#"# Generic Python application with signal handling
 import signal
@@ -327,7 +331,8 @@ async def shutdown(loop, signal=None):
     
     logger.info(f"Cancelling {len(tasks)} outstanding tasks")
     await asyncio.gather(*tasks, return_exceptions=True)
-    loop.stop()"#.to_string()
+    loop.stop()"#
+            .to_string()
     }
 }
 
@@ -412,7 +417,10 @@ def root():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        assert_eq!(findings[0].rule_id, "python.resilience.missing_graceful_shutdown");
+        assert_eq!(
+            findings[0].rule_id,
+            "python.resilience.missing_graceful_shutdown"
+        );
     }
 
     #[tokio::test]
@@ -455,6 +463,12 @@ app = FastAPI()
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(findings[0].fix_preview.is_some());
-        assert!(findings[0].fix_preview.as_ref().unwrap().contains("lifespan"));
+        assert!(
+            findings[0]
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("lifespan")
+        );
     }
 }

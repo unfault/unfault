@@ -2,14 +2,14 @@
 //!
 //! Detects HTTP clients without retry logic for transient failures.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::retry;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -54,10 +54,10 @@ impl Rule for GoHttpRetryRule {
 
             // Check for retry library imports
             let has_retry_lib = go.imports.iter().any(|imp| {
-                imp.path.contains("hashicorp/go-retryablehttp") ||
-                imp.path.contains("avast/retry-go") ||
-                imp.path.contains("cenkalti/backoff") ||
-                imp.path.contains("sethvargo/go-retry")
+                imp.path.contains("hashicorp/go-retryablehttp")
+                    || imp.path.contains("avast/retry-go")
+                    || imp.path.contains("cenkalti/backoff")
+                    || imp.path.contains("sethvargo/go-retry")
             });
 
             if has_retry_lib {
@@ -76,7 +76,8 @@ impl Rule for GoHttpRetryRule {
                     description: Some(
                         "HTTP calls can fail due to transient network issues. \
                          Implement retry logic with exponential backoff for resilience. \
-                         Consider using hashicorp/go-retryablehttp or cenkalti/backoff.".to_string()
+                         Consider using hashicorp/go-retryablehttp or cenkalti/backoff."
+                            .to_string(),
                     ),
                     kind: FindingKind::StabilityRisk,
                     severity: Severity::Medium,
@@ -88,13 +89,13 @@ impl Rule for GoHttpRetryRule {
                     column: Some(call_column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(FilePatch {
                         file_id: *file_id,
                         hunks: vec![PatchHunk {
                             range: PatchRange::InsertBeforeLine { line: call_line },
                             replacement: format!(
-"// Add retry logic for transient failures:
+                                "// Add retry logic for transient failures:
 // Option 1: Use go-retryablehttp
 // import retryablehttp \"github.com/hashicorp/go-retryablehttp\"
 // client := retryablehttp.NewClient()
@@ -109,11 +110,18 @@ impl Rule for GoHttpRetryRule {
 //         break
 //     }}
 //     time.Sleep(time.Duration(attempt+1) * time.Second)
-// }}", http_call.method_name),
+// }}",
+                                http_call.method_name
+                            ),
                         }],
                     }),
                     fix_preview: Some("Add retry with backoff".to_string()),
-                    tags: vec!["go".into(), "http".into(), "retry".into(), "resilience".into()],
+                    tags: vec![
+                        "go".into(),
+                        "http".into(),
+                        "retry".into(),
+                        "resilience".into(),
+                    ],
                 });
             }
         }

@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -56,8 +56,14 @@ impl Rule for TypescriptUnsafeEvalRule {
             for call in &ts.calls {
                 let is_unsafe = call.callee == "eval"
                     || call.callee == "Function"
-                    || call.callee == "setTimeout" && call.args.first().map_or(false, |a| a.value_repr.starts_with('"') || a.value_repr.starts_with('\''))
-                    || call.callee == "setInterval" && call.args.first().map_or(false, |a| a.value_repr.starts_with('"') || a.value_repr.starts_with('\''));
+                    || call.callee == "setTimeout"
+                        && call.args.first().map_or(false, |a| {
+                            a.value_repr.starts_with('"') || a.value_repr.starts_with('\'')
+                        })
+                    || call.callee == "setInterval"
+                        && call.args.first().map_or(false, |a| {
+                            a.value_repr.starts_with('"') || a.value_repr.starts_with('\'')
+                        });
 
                 if !is_unsafe {
                     continue;
@@ -87,10 +93,7 @@ impl Rule for TypescriptUnsafeEvalRule {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: format!(
-                            "// SECURITY: {}\n// {}\n",
-                            title, suggestion
-                        ),
+                        replacement: format!("// SECURITY: {}\n// {}\n", title, suggestion),
                     }],
                 };
 
@@ -112,7 +115,7 @@ impl Rule for TypescriptUnsafeEvalRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(suggestion.to_string()),
                     tags: vec!["security".into(), "eval".into(), "injection".into()],

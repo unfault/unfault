@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -60,7 +60,7 @@ impl Rule for TypescriptUnboundedRetryRule {
             // Check for retry patterns without limits
             for call in &ts.calls {
                 let callee_lower = call.callee.to_lowercase();
-                
+
                 // Look for retry-related patterns
                 let is_retry_pattern = callee_lower.contains("retry")
                     || callee_lower.contains("attempt")
@@ -71,11 +71,13 @@ impl Rule for TypescriptUnboundedRetryRule {
                 }
 
                 // Check for limiting patterns
-                let args_text = call.args.iter()
+                let args_text = call
+                    .args
+                    .iter()
                     .map(|a| a.value_repr.to_lowercase())
                     .collect::<Vec<_>>()
                     .join(" ");
-                
+
                 let has_limit = args_text.contains("maxretries")
                     || args_text.contains("max_retries")
                     || args_text.contains("attempts")
@@ -118,7 +120,7 @@ impl Rule for TypescriptUnboundedRetryRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Add maxRetries and exponential backoff".to_string()),
                     tags: vec!["reliability".into(), "retry".into(), "resilience".into()],

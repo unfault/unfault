@@ -2,14 +2,14 @@
 //!
 //! Detects template injection vulnerabilities from using text/template with user input.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::sql_injection;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -61,16 +61,16 @@ impl Rule for GoUnsafeTemplateRule {
                 // Check if any HTTP handlers exist
                 for func in &go.functions {
                     let is_http_handler = func.params.iter().any(|p| {
-                        p.param_type.contains("http.ResponseWriter") ||
-                        p.param_type.contains("*gin.Context") ||
-                        p.param_type.contains("echo.Context")
+                        p.param_type.contains("http.ResponseWriter")
+                            || p.param_type.contains("*gin.Context")
+                            || p.param_type.contains("echo.Context")
                     });
 
                     if is_http_handler {
                         // Check if template.Execute is called in this file
                         let has_template_execute = go.calls.iter().any(|call| {
-                            call.function_call.callee_expr.contains("Execute") || 
-                            call.function_call.callee_expr.contains("ExecuteTemplate")
+                            call.function_call.callee_expr.contains("Execute")
+                                || call.function_call.callee_expr.contains("ExecuteTemplate")
                         });
 
                         if has_template_execute {
@@ -112,20 +112,22 @@ impl Rule for GoUnsafeTemplateRule {
 
             // Check for unsafe template type casts (template.HTML, template.JS, etc.)
             for call in &go.calls {
-                if call.function_call.callee_expr.contains("template.HTML") || 
-                   call.function_call.callee_expr.contains("template.JS") ||
-                   call.function_call.callee_expr.contains("template.CSS") ||
-                   call.function_call.callee_expr.contains("template.URL") {
+                if call.function_call.callee_expr.contains("template.HTML")
+                    || call.function_call.callee_expr.contains("template.JS")
+                    || call.function_call.callee_expr.contains("template.CSS")
+                    || call.function_call.callee_expr.contains("template.URL")
+                {
                     let line = call.function_call.location.line;
                     let column = call.function_call.location.column;
-                    
+
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "Unsafe template type cast".to_string(),
                         description: Some(
                             "Casting to template.HTML/JS/CSS/URL bypasses Go's automatic \
                              escaping. Only use these with trusted, static content - never \
-                             with user input. Validate and sanitize before casting.".to_string()
+                             with user input. Validate and sanitize before casting."
+                                .to_string(),
                         ),
                         kind: FindingKind::SecurityVulnerability,
                         severity: Severity::High,
@@ -135,29 +137,37 @@ impl Rule for GoUnsafeTemplateRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: 
-"// WARNING: template.HTML/JS/CSS/URL bypasses escaping
+                                replacement:
+                                    "// WARNING: template.HTML/JS/CSS/URL bypasses escaping
 // Only use with trusted, validated content:
 // - Sanitize user input before casting
-// - Use a sanitization library like bluemonday for HTML".to_string(),
+// - Use a sanitization library like bluemonday for HTML"
+                                        .to_string(),
                             }],
                         }),
                         fix_preview: Some("Validate before unsafe cast".to_string()),
-                        tags: vec!["go".into(), "security".into(), "xss".into(), "template".into()],
+                        tags: vec![
+                            "go".into(),
+                            "security".into(),
+                            "xss".into(),
+                            "template".into(),
+                        ],
                     });
                 }
             }
 
             // Check for dynamic template construction via calls
             for call in &go.calls {
-                if call.function_call.callee_expr.contains("template.Must") || call.function_call.callee_expr.contains("template.New") {
+                if call.function_call.callee_expr.contains("template.Must")
+                    || call.function_call.callee_expr.contains("template.New")
+                {
                     // Check if arguments contain string concatenation patterns
                     if call.args_repr.contains("+") || call.args_repr.contains("fmt.Sprintf") {
                         let line = call.function_call.location.line;

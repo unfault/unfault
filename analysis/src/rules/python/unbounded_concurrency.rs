@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::ImportInsertionType;
@@ -107,18 +107,16 @@ impl Rule for PythonUnboundedConcurrencyRule {
 
             // Use stdlib_import since we're adding "import asyncio"
             let import_line = py.import_insertion_line_for(ImportInsertionType::stdlib_import());
-            
+
             // Check for unbounded concurrency patterns in function calls
             for call in &py.calls {
                 let callee = &call.function_call.callee_expr;
-                
+
                 // Check for asyncio.gather with unpacked arguments
                 if callee == "asyncio.gather" || callee == "gather" {
                     // Check if any argument starts with * (unpacked)
-                    let has_unpacked = call.args.iter().any(|arg| {
-                        arg.value_repr.starts_with('*')
-                    });
-                    
+                    let has_unpacked = call.args.iter().any(|arg| arg.value_repr.starts_with('*'));
+
                     if has_unpacked {
                         let unbounded = UnboundedConcurrencyCall {
                             function_name: callee.clone(),
@@ -130,13 +128,8 @@ impl Rule for PythonUnboundedConcurrencyRule {
                             args_repr: call.args_repr.clone(),
                         };
 
-                        let finding = create_finding(
-                            self.id(),
-                            &unbounded,
-                            *file_id,
-                            &py.path,
-                            import_line,
-                        );
+                        let finding =
+                            create_finding(self.id(), &unbounded, *file_id, &py.path, import_line);
                         findings.push(finding);
                     }
                 }
@@ -145,10 +138,15 @@ impl Rule for PythonUnboundedConcurrencyRule {
                 // (heuristic for potential loop usage)
                 if callee == "asyncio.create_task" || callee == "create_task" {
                     // Count how many create_task calls exist in this file
-                    let create_task_count = py.calls.iter()
-                        .filter(|c| c.function_call.callee_expr == "asyncio.create_task" || c.function_call.callee_expr == "create_task")
+                    let create_task_count = py
+                        .calls
+                        .iter()
+                        .filter(|c| {
+                            c.function_call.callee_expr == "asyncio.create_task"
+                                || c.function_call.callee_expr == "create_task"
+                        })
                         .count();
-                    
+
                     // If there are multiple create_task calls, it might indicate a pattern
                     // that could be unbounded
                     if create_task_count > 3 {
@@ -162,13 +160,8 @@ impl Rule for PythonUnboundedConcurrencyRule {
                             args_repr: call.args_repr.clone(),
                         };
 
-                        let finding = create_finding(
-                            self.id(),
-                            &unbounded,
-                            *file_id,
-                            &py.path,
-                            import_line,
-                        );
+                        let finding =
+                            create_finding(self.id(), &unbounded, *file_id, &py.path, import_line);
                         findings.push(finding);
                         // Only report once per file
                         break;
@@ -220,9 +213,9 @@ fn create_finding(
         file_path: file_path.to_string(),
         line: Some(unbounded.line),
         column: Some(unbounded.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -258,13 +251,16 @@ async def _limited_gather(coros, max_concurrent=10):  # Added by unfault
 
 "#;
             hunks.push(PatchHunk {
-                range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+                range: PatchRange::InsertBeforeLine {
+                    line: import_insertion_line,
+                },
                 replacement: helper_code.to_string(),
             });
 
             // Extract the unpacked argument (e.g., "*tasks" -> "tasks")
             // The args_repr typically contains the comma-separated arguments
-            let tasks_var = unbounded.args_repr
+            let tasks_var = unbounded
+                .args_repr
                 .split(',')
                 .find(|arg| arg.trim().starts_with('*'))
                 .map(|arg| arg.trim().trim_start_matches('*').trim())
@@ -287,8 +283,9 @@ async def _limited_gather(coros, max_concurrent=10):  # Added by unfault
             let suggestion = "# TODO: Consider using semaphore to limit concurrent tasks\n\
                  # semaphore = asyncio.Semaphore(10)\n\
                  # async with semaphore:\n\
-                 #     task = asyncio.create_task(coro())\n".to_string();
-            
+                 #     task = asyncio.create_task(coro())\n"
+                .to_string();
+
             hunks.push(PatchHunk {
                 range: PatchRange::InsertBeforeLine {
                     line: unbounded.line,
@@ -298,10 +295,7 @@ async def _limited_gather(coros, max_concurrent=10):  # Added by unfault
         }
     }
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -358,8 +352,16 @@ mod tests {
 
     #[test]
     fn pattern_descriptions_are_meaningful() {
-        assert!(ConcurrencyPattern::GatherUnpacked.description().contains("gather"));
-        assert!(ConcurrencyPattern::CreateTaskPotentiallyUnbounded.description().contains("create_task"));
+        assert!(
+            ConcurrencyPattern::GatherUnpacked
+                .description()
+                .contains("gather")
+        );
+        assert!(
+            ConcurrencyPattern::CreateTaskPotentiallyUnbounded
+                .description()
+                .contains("create_task")
+        );
     }
 
     // ==================== Edge Cases ====================
@@ -417,7 +419,7 @@ async def unbounded():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             assert_eq!(findings[0].rule_id, "python.unbounded_concurrency");
             assert!(matches!(findings[0].severity, Severity::High));

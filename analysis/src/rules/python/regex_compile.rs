@@ -9,11 +9,13 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
-use crate::semantics::python::model::{ImportInsertionType, PyCallSite, PyFileSemantics, PyFunction};
+use crate::semantics::python::model::{
+    ImportInsertionType, PyCallSite, PyFileSemantics, PyFunction,
+};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -111,13 +113,15 @@ impl Rule for PythonRegexCompileRule {
             for call in &py.calls {
                 if is_regex_compile_call(&call.function_call.callee_expr) {
                     // Check if this call is inside a function
-                    if let Some(func_name) = find_enclosing_function(&py.functions, call.function_call.location.line) {
+                    if let Some(func_name) =
+                        find_enclosing_function(&py.functions, call.function_call.location.line)
+                    {
                         // Extract pattern argument if possible
                         let pattern_arg = extract_pattern_arg(&call.args_repr);
-                        
+
                         // Try to find if this is an assignment
                         let assignment_target = find_assignment_target(py, call);
-                        
+
                         let full_call = if call.args_repr.is_empty() {
                             call.function_call.callee_expr.clone()
                         } else {
@@ -133,16 +137,13 @@ impl Rule for PythonRegexCompileRule {
                             start_byte: call.start_byte,
                             end_byte: call.end_byte,
                             full_call,
-                            import_insertion_line: py.import_insertion_line_for(ImportInsertionType::stdlib_from_import()),
+                            import_insertion_line: py.import_insertion_line_for(
+                                ImportInsertionType::stdlib_from_import(),
+                            ),
                             assignment_target,
                         };
 
-                        findings.push(create_finding(
-                            self.id(),
-                            &regex_info,
-                            *file_id,
-                            &py.path,
-                        ));
+                        findings.push(create_finding(self.id(), &regex_info, *file_id, &py.path));
                     }
                 }
             }
@@ -160,11 +161,11 @@ fn is_regex_compile_call(callee: &str) -> bool {
 /// Find the enclosing function for a given line
 fn find_enclosing_function(functions: &[PyFunction], call_line: u32) -> Option<String> {
     let mut best_match: Option<&PyFunction> = None;
-    
+
     for func in functions {
         let func_start = func.location.range.start_line;
         let func_end = func.location.range.end_line;
-        
+
         // Check if the call is within the function's range
         if call_line >= func_start && call_line <= func_end {
             match best_match {
@@ -190,17 +191,17 @@ fn extract_pattern_arg(args_repr: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    
+
     // Remove parentheses if present
     let inner = trimmed.trim_start_matches('(').trim_end_matches(')');
-    
+
     // Get the first argument (before any comma)
     let first_arg = if let Some(comma_pos) = find_unquoted_comma(inner) {
         inner[..comma_pos].trim()
     } else {
         inner.trim()
     };
-    
+
     if first_arg.is_empty() {
         None
     } else {
@@ -213,7 +214,7 @@ fn find_unquoted_comma(s: &str) -> Option<usize> {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut prev_char = None;
-    
+
     for (i, c) in s.char_indices() {
         match c {
             '\'' if !in_double_quote && prev_char != Some('\\') => {
@@ -229,7 +230,7 @@ fn find_unquoted_comma(s: &str) -> Option<usize> {
         }
         prev_char = Some(c);
     }
-    
+
     None
 }
 
@@ -254,7 +255,7 @@ fn suggest_constant_name(regex_info: &RegexCompileInFunction) -> String {
     if let Some(ref target) = regex_info.assignment_target {
         return target.to_uppercase() + "_PATTERN";
     }
-    
+
     // Otherwise, derive from function name
     let base = regex_info.function_name.to_uppercase();
     format!("{}_PATTERN", base)
@@ -272,7 +273,7 @@ fn create_finding(
     );
 
     let suggested_name = suggest_constant_name(regex_info);
-    
+
     let description = format!(
         "The regex compilation '{}' inside function '{}' will recompile the pattern \
          on every function call. Move the re.compile() to module level as a constant \
@@ -281,9 +282,7 @@ fn create_finding(
          - Faster function execution (no recompilation)\n\
          - Clearer code structure (patterns are visible at module level)\n\
          - Early error detection (compilation errors on module import)",
-        regex_info.full_call,
-        regex_info.function_name,
-        suggested_name,
+        regex_info.full_call, regex_info.function_name, suggested_name,
     );
 
     let (patch, fix_preview) = generate_patch(regex_info, file_id);
@@ -302,7 +301,7 @@ fn create_finding(
         column: Some(regex_info.column),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -316,15 +315,11 @@ fn create_finding(
 
 fn generate_patch(regex_info: &RegexCompileInFunction, file_id: FileId) -> (FilePatch, String) {
     let suggested_name = suggest_constant_name(regex_info);
-    
+
     // Create the module-level constant definition
     let pattern_arg = regex_info.pattern_arg.as_deref().unwrap_or("r'pattern'");
-    let constant_def = format!(
-        "{} = re.compile({})\n",
-        suggested_name,
-        pattern_arg
-    );
-    
+    let constant_def = format!("{} = re.compile({})\n", suggested_name, pattern_arg);
+
     // For the fix preview, show the before/after transformation
     let fix_preview = format!(
         r#"# Before (recompiles on every call):
@@ -350,8 +345,8 @@ def {}(...):
     // 1. Insert the constant at module level (after imports)
     let hunks = vec![
         PatchHunk {
-            range: PatchRange::InsertBeforeLine { 
-                line: regex_info.import_insertion_line + 1  // After imports
+            range: PatchRange::InsertBeforeLine {
+                line: regex_info.import_insertion_line + 1, // After imports
             },
             replacement: format!("\n{}", constant_def),
         },
@@ -365,10 +360,7 @@ def {}(...):
         },
     ];
 
-    let patch = FilePatch {
-        file_id,
-        hunks,
-    };
+    let patch = FilePatch { file_id, hunks };
 
     (patch, fix_preview)
 }
@@ -437,10 +429,16 @@ def validate_email(email):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1, "Should detect re.compile in function");
         assert_eq!(findings[0].rule_id, "python.regex_compile");
-        assert!(findings[0].description.as_ref().unwrap().contains("validate_email"));
+        assert!(
+            findings[0]
+                .description
+                .as_ref()
+                .unwrap()
+                .contains("validate_email")
+        );
     }
 
     #[tokio::test]
@@ -458,8 +456,11 @@ def validate_email(email):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.is_empty(), "Should not flag module-level re.compile");
+
+        assert!(
+            findings.is_empty(),
+            "Should not flag module-level re.compile"
+        );
     }
 
     #[tokio::test]
@@ -477,7 +478,7 @@ def parse_data(text):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 2, "Should detect both re.compile calls");
     }
 
@@ -497,8 +498,12 @@ def outer():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 1, "Should detect re.compile in nested function");
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should detect re.compile in nested function"
+        );
     }
 
     #[tokio::test]
@@ -515,8 +520,12 @@ async def process_data(text):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 1, "Should detect re.compile in async function");
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should detect re.compile in async function"
+        );
     }
 
     #[tokio::test]
@@ -534,8 +543,12 @@ class Validator:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 1, "Should detect re.compile in class method");
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should detect re.compile in class method"
+        );
     }
 
     #[tokio::test]
@@ -567,12 +580,14 @@ class Validator:
             content: "fn main() {}".to_string(),
         };
         let file_id = FileId(1);
-        
+
         // Manually create non-Python semantics for the test
-        let parsed = crate::parse::rust::parse_rust_file(file_id, &sf).expect("parsing should succeed");
-        let rust_sem = crate::semantics::rust::build_rust_semantics(&parsed).expect("semantics should build");
+        let parsed =
+            crate::parse::rust::parse_rust_file(file_id, &sf).expect("parsing should succeed");
+        let rust_sem =
+            crate::semantics::rust::build_rust_semantics(&parsed).expect("semantics should build");
         let sem = Arc::new(SourceSemantics::Rust(rust_sem));
-        
+
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
@@ -595,10 +610,10 @@ def validate(text):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1);
         let finding = &findings[0];
-        
+
         assert_eq!(finding.rule_id, "python.regex_compile");
         assert!(matches!(finding.kind, FindingKind::PerformanceSmell));
         assert_eq!(finding.dimension, Dimension::Performance);
@@ -624,7 +639,7 @@ def my_special_validator(text):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1);
         let description = findings[0].description.as_ref().unwrap();
         assert!(description.contains("my_special_validator"));
@@ -685,7 +700,7 @@ def my_special_validator(text):
             import_insertion_line: 2,
             assignment_target: None,
         };
-        
+
         let name = suggest_constant_name(&info);
         assert_eq!(name, "VALIDATE_EMAIL_PATTERN");
     }
@@ -704,7 +719,7 @@ def my_special_validator(text):
             import_insertion_line: 2,
             assignment_target: Some("email_regex".to_string()),
         };
-        
+
         let name = suggest_constant_name(&info);
         assert_eq!(name, "EMAIL_REGEX_PATTERN");
     }

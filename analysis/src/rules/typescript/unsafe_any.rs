@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -91,9 +91,9 @@ impl Rule for TypescriptUnsafeAnyRule {
                                 file_path: ts.path.clone(),
                                 line: Some(func.location.range.start_line + 1),
                                 column: Some(func.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
                                 patch: None,
                                 fix_preview: Some(format!("// Consider: {} : unknown", param.name)),
                                 tags: vec![
@@ -112,10 +112,7 @@ impl Rule for TypescriptUnsafeAnyRule {
             for var in &ts.variables {
                 if let Some(ref type_ann) = var.type_annotation {
                     if type_ann.contains("any") && !type_ann.contains("unknown") {
-                        let title = format!(
-                            "Variable `{}` uses `any` type",
-                            var.name
-                        );
+                        let title = format!("Variable `{}` uses `any` type", var.name);
                         let description = format!(
                             "The variable `{}` has type `any`, which disables type checking. \
                              Consider using `unknown` for values of uncertain type, or define \
@@ -137,11 +134,14 @@ impl Rule for TypescriptUnsafeAnyRule {
                             file_path: ts.path.clone(),
                             line: Some(var.location.range.start_line + 1),
                             column: Some(var.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
-                            fix_preview: Some(format!("// Consider: const {}: unknown = ...", var.name)),
+                            fix_preview: Some(format!(
+                                "// Consider: const {}: unknown = ...",
+                                var.name
+                            )),
                             tags: vec![
                                 "typescript".into(),
                                 "type-safety".into(),
@@ -163,7 +163,8 @@ fn generate_patch(file_id: FileId, line: u32) -> FilePatch {
         file_id,
         hunks: vec![PatchHunk {
             range: PatchRange::InsertBeforeLine { line },
-            replacement: "// TODO: Replace `any` with a more specific type or `unknown`\n".to_string(),
+            replacement: "// TODO: Replace `any` with a more specific type or `unknown`\n"
+                .to_string(),
         }],
     }
 }

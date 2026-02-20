@@ -12,10 +12,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::typescript::model::is_server_side_code;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::typescript::model::is_server_side_code;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -129,7 +129,7 @@ impl Rule for TypescriptConsoleInProductionRule {
                         column: Some(call.location.range.start_col + 1),
                         end_line: None,
                         end_column: None,
-            byte_range: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -255,7 +255,10 @@ function showMessage() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Client-side code should not trigger console warnings");
+        assert!(
+            findings.is_empty(),
+            "Client-side code should not trigger console warnings"
+        );
     }
 
     #[tokio::test]
@@ -283,6 +286,9 @@ function log(message: string): void {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "VS Code extensions should not trigger console warnings");
+        assert!(
+            findings.is_empty(),
+            "VS Code extensions should not trigger console warnings"
+        );
     }
 }

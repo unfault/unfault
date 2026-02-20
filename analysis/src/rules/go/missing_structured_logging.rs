@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::structured_logging;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -78,7 +78,7 @@ impl Rule for GoMissingStructuredLoggingRule {
 
                 if is_unstructured {
                     let line = call.function_call.location.line;
-                    
+
                     let title = format!(
                         "Unstructured logging call `{}` detected",
                         call.function_call.callee_expr
@@ -128,7 +128,8 @@ impl Rule for GoMissingStructuredLoggingRule {
 fn generate_structured_logging_patch(file_id: FileId, line: u32) -> FilePatch {
     let replacement = r#"// Replace with structured logging:
     // import "github.com/rs/zerolog/log"
-    // log.Info().Str("key", "value").Msg("your message")"#.to_string();
+    // log.Info().Str("key", "value").Msg("your message")"#
+        .to_string();
 
     FilePatch {
         file_id,

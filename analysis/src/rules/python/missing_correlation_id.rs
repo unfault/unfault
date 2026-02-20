@@ -108,11 +108,11 @@ fn has_correlation_id_middleware(py: &PyFileSemantics) -> bool {
     let has_starlette_context = py.imports.iter().any(|imp| {
         imp.module.contains("starlette_context") || imp.module.contains("starlette-context")
     });
-    
+
     if has_starlette_context {
         return true;
     }
-    
+
     // Check for common correlation ID middleware patterns in function names
     let has_correlation_middleware = py.functions.iter().any(|f| {
         let name_lower = f.name.to_lowercase();
@@ -121,17 +121,18 @@ fn has_correlation_id_middleware(py: &PyFileSemantics) -> bool {
             || name_lower.contains("trace_id")
             || name_lower.contains("get_request_id") // Helper function pattern
     });
-    
+
     if has_correlation_middleware {
         return true;
     }
-    
+
     // Check for ContextVar named "request_id" which is the proper pattern
     // This detects code like: request_id_var: ContextVar[str | None] = ContextVar("request_id", ...)
-    let has_request_id_contextvar = py.imports.iter().any(|imp| {
-        imp.module == "contextvars" && imp.names.iter().any(|n| n == "ContextVar")
-    });
-    
+    let has_request_id_contextvar = py
+        .imports
+        .iter()
+        .any(|imp| imp.module == "contextvars" && imp.names.iter().any(|n| n == "ContextVar"));
+
     // Check for middleware that mentions correlation/request ID/observability in calls
     if let Some(fastapi) = &py.fastapi {
         for middleware in &fastapi.middlewares {
@@ -140,13 +141,14 @@ fn has_correlation_id_middleware(py: &PyFileSemantics) -> bool {
                 || mw_type_lower.contains("requestid")
                 || mw_type_lower.contains("request_id")
                 || mw_type_lower.contains("trace")
-                || mw_type_lower.contains("observability") // ObservabilityMiddleware pattern
+                || mw_type_lower.contains("observability")
+            // ObservabilityMiddleware pattern
             {
                 return true;
             }
         }
     }
-    
+
     // Check for BaseHTTPMiddleware subclasses that handle correlation IDs
     for class in &py.classes {
         for base in &class.base_classes {
@@ -162,7 +164,7 @@ fn has_correlation_id_middleware(py: &PyFileSemantics) -> bool {
                 {
                     return true;
                 }
-                
+
                 // If using ContextVar, this class likely handles request context
                 if has_request_id_contextvar {
                     return true;
@@ -170,7 +172,7 @@ fn has_correlation_id_middleware(py: &PyFileSemantics) -> bool {
             }
         }
     }
-    
+
     false
 }
 
@@ -216,7 +218,7 @@ impl Rule for PythonMissingCorrelationIdRule {
             };
             has_correlation_id_middleware(py)
         });
-        
+
         if context_has_middleware {
             return findings;
         }
@@ -238,13 +240,7 @@ impl Rule for PythonMissingCorrelationIdRule {
                         column: app.location.range.start_col + 1,
                     };
 
-                    let finding = create_finding(
-                        self.id(),
-                        &missing,
-                        *file_id,
-                        &py.path,
-                        py,
-                    );
+                    let finding = create_finding(self.id(), &missing, *file_id, &py.path, py);
                     findings.push(finding);
                 }
             }
@@ -300,7 +296,7 @@ fn create_finding(
         column: Some(missing.column),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -320,23 +316,26 @@ fn generate_middleware_patch(
     py: &PyFileSemantics,
 ) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Add standard library imports at the correct position
     let stdlib_from_line = py.import_insertion_line_for(ImportInsertionType::stdlib_import());
-    
+
     hunks.push(PatchHunk {
-        range: PatchRange::InsertBeforeLine { line: stdlib_from_line },
+        range: PatchRange::InsertBeforeLine {
+            line: stdlib_from_line,
+        },
         replacement: "import time\nimport uuid\nfrom contextvars import ContextVar\n".to_string(),
     });
-    
+
     // Add third-party imports
-    let third_party_from_line = py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
-    
+    let third_party_from_line =
+        py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
+
     hunks.push(PatchHunk {
         range: PatchRange::InsertBeforeLine { line: third_party_from_line },
         replacement: "import structlog\nfrom starlette.middleware.base import BaseHTTPMiddleware\nfrom starlette.requests import Request\nfrom starlette.responses import Response\n".to_string(),
     });
-    
+
     // Add ObservabilityMiddleware implementation and registration after the app definition
     let middleware_code = format!(
         r#"
@@ -386,7 +385,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
 "#,
         app = missing.app_var_name,
     );
-    
+
     hunks.push(PatchHunk {
         range: PatchRange::InsertAfterLine {
             line: missing.end_line,
@@ -394,10 +393,7 @@ class ObservabilityMiddleware(BaseHTTPMiddleware):
         replacement: middleware_code,
     });
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -470,8 +466,14 @@ async def get_users():
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should detect app without correlation ID middleware
-        assert!(!findings.is_empty(), "Should detect FastAPI app without correlation ID middleware");
-        assert!(findings[0].title.contains("middleware"), "Finding should mention middleware");
+        assert!(
+            !findings.is_empty(),
+            "Should detect FastAPI app without correlation ID middleware"
+        );
+        assert!(
+            findings[0].title.contains("middleware"),
+            "Finding should mention middleware"
+        );
     }
 
     #[tokio::test]
@@ -495,7 +497,10 @@ async def get_users():
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should not flag apps with starlette-context
-        assert!(findings.is_empty(), "Should not flag app with starlette-context middleware");
+        assert!(
+            findings.is_empty(),
+            "Should not flag app with starlette-context middleware"
+        );
     }
 
     #[tokio::test]
@@ -520,7 +525,10 @@ app.add_middleware(CorrelationIdMiddleware)
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should not flag apps with custom correlation middleware
-        assert!(findings.is_empty(), "Should not flag app with custom correlation middleware");
+        assert!(
+            findings.is_empty(),
+            "Should not flag app with custom correlation middleware"
+        );
     }
 
     #[tokio::test]
@@ -560,7 +568,10 @@ app.add_middleware(ObservabilityMiddleware)
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should not flag apps with ObservabilityMiddleware
-        assert!(findings.is_empty(), "Should not flag app with ObservabilityMiddleware");
+        assert!(
+            findings.is_empty(),
+            "Should not flag app with ObservabilityMiddleware"
+        );
     }
 
     // ==================== Edge Cases ====================
@@ -606,7 +617,7 @@ async def create_item(data: dict):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(!findings.is_empty());
         let finding = &findings[0];
         assert_eq!(finding.rule_id, "python.missing_correlation_id");
@@ -621,7 +632,7 @@ async def create_item(data: dict):
     #[tokio::test]
     async fn patch_adds_middleware_to_app() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = PythonMissingCorrelationIdRule::new();
         let src = r#"from fastapi import FastAPI
 
@@ -635,36 +646,54 @@ async def get_users():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect app without correlation ID middleware");
-        
+        assert!(
+            !findings.is_empty(),
+            "Should detect app without correlation ID middleware"
+        );
+
         let patch = findings[0].patch.as_ref().expect("Should have a patch");
         let patched = apply_file_patch(src, patch);
-        
+
         // Should contain the ObservabilityMiddleware class
-        assert!(patched.contains("class ObservabilityMiddleware"),
-            "Patched code should define ObservabilityMiddleware. Got:\n{}", patched);
-        
+        assert!(
+            patched.contains("class ObservabilityMiddleware"),
+            "Patched code should define ObservabilityMiddleware. Got:\n{}",
+            patched
+        );
+
         // Should contain the middleware registration
-        assert!(patched.contains("add_middleware(ObservabilityMiddleware)"),
-            "Patched code should add ObservabilityMiddleware. Got:\n{}", patched);
-        
+        assert!(
+            patched.contains("add_middleware(ObservabilityMiddleware)"),
+            "Patched code should add ObservabilityMiddleware. Got:\n{}",
+            patched
+        );
+
         // Should contain ContextVar for request ID
-        assert!(patched.contains("request_id_var"),
-            "Patched code should define request_id_var ContextVar. Got:\n{}", patched);
-        
+        assert!(
+            patched.contains("request_id_var"),
+            "Patched code should define request_id_var ContextVar. Got:\n{}",
+            patched
+        );
+
         // Should contain structlog integration
-        assert!(patched.contains("structlog"),
-            "Patched code should integrate with structlog. Got:\n{}", patched);
-        
+        assert!(
+            patched.contains("structlog"),
+            "Patched code should integrate with structlog. Got:\n{}",
+            patched
+        );
+
         // Should contain get_request_id helper
-        assert!(patched.contains("def get_request_id"),
-            "Patched code should define get_request_id helper. Got:\n{}", patched);
+        assert!(
+            patched.contains("def get_request_id"),
+            "Patched code should define get_request_id helper. Got:\n{}",
+            patched
+        );
     }
-    
+
     #[tokio::test]
     async fn patch_preserves_original_code() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = PythonMissingCorrelationIdRule::new();
         let src = r#"from fastapi import FastAPI
 
@@ -679,17 +708,26 @@ async def get_users():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let patch = findings[0].patch.as_ref().expect("Should have a patch");
         let patched = apply_file_patch(src, patch);
-        
+
         // Should still contain the original code
-        assert!(patched.contains("app = FastAPI()"),
-            "Patched code should preserve FastAPI app. Got:\n{}", patched);
-        assert!(patched.contains("async def get_users"),
-            "Patched code should preserve handlers. Got:\n{}", patched);
-        assert!(patched.contains("return []"),
-            "Patched code should preserve handler body. Got:\n{}", patched);
+        assert!(
+            patched.contains("app = FastAPI()"),
+            "Patched code should preserve FastAPI app. Got:\n{}",
+            patched
+        );
+        assert!(
+            patched.contains("async def get_users"),
+            "Patched code should preserve handlers. Got:\n{}",
+            patched
+        );
+        assert!(
+            patched.contains("return []"),
+            "Patched code should preserve handler body. Got:\n{}",
+            patched
+        );
     }
 
     #[tokio::test]
@@ -708,20 +746,26 @@ async def get_users():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let patch = findings[0].patch.as_ref().expect("Should have a patch");
-        
+
         // Should have hunks that use InsertAfterLine for middleware placement
         let has_insert_after = patch.hunks.iter().any(|h| {
-            matches!(h.range, crate::types::patch::PatchRange::InsertAfterLine { .. })
+            matches!(
+                h.range,
+                crate::types::patch::PatchRange::InsertAfterLine { .. }
+            )
         });
-        assert!(has_insert_after, "Patch should use InsertAfterLine for middleware placement");
+        assert!(
+            has_insert_after,
+            "Patch should use InsertAfterLine for middleware placement"
+        );
     }
 
     #[tokio::test]
     async fn patch_works_with_multiline_fastapi_constructor() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = PythonMissingCorrelationIdRule::new();
         // Multi-line FastAPI() constructor - this is the case that was broken
         let src = r#"from fastapi import FastAPI
@@ -741,33 +785,55 @@ async def get_users():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty(), "Should detect app without middleware");
-        
+
         let patch = findings[0].patch.as_ref().expect("Should have a patch");
         let patched = apply_file_patch(src, patch);
-        
+
         // The middleware should be added AFTER the closing ), not inside the constructor
         // Check that the FastAPI constructor is preserved intact
-        assert!(patched.contains("app = FastAPI("),
-            "Should preserve start of FastAPI constructor. Got:\n{}", patched);
-        assert!(patched.contains("title=\"My API\""),
-            "Should preserve FastAPI constructor arguments. Got:\n{}", patched);
-        assert!(patched.contains("openapi_url=None,"),
-            "Should preserve FastAPI constructor arguments. Got:\n{}", patched);
-        
+        assert!(
+            patched.contains("app = FastAPI("),
+            "Should preserve start of FastAPI constructor. Got:\n{}",
+            patched
+        );
+        assert!(
+            patched.contains("title=\"My API\""),
+            "Should preserve FastAPI constructor arguments. Got:\n{}",
+            patched
+        );
+        assert!(
+            patched.contains("openapi_url=None,"),
+            "Should preserve FastAPI constructor arguments. Got:\n{}",
+            patched
+        );
+
         // Check that middleware class is added (after the constructor, not inside)
         // The patched code should have the closing ) followed eventually by ObservabilityMiddleware
-        let constructor_end = patched.find("openapi_url=None,").expect("Should have constructor arg");
-        let middleware_start = patched.find("class ObservabilityMiddleware").expect("Should have middleware class");
-        assert!(middleware_start > constructor_end,
-            "Middleware should come after constructor arguments. Got:\n{}", patched);
-        
+        let constructor_end = patched
+            .find("openapi_url=None,")
+            .expect("Should have constructor arg");
+        let middleware_start = patched
+            .find("class ObservabilityMiddleware")
+            .expect("Should have middleware class");
+        assert!(
+            middleware_start > constructor_end,
+            "Middleware should come after constructor arguments. Got:\n{}",
+            patched
+        );
+
         // Check the handler is still there
-        assert!(patched.contains("@app.get(\"/users\")"),
-            "Should preserve route handlers. Got:\n{}", patched);
-        
+        assert!(
+            patched.contains("@app.get(\"/users\")"),
+            "Should preserve route handlers. Got:\n{}",
+            patched
+        );
+
         // Check middleware registration happens
-        assert!(patched.contains("app.add_middleware(ObservabilityMiddleware)"),
-            "Should add middleware to app. Got:\n{}", patched);
+        assert!(
+            patched.contains("app.add_middleware(ObservabilityMiddleware)"),
+            "Should add middleware to app. Got:\n{}",
+            patched
+        );
     }
 
     // ==================== Cross-File Context Tests ====================
@@ -794,7 +860,7 @@ async def get_users():
     #[tokio::test]
     async fn evaluate_ignores_when_middleware_in_separate_file() {
         let rule = PythonMissingCorrelationIdRule::new();
-        
+
         // Middleware configured in separate file
         let sources = vec![
             (

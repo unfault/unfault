@@ -9,9 +9,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::tracing;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -84,10 +84,12 @@ impl Rule for PythonMissingTracingRule {
 
                 if let Some(ref fastapi) = py.fastapi {
                     // Get app info from the first app in the file
-                    let (app_var_name, app_line) = fastapi.apps.first()
+                    let (app_var_name, app_line) = fastapi
+                        .apps
+                        .first()
                         .map(|a| (a.var_name.clone(), a.location.range.start_line + 1))
                         .unwrap_or_else(|| ("app".to_string(), 1));
-                    
+
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "FastAPI app without distributed tracing".to_string(),

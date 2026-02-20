@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -50,18 +50,20 @@ impl Rule for GormQueryTimeoutRule {
             };
 
             // Check if GORM is imported
-            let has_gorm = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("gorm.io/gorm")
-            });
+            let has_gorm = go_sem
+                .imports
+                .iter()
+                .any(|imp| imp.path.contains("gorm.io/gorm"));
 
             if !has_gorm {
                 continue;
             }
 
             // Check for WithContext usage
-            let has_context = go_sem.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("WithContext")
-            });
+            let has_context = go_sem
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr.contains("WithContext"));
 
             if has_context {
                 continue;
@@ -81,10 +83,7 @@ impl Rule for GormQueryTimeoutRule {
                 if is_query {
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "GORM query at line {} lacks context timeout",
-                        line
-                    );
+                    let title = format!("GORM query at line {} lacks context timeout", line);
 
                     let description = format!(
                         "GORM query at line {} does not use WithContext for timeout. \
@@ -108,9 +107,9 @@ impl Rule for GormQueryTimeoutRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("// Use WithContext for query timeout".to_string()),
                         tags: vec![
@@ -138,7 +137,8 @@ fn generate_context_patch(file_id: FileId, line: u32) -> FilePatch {
 // ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 // defer cancel()
 // db.WithContext(ctx).Find(&items)
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

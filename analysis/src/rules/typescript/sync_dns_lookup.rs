@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -67,7 +67,8 @@ impl Rule for TypescriptSyncDnsLookupRule {
             for call in &ts.calls {
                 let is_sync_dns = call.callee.contains("dns.lookupSync")
                     || call.callee.contains("dns.resolveSync")
-                    || (call.callee.contains("dns.lookup") && !call.callee.contains("lookupService"));
+                    || (call.callee.contains("dns.lookup")
+                        && !call.callee.contains("lookupService"));
 
                 if !is_sync_dns {
                     continue;
@@ -111,7 +112,7 @@ impl Rule for TypescriptSyncDnsLookupRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Use async dns.promises.lookup()".to_string()),
                     tags: vec!["performance".into(), "dns".into(), "blocking".into()],

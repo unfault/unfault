@@ -1,5 +1,5 @@
 pub mod common;
-mod common_impl;  // CommonSemantics trait implementations
+mod common_impl; // CommonSemantics trait implementations
 pub mod go;
 pub mod python;
 pub mod rust;
@@ -17,13 +17,8 @@ use typescript::model::TsFileSemantics;
 
 // Re-export common types for convenience
 pub use common::{
-    async_ops::AsyncOperation,
-    calls::FunctionCall,
-    db::DbOperation,
-    functions::FunctionDef,
-    http::HttpCall,
-    imports::Import,
-    CommonSemantics,
+    CommonSemantics, async_ops::AsyncOperation, calls::FunctionCall, db::DbOperation,
+    functions::FunctionDef, http::HttpCall, imports::Import,
 };
 
 /// Language-agnostic wrapper for per-file semantics.
@@ -110,15 +105,11 @@ impl SourceSemantics {
     /// for IR compatibility with the core crate, so it returns an empty vec.
     pub fn function_calls(&self) -> Vec<FunctionCall> {
         match self {
-            SourceSemantics::Python(py) => py.calls.iter()
-                .map(|c| c.function_call.clone())
-                .collect(),
-            SourceSemantics::Go(go) => go.calls.iter()
-                .map(|c| c.function_call.clone())
-                .collect(),
-            SourceSemantics::Rust(rs) => rs.calls.iter()
-                .map(|c| c.function_call.clone())
-                .collect(),
+            SourceSemantics::Python(py) => {
+                py.calls.iter().map(|c| c.function_call.clone()).collect()
+            }
+            SourceSemantics::Go(go) => go.calls.iter().map(|c| c.function_call.clone()).collect(),
+            SourceSemantics::Rust(rs) => rs.calls.iter().map(|c| c.function_call.clone()).collect(),
             // TypeScript uses simpler call representation for core crate compatibility
             SourceSemantics::Typescript(_) => Vec::new(),
         }
@@ -315,7 +306,7 @@ mod tests {
     #[test]
     fn build_source_semantics_typescript_returns_some() {
         use crate::parse::typescript::parse_typescript_file;
-        
+
         let sf = make_source_file("test.ts", Language::Typescript, "const x = 1;");
         let parsed = parse_typescript_file(FileId(1), &sf).expect("parsing should succeed");
 
@@ -327,7 +318,7 @@ mod tests {
     #[test]
     fn build_source_semantics_typescript_returns_typescript_variant() {
         use crate::parse::typescript::parse_typescript_file;
-        
+
         let sf = make_source_file("test.ts", Language::Typescript, "const x = 1;");
         let parsed = parse_typescript_file(FileId(1), &sf).expect("parsing should succeed");
 
@@ -338,10 +329,11 @@ mod tests {
     #[test]
     fn source_semantics_as_typescript_returns_some_for_typescript() {
         use crate::parse::typescript::parse_typescript_file;
-        
+
         let sf = make_source_file("test.ts", Language::Typescript, "const x = 1;");
         let parsed = parse_typescript_file(FileId(1), &sf).expect("parsing should succeed");
-        let sem = typescript::build_typescript_semantics(&parsed).expect("semantics building should succeed");
+        let sem = typescript::build_typescript_semantics(&parsed)
+            .expect("semantics building should succeed");
 
         let source_sem = SourceSemantics::Typescript(sem);
         assert!(source_sem.as_typescript().is_some());

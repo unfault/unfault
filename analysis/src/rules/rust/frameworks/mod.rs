@@ -5,12 +5,12 @@
 //! and database libraries (SQLx, Diesel).
 
 pub mod axum;
-pub mod tokio;
 pub mod sqlx;
+pub mod tokio;
 
 // Re-export Axum rules
-pub use axum::AxumMissingErrorHandlerRule;
 pub use axum::AxumMissingCorsRule;
+pub use axum::AxumMissingErrorHandlerRule;
 pub use axum::AxumMissingTimeoutRule;
 
 // Re-export Tokio rules

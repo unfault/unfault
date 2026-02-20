@@ -56,7 +56,10 @@ impl Rule for SqlAlchemyConnectionPoolRule {
             // Check for SQLAlchemy imports
             let has_sqlalchemy = py.imports.iter().any(|imp| {
                 imp.module.contains("sqlalchemy")
-                    || imp.names.iter().any(|n| n == "create_engine" || n == "create_async_engine")
+                    || imp
+                        .names
+                        .iter()
+                        .any(|n| n == "create_engine" || n == "create_async_engine")
             });
 
             if !has_sqlalchemy {
@@ -68,7 +71,10 @@ impl Rule for SqlAlchemyConnectionPoolRule {
                 let is_engine_creation = call.function_call.callee_expr == "create_engine"
                     || call.function_call.callee_expr.ends_with(".create_engine")
                     || call.function_call.callee_expr == "create_async_engine"
-                    || call.function_call.callee_expr.ends_with(".create_async_engine");
+                    || call
+                        .function_call
+                        .callee_expr
+                        .ends_with(".create_async_engine");
 
                 if !is_engine_creation {
                     continue;
@@ -120,11 +126,12 @@ impl Rule for SqlAlchemyConnectionPoolRule {
                         missing_settings.join(", ")
                     );
 
-                    let description = 
+                    let description =
                         "SQLAlchemy engine is created without explicit connection pool \
                          configuration. This can lead to connection exhaustion under load, \
                          stale connections, or poor performance. Configure pool_size, \
-                         max_overflow, pool_recycle, and pool_pre_ping for production.".to_string();
+                         max_overflow, pool_recycle, and pool_pre_ping for production."
+                            .to_string();
 
                     let fix_preview = generate_pool_config_fix_preview();
 
@@ -149,9 +156,9 @@ impl Rule for SqlAlchemyConnectionPoolRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -171,7 +178,8 @@ impl Rule for SqlAlchemyConnectionPoolRule {
                         description: Some(
                             "Connection pool is configured but pool_timeout is not set. \
                              Without a timeout, requests may wait indefinitely for a \
-                             connection. Set pool_timeout to fail fast under load.".to_string()
+                             connection. Set pool_timeout to fail fast under load."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Low,
@@ -181,9 +189,9 @@ impl Rule for SqlAlchemyConnectionPoolRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_pool_timeout_fix_preview()),
                         tags: vec![
@@ -219,15 +227,15 @@ fn generate_pool_config_patch(
     if let (Some(start), Some(end)) = (start_byte, end_byte) {
         // Parse existing args and add pool configuration
         let args_inner = args.trim().trim_start_matches('(').trim_end_matches(')');
-        
+
         let pool_config = "pool_size=5, max_overflow=10, pool_recycle=3600, pool_pre_ping=True";
-        
+
         let new_call = if args_inner.is_empty() {
             format!("{}({})", callee, pool_config)
         } else {
             format!("{}({}, {})", callee, args_inner, pool_config)
         };
-        
+
         return FilePatch {
             file_id,
             hunks: vec![PatchHunk {
@@ -236,7 +244,7 @@ fn generate_pool_config_patch(
             }],
         };
     }
-    
+
     // Fallback to comment patch
     let hunks = vec![PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
@@ -299,7 +307,8 @@ engine = create_engine(
     max_overflow=int(os.environ.get("DB_MAX_OVERFLOW", 10)),
     pool_recycle=int(os.environ.get("DB_POOL_RECYCLE", 3600)),
     pool_pre_ping=True,
-)"#.to_string()
+)"#
+    .to_string()
 }
 
 /// Generate fix preview for pool timeout.
@@ -319,7 +328,8 @@ engine = create_engine(
 # For high-traffic applications, consider:
 # - Lower pool_timeout (10-30 seconds)
 # - Higher pool_size and max_overflow
-# - Connection pooler like PgBouncer"#.to_string()
+# - Connection pooler like PgBouncer"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -346,7 +356,10 @@ mod tests {
     #[test]
     fn rule_id_is_correct() {
         let rule = SqlAlchemyConnectionPoolRule::new();
-        assert_eq!(rule.id(), "python.sqlalchemy.missing_connection_pool_config");
+        assert_eq!(
+            rule.id(),
+            "python.sqlalchemy.missing_connection_pool_config"
+        );
     }
 
     #[test]

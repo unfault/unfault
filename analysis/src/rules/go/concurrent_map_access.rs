@@ -3,14 +3,14 @@
 //! Detects potential data races from accessing Go maps from multiple goroutines
 //! without proper synchronization.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -59,32 +59,34 @@ impl Rule for GoConcurrentMapAccessRule {
 
             // Check for sync.Map usage (safe pattern)
             let uses_sync_map = go.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("sync.Map") || 
-                c.function_call.callee_expr.contains(".Store(") ||
-                c.function_call.callee_expr.contains(".Load(") ||
-                c.function_call.callee_expr.contains(".LoadOrStore(") ||
-                c.function_call.callee_expr.contains(".Delete(") ||
-                c.function_call.callee_expr.contains(".Range(")
+                c.function_call.callee_expr.contains("sync.Map")
+                    || c.function_call.callee_expr.contains(".Store(")
+                    || c.function_call.callee_expr.contains(".Load(")
+                    || c.function_call.callee_expr.contains(".LoadOrStore(")
+                    || c.function_call.callee_expr.contains(".Delete(")
+                    || c.function_call.callee_expr.contains(".Range(")
             });
 
             // Check for mutex usage
-            let uses_mutex = go.mutex_operations.iter().any(|_| true) ||
-                go.calls.iter().any(|c| {
-                    c.function_call.callee_expr.contains(".Lock()") || 
-                    c.function_call.callee_expr.contains(".RLock()") ||
-                    c.function_call.callee_expr.contains("sync.Mutex") ||
-                    c.function_call.callee_expr.contains("sync.RWMutex")
+            let uses_mutex = go.mutex_operations.iter().any(|_| true)
+                || go.calls.iter().any(|c| {
+                    c.function_call.callee_expr.contains(".Lock()")
+                        || c.function_call.callee_expr.contains(".RLock()")
+                        || c.function_call.callee_expr.contains("sync.Mutex")
+                        || c.function_call.callee_expr.contains("sync.RWMutex")
                 });
 
             // Look for map declarations in the file
-            let has_map_decl = go.declarations.iter().any(|d| {
-                d.decl_type.as_ref().is_some_and(|t| t.starts_with("map["))
-            });
+            let has_map_decl = go
+                .declarations
+                .iter()
+                .any(|d| d.decl_type.as_ref().is_some_and(|t| t.starts_with("map[")));
 
             // Look for make(map[...]) calls
-            let has_map_make = go.calls.iter().any(|c| {
-                c.function_call.callee_expr == "make" && c.args_repr.contains("map[")
-            });
+            let has_map_make = go
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "make" && c.args_repr.contains("map["));
 
             let has_map = has_map_decl || has_map_make;
 
@@ -96,7 +98,7 @@ impl Rule for GoConcurrentMapAccessRule {
                         // Check if goroutine body might access a map
                         // This is heuristic - looking for map-like access patterns
                         let text = &goroutine.text;
-                        
+
                         // Look for map access patterns: var[key] or var[key] = value
                         if text.contains('[') && text.contains(']') {
                             let title = "Potential concurrent map access".to_string();
@@ -133,9 +135,9 @@ impl Rule for GoConcurrentMapAccessRule {
                                 file_path: go.path.clone(),
                                 line: Some(goroutine.line),
                                 column: Some(goroutine.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
                                 patch: Some(patch),
                                 fix_preview: Some("Use sync.Map or protect with mutex".to_string()),
                                 tags: vec![
@@ -157,9 +159,9 @@ impl Rule for GoConcurrentMapAccessRule {
                         // Global map - higher risk
                         if !go.goroutines.is_empty() && !uses_sync_map && !uses_mutex {
                             let line = decl.location.range.start_line + 1;
-                            
+
                             let title = "Global map may be accessed concurrently".to_string();
-                            
+
                             let description = format!(
                                 "Package-level map '{}' at line {} may be accessed from goroutines \
                                  without synchronization. This is a common source of \"concurrent map writes\" \
@@ -195,9 +197,9 @@ impl Rule for GoConcurrentMapAccessRule {
                                 file_path: go.path.clone(),
                                 line: Some(line),
                                 column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
                                 patch: Some(patch),
                                 fix_preview: Some("Replace with sync.Map".to_string()),
                                 tags: vec![
@@ -223,8 +225,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -249,7 +251,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_unsafe_map_in_goroutine() {
         let rule = GoConcurrentMapAccessRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func main() {
@@ -263,18 +266,24 @@ func main() {
         _ = m["key"]
     }()
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect potential concurrent map access
-        assert!(findings.iter().any(|f| f.rule_id == "go.concurrent_map_access"));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == "go.concurrent_map_access")
+        );
     }
 
     #[tokio::test]
     async fn test_no_finding_with_sync_map() {
         let rule = GoConcurrentMapAccessRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 import "sync"
@@ -290,12 +299,14 @@ func main() {
         m.Load("key")
     }()
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag sync.Map usage
-        let map_findings: Vec<_> = findings.iter()
+        let map_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.concurrent_map_access")
             .collect();
         assert!(map_findings.is_empty());
@@ -304,7 +315,8 @@ func main() {
     #[tokio::test]
     async fn test_no_finding_with_mutex() {
         let rule = GoConcurrentMapAccessRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 import "sync"
@@ -321,12 +333,14 @@ func main() {
         mu.Unlock()
     }()
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag when mutex is used
-        let map_findings: Vec<_> = findings.iter()
+        let map_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.concurrent_map_access")
             .collect();
         assert!(map_findings.is_empty());

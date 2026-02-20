@@ -108,7 +108,7 @@ impl Rule for TypescriptRegexCompileRule {
                     // Check if this call is inside a function
                     if let Some(func_name) = find_enclosing_function(&ts.functions, call) {
                         let (pattern_arg, flags_arg) = extract_regexp_args(&call.args_repr);
-                        
+
                         let full_call = format!("{}{}", call.callee, call.args_repr);
 
                         let regex_info = RegexInFunction {
@@ -123,12 +123,7 @@ impl Rule for TypescriptRegexCompileRule {
                             full_call,
                         };
 
-                        findings.push(create_finding(
-                            self.id(),
-                            &regex_info,
-                            *file_id,
-                            &ts.path,
-                        ));
+                        findings.push(create_finding(self.id(), &regex_info, *file_id, &ts.path));
                     }
                 }
             }
@@ -150,16 +145,16 @@ fn is_regexp_constructor_call(callee: &str) -> bool {
 /// Find the enclosing function for a given call
 fn find_enclosing_function(functions: &[TsFunction], call: &TsCallSite) -> Option<String> {
     let call_line = call.location.range.start_line + 1;
-    
+
     for func in functions {
         let func_start = func.location.range.start_line;
         let func_end = func.location.range.end_line;
-        
+
         if call_line >= func_start && call_line <= func_end {
             return Some(func.name.clone());
         }
     }
-    
+
     None
 }
 
@@ -169,20 +164,20 @@ fn extract_regexp_args(args_repr: &str) -> (Option<String>, Option<String>) {
     if trimmed.is_empty() {
         return (None, None);
     }
-    
+
     // Remove parentheses
     let inner = trimmed.trim_start_matches('(').trim_end_matches(')').trim();
-    
+
     if inner.is_empty() {
         return (None, None);
     }
-    
+
     // Split by comma (outside of quotes)
     let parts: Vec<&str> = split_args(inner);
-    
+
     let pattern_arg = parts.first().map(|s| s.trim().to_string());
     let flags_arg = parts.get(1).map(|s| s.trim().to_string());
-    
+
     (pattern_arg, flags_arg)
 }
 
@@ -194,7 +189,7 @@ fn split_args(s: &str) -> Vec<&str> {
     let mut in_double_quote = false;
     let mut in_template = false;
     let mut prev_char = None;
-    
+
     for (i, c) in s.char_indices() {
         match c {
             '\'' if !in_double_quote && !in_template && prev_char != Some('\\') => {
@@ -214,11 +209,11 @@ fn split_args(s: &str) -> Vec<&str> {
         }
         prev_char = Some(c);
     }
-    
+
     if start < s.len() {
         result.push(&s[start..]);
     }
-    
+
     result
 }
 
@@ -237,27 +232,28 @@ fn suggest_constant_name(regex_info: &RegexInFunction) -> String {
             return "PHONE_PATTERN".to_string();
         }
     }
-    
+
     // Default: derive from function name
-    let base = regex_info.function_name
+    let base = regex_info
+        .function_name
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '_')
         .collect::<String>();
-    
+
     format!("{}_PATTERN", to_screaming_snake_case(&base))
 }
 
 /// Convert a string to SCREAMING_SNAKE_CASE
 fn to_screaming_snake_case(s: &str) -> String {
     let mut result = String::new();
-    
+
     for (i, c) in s.chars().enumerate() {
         if c.is_uppercase() && i > 0 {
             result.push('_');
         }
         result.push(c.to_ascii_uppercase());
     }
-    
+
     result
 }
 
@@ -266,19 +262,20 @@ fn pattern_to_literal(pattern: &Option<String>, flags: &Option<String>) -> Optio
     if let Some(p) = pattern {
         // Check if pattern is a simple string literal
         let is_simple = p.starts_with('\'') || p.starts_with('"');
-        
+
         if is_simple {
             // Remove quotes and create literal
             let inner = p.trim_matches(|c| c == '\'' || c == '"');
-            
+
             // Check for special chars that would prevent literal conversion
             let has_forward_slash = inner.contains('/');
-            
+
             if !has_forward_slash {
-                let flags_str = flags.as_ref()
+                let flags_str = flags
+                    .as_ref()
                     .map(|f| f.trim_matches(|c| c == '\'' || c == '"'))
                     .unwrap_or("");
-                    
+
                 return Some(format!("/{}/{}", inner, flags_str));
             }
         }
@@ -299,13 +296,16 @@ fn create_finding(
 
     let suggested_name = suggest_constant_name(regex_info);
     let literal_form = pattern_to_literal(&regex_info.pattern_arg, &regex_info.flags_arg);
-    
+
     let suggestion = if let Some(ref lit) = literal_form {
         format!("Use regex literal: `const {} = {};`", suggested_name, lit)
     } else {
-        format!("Move to module level: `const {} = new RegExp(...);`", suggested_name)
+        format!(
+            "Move to module level: `const {} = new RegExp(...);`",
+            suggested_name
+        )
     };
-    
+
     let description = format!(
         "The RegExp creation '{}' inside function '{}' will create a new RegExp object \
          on every function call. Move the RegExp to module level as a constant \
@@ -315,10 +315,7 @@ fn create_finding(
          - Clearer code structure (patterns visible at module level)\n\
          - Better memory usage (single instance, not one per call)\n\n\
          Suggestion: {}",
-        regex_info.full_call,
-        regex_info.function_name,
-        suggested_name,
-        suggestion,
+        regex_info.full_call, regex_info.function_name, suggested_name, suggestion,
     );
 
     let (patch, fix_preview) = generate_patch(regex_info, file_id);
@@ -337,7 +334,7 @@ fn create_finding(
         column: Some(regex_info.column),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -352,9 +349,9 @@ fn create_finding(
 fn generate_patch(regex_info: &RegexInFunction, file_id: FileId) -> (FilePatch, String) {
     let suggested_name = suggest_constant_name(regex_info);
     let literal_form = pattern_to_literal(&regex_info.pattern_arg, &regex_info.flags_arg);
-    
+
     let pattern_repr = regex_info.pattern_arg.as_deref().unwrap_or("'pattern'");
-    
+
     // For the fix preview, show the before/after transformation
     let fix_preview = if let Some(ref lit) = literal_form {
         format!(
@@ -405,15 +402,13 @@ function {}(...) {{
     // The patch replaces the new RegExp call with the suggested constant name
     let patch = FilePatch {
         file_id,
-        hunks: vec![
-            PatchHunk {
-                range: PatchRange::ReplaceBytes {
-                    start: regex_info.start_byte,
-                    end: regex_info.end_byte,
-                },
-                replacement: suggested_name.clone(),
+        hunks: vec![PatchHunk {
+            range: PatchRange::ReplaceBytes {
+                start: regex_info.start_byte,
+                end: regex_info.end_byte,
             },
-        ],
+            replacement: suggested_name.clone(),
+        }],
     };
 
     (patch, fix_preview)
@@ -482,10 +477,16 @@ function validateEmail(email: string): boolean {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1, "Should detect new RegExp in function");
         assert_eq!(findings[0].rule_id, "typescript.regex_compile");
-        assert!(findings[0].description.as_ref().unwrap().contains("validateEmail"));
+        assert!(
+            findings[0]
+                .description
+                .as_ref()
+                .unwrap()
+                .contains("validateEmail")
+        );
     }
 
     #[tokio::test]
@@ -502,7 +503,7 @@ function validateEmail(email: string): boolean {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(findings.is_empty(), "Should not flag module-level RegExp");
     }
 
@@ -520,7 +521,7 @@ function validateEmail(email: string): boolean {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(findings.is_empty(), "Should not flag regex literals");
     }
 
@@ -558,10 +559,10 @@ function validate(text: string): boolean {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1);
         let finding = &findings[0];
-        
+
         assert_eq!(finding.rule_id, "typescript.regex_compile");
         assert!(matches!(finding.kind, FindingKind::PerformanceSmell));
         assert_eq!(finding.dimension, Dimension::Performance);
@@ -649,7 +650,7 @@ function validate(text: string): boolean {
             end_byte: 150,
             full_call: "new RegExp('\\d+')".to_string(),
         };
-        
+
         let name = suggest_constant_name(&info);
         assert_eq!(name, "VALIDATE_INPUT_PATTERN");
     }

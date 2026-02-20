@@ -40,8 +40,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -110,7 +110,9 @@ impl Rule for RustUnboundedConcurrencyRule {
 
             // Check if Semaphore is imported
             let has_semaphore_import = rust.uses.iter().any(|u| {
-                CONCURRENCY_LIMIT_PATTERNS.iter().any(|p| u.path.contains(p))
+                CONCURRENCY_LIMIT_PATTERNS
+                    .iter()
+                    .any(|p| u.path.contains(p))
             });
 
             // Look for spawn calls that appear in loop/iterator context
@@ -119,15 +121,15 @@ impl Rule for RustUnboundedConcurrencyRule {
                 let func_name = spawn_call.function_name.clone().unwrap_or_default();
 
                 // Check if this spawn is part of an iterator chain
-                let in_iterator_context = UNBOUNDED_SPAWN_PATTERNS
-                    .iter()
-                    .any(|p| expr.contains(p));
+                let in_iterator_context = UNBOUNDED_SPAWN_PATTERNS.iter().any(|p| expr.contains(p));
 
                 // Check if the function uses any concurrency limiting
                 let func_has_limiting = has_semaphore_import
                     || rust.calls.iter().any(|c| {
                         c.function_name.as_deref() == Some(&func_name)
-                            && CONCURRENCY_LIMIT_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
+                            && CONCURRENCY_LIMIT_PATTERNS
+                                .iter()
+                                .any(|p| c.function_call.callee_expr.contains(p))
                     });
 
                 // Count spawns in this function
@@ -151,7 +153,7 @@ impl Rule for RustUnboundedConcurrencyRule {
                         *file_id,
                         &rust.path,
                     ));
-                    
+
                     // Only report once per function
                     break;
                 }
@@ -159,13 +161,17 @@ impl Rule for RustUnboundedConcurrencyRule {
 
             // Also check for join_all/try_join_all without semaphore
             for call in &rust.calls {
-                if call.function_call.callee_expr.contains("join_all") || call.function_call.callee_expr.contains("try_join_all") {
+                if call.function_call.callee_expr.contains("join_all")
+                    || call.function_call.callee_expr.contains("try_join_all")
+                {
                     let func_name = call.function_name.clone().unwrap_or_default();
 
                     let func_has_limiting = has_semaphore_import
                         || rust.calls.iter().any(|c| {
                             c.function_name.as_deref() == Some(&func_name)
-                                && CONCURRENCY_LIMIT_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
+                                && CONCURRENCY_LIMIT_PATTERNS
+                                    .iter()
+                                    .any(|p| c.function_call.callee_expr.contains(p))
                         });
 
                     if !func_has_limiting {
@@ -302,9 +308,9 @@ for item in items {{
         file_path: file_path.to_string(),
         line: Some(line),
         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(FilePatch {
             file_id,
             hunks: vec![
@@ -334,8 +340,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -322,9 +322,9 @@ results = await asyncio.gather(*[async_{callee}(item) for item in items])"#,
         file_path: file_path.to_string(),
         line: Some(io_call.line),
         column: Some(io_call.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -337,12 +337,9 @@ results = await asyncio.gather(*[async_{callee}(item) for item in items])"#,
     }
 }
 
-fn generate_batch_suggestion_patch(
-    io_call: &IoInHotPath,
-    file_id: FileId,
-) -> FilePatch {
+fn generate_batch_suggestion_patch(io_call: &IoInHotPath, file_id: FileId) -> FilePatch {
     let func_name = io_call.callee.split('.').last().unwrap_or(&io_call.callee);
-    
+
     // Generate specific fix based on I/O type
     let replacement = match io_call.io_type {
         IoOperationType::FileSystem => {
@@ -398,9 +395,7 @@ fn generate_batch_suggestion_patch(
     FilePatch {
         file_id,
         hunks: vec![PatchHunk {
-            range: PatchRange::InsertBeforeLine {
-                line: io_call.line,
-            },
+            range: PatchRange::InsertBeforeLine { line: io_call.line },
             replacement,
         }],
     }
@@ -464,7 +459,7 @@ for filename in filenames:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(!findings.is_empty(), "Should detect open() in loop");
         assert_eq!(findings[0].rule_id, "python.io_in_hot_path");
     }
@@ -483,7 +478,7 @@ for url in urls:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(!findings.is_empty(), "Should detect requests.get in loop");
     }
 
@@ -497,8 +492,11 @@ results = [cursor.execute(f"SELECT * FROM users WHERE id = {id}") for id in user
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(!findings.is_empty(), "Should detect cursor.execute in comprehension");
+
+        assert!(
+            !findings.is_empty(),
+            "Should detect cursor.execute in comprehension"
+        );
     }
 
     #[tokio::test]
@@ -517,9 +515,10 @@ for item in data:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag I/O outside loops
-        let io_findings: Vec<_> = findings.iter()
+        let io_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "python.io_in_hot_path")
             .collect();
         assert!(io_findings.is_empty(), "Should not flag I/O outside loops");
@@ -555,7 +554,7 @@ for f in files:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             let finding = &findings[0];
             assert_eq!(finding.rule_id, "python.io_in_hot_path");

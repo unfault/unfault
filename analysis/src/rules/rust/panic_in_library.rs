@@ -31,8 +31,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -53,12 +53,7 @@ impl RustPanicInLibraryRule {
 }
 
 /// Panic macros to detect
-const PANIC_MACROS: &[&str] = &[
-    "panic",
-    "unreachable",
-    "unimplemented",
-    "todo",
-];
+const PANIC_MACROS: &[&str] = &["panic", "unreachable", "unimplemented", "todo"];
 
 #[async_trait]
 impl Rule for RustPanicInLibraryRule {
@@ -106,7 +101,7 @@ impl Rule for RustPanicInLibraryRule {
                 }
 
                 let line = macro_inv.location.range.start_line + 1;
-                
+
                 // Different severity for different macros
                 let (severity, message) = match macro_inv.name.as_str() {
                     "panic" => (
@@ -121,10 +116,7 @@ impl Rule for RustPanicInLibraryRule {
                         Severity::Medium,
                         "unimplemented!/todo! will panic at runtime. These should not be in production code.",
                     ),
-                    _ => (
-                        Severity::Medium,
-                        "This macro may panic at runtime.",
-                    ),
+                    _ => (Severity::Medium, "This macro may panic at runtime."),
                 };
 
                 let title = format!(
@@ -203,7 +195,7 @@ impl Rule for RustPanicInLibraryRule {
                     column: Some(macro_inv.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -225,8 +217,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -271,7 +263,9 @@ pub fn process(x: i32) -> i32 {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.panic_in_library"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.panic_in_library"),
             "Should detect panic in library function"
         );
     }
@@ -291,7 +285,9 @@ pub fn process() -> String {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.panic_in_library"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.panic_in_library"),
             "Should detect todo! macro"
         );
     }
@@ -311,7 +307,9 @@ pub fn process() {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.panic_in_library"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.panic_in_library"),
             "Should detect unimplemented! macro"
         );
     }

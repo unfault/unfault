@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::ImportInsertionType;
@@ -116,7 +116,9 @@ impl Rule for PythonEphemeralFilesystemWriteRule {
 
             // Check all calls for filesystem write operations
             for call in &py.calls {
-                if let Some((write_type, path_hint)) = detect_filesystem_write(&call.function_call.callee_expr, &call.args_repr) {
+                if let Some((write_type, path_hint)) =
+                    detect_filesystem_write(&call.function_call.callee_expr, &call.args_repr)
+                {
                     // Skip writes to known persistent paths
                     if let Some(ref path) = path_hint {
                         if is_persistent_path(path) {
@@ -146,15 +148,23 @@ impl Rule for PythonEphemeralFilesystemWriteRule {
     }
 }
 
-fn detect_filesystem_write(callee: &str, args: &str) -> Option<(WriteOperationType, Option<String>)> {
+fn detect_filesystem_write(
+    callee: &str,
+    args: &str,
+) -> Option<(WriteOperationType, Option<String>)> {
     // File open with write mode
     if callee == "open" || callee.ends_with(".open") {
         // Check for write modes: 'w', 'a', 'x', 'wb', 'ab', 'xb', etc.
-        if args.contains("'w") || args.contains("\"w")
-            || args.contains("'a") || args.contains("\"a")
-            || args.contains("'x") || args.contains("\"x")
-            || args.contains("mode='w") || args.contains("mode=\"w")
-            || args.contains("mode='a") || args.contains("mode=\"a")
+        if args.contains("'w")
+            || args.contains("\"w")
+            || args.contains("'a")
+            || args.contains("\"a")
+            || args.contains("'x")
+            || args.contains("\"x")
+            || args.contains("mode='w")
+            || args.contains("mode=\"w")
+            || args.contains("mode='a")
+            || args.contains("mode=\"a")
         {
             let path = extract_path_from_args(args);
             return Some((WriteOperationType::FileOpen, path));
@@ -167,7 +177,9 @@ fn detect_filesystem_write(callee: &str, args: &str) -> Option<(WriteOperationTy
     }
 
     // Pathlib write operations
-    if callee.contains("Path(") && (callee.contains(".write_text(") || callee.contains(".write_bytes(")) {
+    if callee.contains("Path(")
+        && (callee.contains(".write_text(") || callee.contains(".write_bytes("))
+    {
         let path = extract_path_from_args(args);
         return Some((WriteOperationType::PathWrite, path));
     }
@@ -176,7 +188,7 @@ fn detect_filesystem_write(callee: &str, args: &str) -> Option<(WriteOperationTy
     }
 
     // Temporary file creation
-    if callee.contains("tempfile.") 
+    if callee.contains("tempfile.")
         || callee.contains("NamedTemporaryFile")
         || callee.contains("TemporaryFile")
         || callee.contains("mkstemp")
@@ -186,25 +198,33 @@ fn detect_filesystem_write(callee: &str, args: &str) -> Option<(WriteOperationTy
     }
 
     // Directory creation
-    if callee.contains("os.mkdir") || callee.contains("os.makedirs")
-        || callee.contains("Path.mkdir") || callee.contains(".mkdir(")
+    if callee.contains("os.mkdir")
+        || callee.contains("os.makedirs")
+        || callee.contains("Path.mkdir")
+        || callee.contains(".mkdir(")
     {
         let path = extract_path_from_args(args);
         return Some((WriteOperationType::DirectoryCreate, path));
     }
 
     // File copy/move operations
-    if callee.contains("shutil.copy") || callee.contains("shutil.move")
-        || callee.contains("shutil.copytree") || callee.contains("os.rename")
+    if callee.contains("shutil.copy")
+        || callee.contains("shutil.move")
+        || callee.contains("shutil.copytree")
+        || callee.contains("os.rename")
     {
         return Some((WriteOperationType::FileCopyMove, None));
     }
 
     // Serialization to file
-    if callee.contains("pickle.dump") || callee.contains("json.dump")
-        || callee.contains("yaml.dump") || callee.contains("toml.dump")
-        || callee.contains("torch.save") || callee.contains("joblib.dump")
-        || callee.contains("np.save") || callee.contains("numpy.save")
+    if callee.contains("pickle.dump")
+        || callee.contains("json.dump")
+        || callee.contains("yaml.dump")
+        || callee.contains("toml.dump")
+        || callee.contains("torch.save")
+        || callee.contains("joblib.dump")
+        || callee.contains("np.save")
+        || callee.contains("numpy.save")
     {
         return Some((WriteOperationType::Serialization, None));
     }
@@ -216,7 +236,7 @@ fn extract_path_from_args(args: &str) -> Option<String> {
     // Try to extract a string literal path from arguments
     // This is a simple heuristic - look for quoted strings
     let args_trimmed = args.trim_start_matches('(').trim_end_matches(')');
-    
+
     // Look for single or double quoted strings
     for quote in &['\'', '"'] {
         if let Some(start) = args_trimmed.find(*quote) {
@@ -228,24 +248,24 @@ fn extract_path_from_args(args: &str) -> Option<String> {
             }
         }
     }
-    
+
     None
 }
 
 fn is_persistent_path(path: &str) -> bool {
     // Paths that are typically persistent even in containers
     let persistent_prefixes = [
-        "/mnt/",           // Mounted volumes
-        "/data/",          // Common data mount point
-        "/var/data/",      // Data directory
-        "/persistent/",    // Explicit persistent storage
-        "/efs/",           // AWS EFS
-        "/nfs/",           // NFS mounts
-        "/shared/",        // Shared storage
-        "s3://",           // S3 (not local filesystem)
-        "gs://",           // Google Cloud Storage
-        "az://",           // Azure Blob Storage
-        "hdfs://",         // HDFS
+        "/mnt/",        // Mounted volumes
+        "/data/",       // Common data mount point
+        "/var/data/",   // Data directory
+        "/persistent/", // Explicit persistent storage
+        "/efs/",        // AWS EFS
+        "/nfs/",        // NFS mounts
+        "/shared/",     // Shared storage
+        "s3://",        // S3 (not local filesystem)
+        "gs://",        // Google Cloud Storage
+        "az://",        // Azure Blob Storage
+        "hdfs://",      // HDFS
     ];
 
     for prefix in &persistent_prefixes {
@@ -269,7 +289,9 @@ fn create_finding(
     file_path: &str,
     import_line: u32,
 ) -> RuleFinding {
-    let path_info = write.path_hint.as_ref()
+    let path_info = write
+        .path_hint
+        .as_ref()
         .map(|p| format!(" to '{}'", p))
         .unwrap_or_default();
 
@@ -328,9 +350,9 @@ db.execute("INSERT INTO files (name, content) VALUES (?, ?)", ['{path}', data])"
         file_path: file_path.to_string(),
         line: Some(write.line),
         column: Some(write.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -349,10 +371,12 @@ fn generate_storage_suggestion_patch(
     import_line: u32,
 ) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Generate specific fix based on write type
     let (import_str, replacement) = match write.write_type {
-        WriteOperationType::FileOpen | WriteOperationType::FileWrite | WriteOperationType::PathWrite => {
+        WriteOperationType::FileOpen
+        | WriteOperationType::FileWrite
+        | WriteOperationType::PathWrite => {
             let path = write.path_hint.as_deref().unwrap_or("output.txt");
             let import = "import boto3  # or: from google.cloud import storage\n";
             let fix = format!(
@@ -366,43 +390,43 @@ fn generate_storage_suggestion_patch(
         }
         WriteOperationType::TempFile => {
             let import = "";
-            let fix =
-                "# Fix: For temporary files in containers, use:\n\
+            let fix = "# Fix: For temporary files in containers, use:\n\
                  # - /tmp with awareness it's ephemeral\n\
                  # - Redis/Memcached for temporary data\n\
-                 # - Object storage with TTL for larger temp files\n".to_string();
+                 # - Object storage with TTL for larger temp files\n"
+                .to_string();
             (import, fix)
         }
         WriteOperationType::DirectoryCreate => {
             let import = "";
-            let fix =
-                "# Fix: Create directories on persistent volumes:\n\
-                 # os.makedirs('/mnt/persistent/my_dir', exist_ok=True)\n".to_string();
+            let fix = "# Fix: Create directories on persistent volumes:\n\
+                 # os.makedirs('/mnt/persistent/my_dir', exist_ok=True)\n"
+                .to_string();
             (import, fix)
         }
         WriteOperationType::FileCopyMove => {
             let import = "";
-            let fix =
-                "# Fix: Copy/move to persistent storage:\n\
+            let fix = "# Fix: Copy/move to persistent storage:\n\
                  # shutil.copy(src, '/mnt/persistent/dest')\n\
-                 # Or upload to object storage after copy\n".to_string();
+                 # Or upload to object storage after copy\n"
+                .to_string();
             (import, fix)
         }
         WriteOperationType::Serialization => {
             let import = "import boto3\n";
-            let fix =
-                "# Fix: Serialize to object storage or database:\n\
+            let fix = "# Fix: Serialize to object storage or database:\n\
                  # # Option 1: S3\n\
                  # import io\n\
                  # buffer = io.BytesIO()\n\
                  # pickle.dump(obj, buffer)\n\
                  # s3.put_object(Bucket='bucket', Key='model.pkl', Body=buffer.getvalue())\n\
                  # # Option 2: Database BLOB\n\
-                 # db.execute('INSERT INTO models (data) VALUES (?)', [pickle.dumps(obj)])\n".to_string();
+                 # db.execute('INSERT INTO models (data) VALUES (?)', [pickle.dumps(obj)])\n"
+                .to_string();
             (import, fix)
         }
     };
-    
+
     // Add import if needed
     if !import_str.is_empty() {
         hunks.push(PatchHunk {
@@ -410,18 +434,13 @@ fn generate_storage_suggestion_patch(
             replacement: import_str.to_string(),
         });
     }
-    
+
     hunks.push(PatchHunk {
-        range: PatchRange::InsertBeforeLine {
-            line: write.line,
-        },
+        range: PatchRange::InsertBeforeLine { line: write.line },
         replacement,
     });
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -481,7 +500,7 @@ with open("output.txt", "w") as f:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(!findings.is_empty(), "Should detect open() with write mode");
         assert_eq!(findings[0].rule_id, "python.ephemeral_filesystem_write");
     }
@@ -499,7 +518,7 @@ with tempfile.NamedTemporaryFile() as f:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(!findings.is_empty(), "Should detect tempfile creation");
     }
 
@@ -516,7 +535,7 @@ with open("model.pkl", "wb") as f:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect both open() and pickle.dump()
         assert!(!findings.is_empty(), "Should detect pickle.dump");
     }
@@ -532,7 +551,7 @@ with open("input.txt", "r") as f:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(findings.is_empty(), "Should not flag read-only operations");
     }
 
@@ -547,8 +566,11 @@ with open("/mnt/data/output.txt", "w") as f:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.is_empty(), "Should not flag writes to persistent paths");
+
+        assert!(
+            findings.is_empty(),
+            "Should not flag writes to persistent paths"
+        );
     }
 
     #[tokio::test]
@@ -581,7 +603,7 @@ with open("/tmp/output.txt", "w") as f:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             let finding = &findings[0];
             assert_eq!(finding.rule_id, "python.ephemeral_filesystem_write");
@@ -632,7 +654,15 @@ with open("/tmp/output.txt", "w") as f:
     #[test]
     fn write_operation_type_descriptions_are_meaningful() {
         assert!(WriteOperationType::FileOpen.description().contains("file"));
-        assert!(WriteOperationType::TempFile.description().contains("temporary"));
-        assert!(WriteOperationType::Serialization.description().contains("serialization"));
+        assert!(
+            WriteOperationType::TempFile
+                .description()
+                .contains("temporary")
+        );
+        assert!(
+            WriteOperationType::Serialization
+                .description()
+                .contains("serialization")
+        );
     }
 }

@@ -55,22 +55,62 @@ struct BodyRoute {
 
 /// Known primitive types that are NOT Pydantic models
 const PRIMITIVE_TYPES: &[&str] = &[
-    "int", "str", "float", "bool", "bytes", "list", "dict", "set", "tuple",
-    "List", "Dict", "Set", "Tuple", "Optional", "Union", "Any",
-    "Request", "Response", "File", "UploadFile", "Form", "Body", "Query",
-    "Path", "Header", "Cookie", "Depends", "BackgroundTasks", "WebSocket",
-    "HTTPConnection", "None", "NoneType",
+    "int",
+    "str",
+    "float",
+    "bool",
+    "bytes",
+    "list",
+    "dict",
+    "set",
+    "tuple",
+    "List",
+    "Dict",
+    "Set",
+    "Tuple",
+    "Optional",
+    "Union",
+    "Any",
+    "Request",
+    "Response",
+    "File",
+    "UploadFile",
+    "Form",
+    "Body",
+    "Query",
+    "Path",
+    "Header",
+    "Cookie",
+    "Depends",
+    "BackgroundTasks",
+    "WebSocket",
+    "HTTPConnection",
+    "None",
+    "NoneType",
 ];
 
 /// Types that are clearly non-body parameters (path, query, header, etc.)
 /// These types indicate the parameter is NOT reading from request body
 const NON_BODY_PARAM_TYPES: &[&str] = &[
     // FastAPI/Starlette dependency injection and special params
-    "Request", "Response", "WebSocket", "HTTPConnection", "BackgroundTasks",
+    "Request",
+    "Response",
+    "WebSocket",
+    "HTTPConnection",
+    "BackgroundTasks",
     // Path/Query/Header/Cookie are explicitly not body
-    "Query", "Path", "Header", "Cookie", "Depends",
+    "Query",
+    "Path",
+    "Header",
+    "Cookie",
+    "Depends",
     // Simple primitives typically used for path/query params
-    "int", "str", "float", "bool", "None", "NoneType",
+    "int",
+    "str",
+    "float",
+    "bool",
+    "None",
+    "NoneType",
 ];
 
 /// Pydantic base class names that indicate a class has body validation
@@ -108,9 +148,7 @@ impl<'a> TypeResolutionContext<'a> {
             }
         }
 
-        Self {
-            class_definitions,
-        }
+        Self { class_definitions }
     }
 
     /// Check if a type name inherits from Pydantic BaseModel
@@ -164,7 +202,7 @@ impl<'a> TypeResolutionContext<'a> {
 /// e.g., "Optional[UserCreate]" -> "UserCreate", "List[str]" -> "str"
 fn extract_bare_type_name(type_annotation: &str) -> String {
     let type_name = type_annotation.trim();
-    
+
     // Handle generic types like Optional[SomeModel] or List[SomeModel]
     if let Some(inner_start) = type_name.find('[') {
         if let Some(inner_end) = type_name.rfind(']') {
@@ -173,7 +211,7 @@ fn extract_bare_type_name(type_annotation: &str) -> String {
             return extract_bare_type_name(inner);
         }
     }
-    
+
     type_name.to_string()
 }
 
@@ -183,13 +221,13 @@ fn is_primitive_type(type_name: &str) -> bool {
     if type_name.is_empty() {
         return true;
     }
-    
+
     for primitive in PRIMITIVE_TYPES {
         if type_name == *primitive || type_name.starts_with(&format!("{}[", primitive)) {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -197,25 +235,34 @@ fn is_primitive_type(type_name: &str) -> bool {
 /// Returns true for types that look like custom classes (start with uppercase, not a primitive).
 fn is_pydantic_like_type_heuristic(type_name: &str) -> bool {
     let type_name = type_name.trim();
-    
+
     // Empty type annotation
     if type_name.is_empty() {
         return false;
     }
-    
+
     // Check if it's a known primitive type
     if is_primitive_type(type_name) {
         return false;
     }
-    
+
     // If it starts with lowercase, it's likely a primitive or builtin
-    if type_name.chars().next().map(|c| c.is_lowercase()).unwrap_or(false) {
+    if type_name
+        .chars()
+        .next()
+        .map(|c| c.is_lowercase())
+        .unwrap_or(false)
+    {
         return false;
     }
-    
+
     // It looks like a custom class (Pydantic model)
     // Custom classes typically start with uppercase
-    type_name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false)
+    type_name
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
 }
 
 /// Check if a type is clearly a non-body parameter type (path, query, header, etc.)
@@ -431,10 +478,7 @@ impl Rule for FastApiRequestBodyUnboundedRule {
                     }
 
                     // Try to find the app/router variable name from the file
-                    let app_var_name = fastapi
-                        .apps
-                        .first()
-                        .map(|a| a.var_name.clone());
+                    let app_var_name = fastapi.apps.first().map(|a| a.var_name.clone());
 
                     body_routes.push(BodyRoute {
                         file_id: *file_id,
@@ -551,7 +595,9 @@ class LimitRequestBodyMiddleware(BaseHTTPMiddleware):
 
 "#;
     hunks.push(PatchHunk {
-        range: PatchRange::InsertBeforeLine { line: import_line + 7 },
+        range: PatchRange::InsertBeforeLine {
+            line: import_line + 7,
+        },
         replacement: middleware_code.to_string(),
     });
 
@@ -600,7 +646,8 @@ async def receive_data(request: Request):
 
 # Option 5: Use Starlette's built-in middleware (if available)
 # from starlette.middleware.contentsize import ContentSizeLimitMiddleware
-# app.add_middleware(ContentSizeLimitMiddleware, max_content_size=MAX_BODY_SIZE)"#.to_string()
+# app.add_middleware(ContentSizeLimitMiddleware, max_content_size=MAX_BODY_SIZE)"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -614,7 +661,10 @@ mod tests {
         parse_and_build_semantics_with_path("test.py", source)
     }
 
-    fn parse_and_build_semantics_with_path(path: &str, source: &str) -> (FileId, Arc<SourceSemantics>) {
+    fn parse_and_build_semantics_with_path(
+        path: &str,
+        source: &str,
+    ) -> (FileId, Arc<SourceSemantics>) {
         let sf = SourceFile {
             path: path.to_string(),
             language: Language::Python,
@@ -769,7 +819,10 @@ def setup_middleware(app):
         let semantics = parse_multiple_files(&sources);
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not report findings when middleware is in separate file");
+        assert!(
+            findings.is_empty(),
+            "Should not report findings when middleware is in separate file"
+        );
     }
 
     // ==================== Cross-File Pydantic Inheritance Tests ====================
@@ -1073,7 +1126,11 @@ def patch_item():
 
         let findings = rule.evaluate(&semantics, None).await;
         // Routes without any params don't read body, so no findings
-        assert!(findings.is_empty(), "Routes without params should not trigger. Got {} findings.", findings.len());
+        assert!(
+            findings.is_empty(),
+            "Routes without params should not trigger. Got {} findings.",
+            findings.len()
+        );
     }
 
     // ==================== Finding Location Tests ====================
@@ -1098,7 +1155,10 @@ def receive_data(data: dict):
 
         // Line should point to the route decorator, not line 1
         let line = findings[0].line.unwrap();
-        assert!(line > 1, "Line should not be 1, but point to the route decorator");
+        assert!(
+            line > 1,
+            "Line should not be 1, but point to the route decorator"
+        );
         // The @app.post decorator is on line 6 (1-indexed)
         assert_eq!(line, 6, "Line should point to the @app.post decorator");
     }
@@ -1165,7 +1225,13 @@ def my_handler(data: dict):
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        assert!(findings[0].description.as_ref().unwrap().contains("my_handler"));
+        assert!(
+            findings[0]
+                .description
+                .as_ref()
+                .unwrap()
+                .contains("my_handler")
+        );
     }
 
     #[tokio::test]
@@ -1220,7 +1286,13 @@ def receive_data(data: dict):
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(findings[0].fix_preview.is_some());
-        assert!(findings[0].fix_preview.as_ref().unwrap().contains("MAX_BODY_SIZE"));
+        assert!(
+            findings[0]
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("MAX_BODY_SIZE")
+        );
     }
 
     // ==================== Router (APIRouter) Tests ====================
@@ -1269,7 +1341,10 @@ async def diagnostics(request: DiagnosticsRequest):
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should NOT trigger because DiagnosticsRequest is a Pydantic model
-        assert!(findings.is_empty(), "Should skip routes with Pydantic-typed body parameters");
+        assert!(
+            findings.is_empty(),
+            "Should skip routes with Pydantic-typed body parameters"
+        );
     }
 
     #[tokio::test]
@@ -1289,7 +1364,10 @@ def create_item(item: ItemCreate):
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should NOT trigger because ItemCreate looks like a Pydantic model (uppercase class)
-        assert!(findings.is_empty(), "Should skip routes with custom class type parameters");
+        assert!(
+            findings.is_empty(),
+            "Should skip routes with custom class type parameters"
+        );
     }
 
     #[tokio::test]
@@ -1330,7 +1408,11 @@ def receive_data(data):
         let findings = rule.evaluate(&semantics, None).await;
         // Untyped params in FastAPI default to query params, not body params
         // So we should NOT trigger on this - it's a conservative choice to reduce FPs
-        assert!(findings.is_empty(), "Untyped params should be treated as query params. Got {} findings.", findings.len());
+        assert!(
+            findings.is_empty(),
+            "Untyped params should be treated as query params. Got {} findings.",
+            findings.len()
+        );
     }
 
     #[tokio::test]
@@ -1350,7 +1432,10 @@ def update_item(item_id: int, item: ItemUpdate):
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should NOT trigger because ItemUpdate is a Pydantic model
-        assert!(findings.is_empty(), "Should skip if any parameter is Pydantic-typed");
+        assert!(
+            findings.is_empty(),
+            "Should skip if any parameter is Pydantic-typed"
+        );
     }
 
     // ==================== Decorator-only Highlighting Tests ====================
@@ -1383,7 +1468,10 @@ def receive_data(data: dict):
         // The decorator @app.post("/data") should be on line 6
         // end_line should be the same line (decorator only, not function body)
         assert_eq!(line, 6, "Line should point to the decorator");
-        assert_eq!(end_line, 6, "End line should also be the decorator line, not the function body");
+        assert_eq!(
+            end_line, 6,
+            "End line should also be the decorator line, not the function body"
+        );
     }
 
     // ==================== Pydantic Type Detection Unit Tests ====================
@@ -1424,7 +1512,7 @@ def receive_data(data: dict):
         assert!(!is_pydantic_like_type("List[str]"));
         assert!(!is_pydantic_like_type("Dict[str, int]"));
         assert!(!is_pydantic_like_type("Optional[int]"));
-        
+
         // Container types with Pydantic models inside
         assert!(is_pydantic_like_type("Optional[ItemCreate]"));
         assert!(is_pydantic_like_type("List[UserModel]"));

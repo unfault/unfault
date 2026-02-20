@@ -79,7 +79,12 @@ fn is_in_comment(line: &str, marker_pos: usize, language: Language) -> bool {
 }
 
 /// Determine the scope of a suppression based on its position.
-fn determine_scope(line_num: u32, comment_pos: usize, line: &str, source: &str) -> SuppressionScope {
+fn determine_scope(
+    line_num: u32,
+    comment_pos: usize,
+    line: &str,
+    source: &str,
+) -> SuppressionScope {
     // Same-line: there's code before the comment - check this FIRST
     // because inline suppression takes priority over file-level position
     let before_comment = &line[..comment_pos];
@@ -237,10 +242,7 @@ mod tests {
         let suppressions = parse_suppressions(source, Language::Python);
 
         assert_eq!(suppressions.len(), 1);
-        assert_eq!(
-            suppressions[0].rule_ids,
-            vec!["rule1", "rule2", "rule3"]
-        );
+        assert_eq!(suppressions[0].rule_ids, vec!["rule1", "rule2", "rule3"]);
     }
 
     #[test]

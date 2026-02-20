@@ -25,8 +25,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -53,7 +53,10 @@ const BLOCKING_DNS_PATTERNS: &[(&str, &str)] = &[
     ("std::net::lookup_host", "tokio::net::lookup_host"),
     ("gethostbyname", "tokio::net::lookup_host"),
     ("getaddrinfo", "tokio::net::lookup_host"),
-    ("dns_lookup::", "trust_dns_resolver or tokio::net::lookup_host"),
+    (
+        "dns_lookup::",
+        "trust_dns_resolver or tokio::net::lookup_host",
+    ),
     ("resolve_host", "async resolution"),
 ];
 
@@ -113,7 +116,9 @@ impl Rule for RustSyncDnsLookupRule {
                     let func_name = call.function_name.clone().unwrap_or_default();
                     let is_properly_wrapped = rust.calls.iter().any(|c| {
                         c.function_name.as_deref() == Some(&func_name)
-                            && ASYNC_DNS_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
+                            && ASYNC_DNS_PATTERNS
+                                .iter()
+                                .any(|p| c.function_call.callee_expr.contains(p))
                     });
 
                     if is_properly_wrapped {
@@ -122,10 +127,7 @@ impl Rule for RustSyncDnsLookupRule {
 
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "Blocking DNS lookup '{}' in async function",
-                        pattern
-                    );
+                    let title = format!("Blocking DNS lookup '{}' in async function", pattern);
 
                     let description = format!(
                         "The DNS call '{}' at line {} is a blocking operation that can \
@@ -176,9 +178,9 @@ async fn connect(host: &str) {{
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -197,7 +199,7 @@ async fn connect(host: &str) {{
                 if use_stmt.path.contains("std::net::ToSocketAddrs") {
                     // Check if the file has async functions
                     let has_async = rust.functions.iter().any(|f| f.is_async);
-                    
+
                     if has_async {
                         let line = use_stmt.location.range.start_line + 1;
 
@@ -217,9 +219,9 @@ async fn connect(host: &str) {{
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(use_stmt.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: None,
                             tags: vec![
@@ -243,8 +245,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

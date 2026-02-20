@@ -2,14 +2,14 @@
 //!
 //! Detects blocking DNS lookups that can cause latency issues.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -27,10 +27,10 @@ impl GoSyncDnsLookupRule {
     /// Check if a function looks like an HTTP handler based on its parameters
     fn is_http_handler(func: &crate::semantics::go::model::GoFunction) -> bool {
         func.params.iter().any(|p| {
-            p.param_type.contains("http.ResponseWriter") ||
-            p.param_type.contains("*gin.Context") ||
-            p.param_type.contains("echo.Context") ||
-            p.param_type.contains("*fiber.Ctx")
+            p.param_type.contains("http.ResponseWriter")
+                || p.param_type.contains("*gin.Context")
+                || p.param_type.contains("echo.Context")
+                || p.param_type.contains("*fiber.Ctx")
         }) || func.name.to_lowercase().contains("handler")
     }
 }
@@ -67,17 +67,16 @@ impl Rule for GoSyncDnsLookupRule {
 
             for call in &go.calls {
                 let callee = &call.function_call.callee_expr;
-                
+
                 // Check for DNS lookup calls
-                let is_dns_lookup = 
-                    callee == "net.LookupHost" ||
-                    callee == "net.LookupIP" ||
-                    callee == "net.LookupAddr" ||
-                    callee == "net.LookupCNAME" ||
-                    callee == "net.LookupMX" ||
-                    callee == "net.LookupNS" ||
-                    callee == "net.LookupSRV" ||
-                    callee == "net.LookupTXT";
+                let is_dns_lookup = callee == "net.LookupHost"
+                    || callee == "net.LookupIP"
+                    || callee == "net.LookupAddr"
+                    || callee == "net.LookupCNAME"
+                    || callee == "net.LookupMX"
+                    || callee == "net.LookupNS"
+                    || callee == "net.LookupSRV"
+                    || callee == "net.LookupTXT";
 
                 if !is_dns_lookup {
                     continue;
@@ -94,7 +93,8 @@ impl Rule for GoSyncDnsLookupRule {
                         description: Some(
                             "DNS lookups can block for seconds or timeout. In HTTP handlers, \
                              this adds unpredictable latency. Consider caching DNS results \
-                             or resolving hosts at startup.".to_string()
+                             or resolving hosts at startup."
+                                .to_string(),
                         ),
                         kind: FindingKind::PerformanceSmell,
                         severity: Severity::Medium,
@@ -104,15 +104,14 @@ impl Rule for GoSyncDnsLookupRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: 
-"// Cache DNS results or resolve at startup:
+                                replacement: "// Cache DNS results or resolve at startup:
 // 
 // Option 1: Resolve at initialization
 // var serverIPs []net.IP
@@ -126,19 +125,24 @@ impl Rule for GoSyncDnsLookupRule {
 // import \"github.com/rs/dnscache\"
 // resolver := &dnscache.Resolver{}
 // go resolver.Refresh(time.Hour)
-// ips, _ := resolver.LookupHost(ctx, \"remote-host\")".to_string(),
+// ips, _ := resolver.LookupHost(ctx, \"remote-host\")"
+                                    .to_string(),
                             }],
                         }),
                         fix_preview: Some("Cache DNS results".to_string()),
-                        tags: vec!["go".into(), "dns".into(), "performance".into(), "latency".into()],
+                        tags: vec![
+                            "go".into(),
+                            "dns".into(),
+                            "performance".into(),
+                            "latency".into(),
+                        ],
                     });
                 }
 
                 // Check for DNS lookup without timeout/context
                 // These functions don't accept context and can block indefinitely
-                let uses_context_resolver = 
-                    callee.contains("Resolver") ||
-                    callee == "net.LookupIPAddr"; // LookupIPAddr has context version
+                let uses_context_resolver =
+                    callee.contains("Resolver") || callee == "net.LookupIPAddr"; // LookupIPAddr has context version
 
                 if !uses_context_resolver {
                     findings.push(RuleFinding {
@@ -147,7 +151,8 @@ impl Rule for GoSyncDnsLookupRule {
                         description: Some(
                             "net.LookupHost and similar functions don't accept a context \
                              and can block indefinitely. Use net.Resolver with context \
-                             for timeout control.".to_string()
+                             for timeout control."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -157,19 +162,19 @@ impl Rule for GoSyncDnsLookupRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: 
-"// Use Resolver with context for timeout control:
+                                replacement: "// Use Resolver with context for timeout control:
 // resolver := &net.Resolver{}
 // ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 // defer cancel()
-// ips, err := resolver.LookupIPAddr(ctx, \"hostname\")".to_string(),
+// ips, err := resolver.LookupIPAddr(ctx, \"hostname\")"
+                                    .to_string(),
                             }],
                         }),
                         fix_preview: Some("Use Resolver with context".to_string()),
@@ -186,8 +191,8 @@ impl Rule for GoSyncDnsLookupRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::go::model::GoFunction;
     use crate::parse::ast::{AstLocation, TextRange};
+    use crate::semantics::go::model::GoFunction;
 
     #[test]
     fn test_rule_metadata() {
@@ -200,12 +205,10 @@ mod tests {
     fn test_is_http_handler() {
         let func = GoFunction {
             name: "handleRequest".to_string(),
-            params: vec![
-                crate::semantics::go::model::GoParam {
-                    name: "w".to_string(),
-                    param_type: "http.ResponseWriter".to_string(),
-                },
-            ],
+            params: vec![crate::semantics::go::model::GoParam {
+                name: "w".to_string(),
+                param_type: "http.ResponseWriter".to_string(),
+            }],
             return_types: vec![],
             returns_error: false,
             location: AstLocation {

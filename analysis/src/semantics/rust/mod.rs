@@ -660,7 +660,7 @@ fn build_call_site(
     node: &tree_sitter::Node,
     ctx: &TraversalContext,
 ) -> Option<model::RustCallSite> {
-    use crate::semantics::common::{calls::FunctionCall, CommonLocation};
+    use crate::semantics::common::{CommonLocation, calls::FunctionCall};
 
     let func_node = node.child_by_field_name("function")?;
     let callee = parsed.text_for_node(&func_node);

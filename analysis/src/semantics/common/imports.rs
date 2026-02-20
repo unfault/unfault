@@ -118,7 +118,9 @@ impl Import {
 
     /// Check if this import imports a specific item
     pub fn imports_item(&self, item_name: &str) -> bool {
-        self.items.iter().any(|i| i.name == item_name || i.local_name() == item_name)
+        self.items
+            .iter()
+            .any(|i| i.name == item_name || i.local_name() == item_name)
     }
 
     /// Get the local name used for this module
@@ -417,7 +419,10 @@ impl KnownLibrary {
             Self::Axios
         } else if module_path == "got" {
             Self::Got
-        } else if module_path == "node-fetch" || module_path == "isomorphic-fetch" || module_path == "cross-fetch" {
+        } else if module_path == "node-fetch"
+            || module_path == "isomorphic-fetch"
+            || module_path == "cross-fetch"
+        {
             Self::Fetch
         } else if module_path == "prisma" || module_path.starts_with("@prisma/") {
             Self::Prisma

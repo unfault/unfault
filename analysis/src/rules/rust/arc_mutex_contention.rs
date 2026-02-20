@@ -34,8 +34,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -152,7 +152,8 @@ impl Rule for RustArcMutexContentionRule {
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
                                 replacement: if func.is_async {
-                                    "// TODO: Consider using tokio::sync::Mutex for async code".to_string()
+                                    "// TODO: Consider using tokio::sync::Mutex for async code"
+                                        .to_string()
                                 } else {
                                     "// TODO: Consider using parking_lot::Mutex or tokio::sync::Mutex".to_string()
                                 },
@@ -171,9 +172,9 @@ impl Rule for RustArcMutexContentionRule {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -224,9 +225,9 @@ impl Rule for RustArcMutexContentionRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: None,
                         tags: vec![
@@ -247,7 +248,7 @@ impl Rule for RustArcMutexContentionRule {
 /// Check if a type is Arc<Mutex<...>> using std::sync::Mutex
 fn is_arc_std_mutex(type_str: &str) -> bool {
     let cleaned = type_str.replace(' ', "");
-    
+
     // Check for Arc<Mutex<...>> but not Arc<tokio::sync::Mutex<...>>
     if cleaned.contains("Arc<Mutex<") {
         // Make sure it's not tokio or parking_lot mutex
@@ -264,8 +265,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -329,7 +330,9 @@ async fn handle(state: Arc<Mutex<Data>>) {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.arc_mutex_contention"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.arc_mutex_contention"),
             "Should detect Arc<Mutex> in async code"
         );
     }
@@ -351,10 +354,7 @@ fn handle(state: Arc<Mutex<Data>>) {
         let findings = rule.evaluate(&semantics, None).await;
 
         // Should skip because no async context
-        assert!(
-            findings.is_empty(),
-            "Should skip non-async code"
-        );
+        assert!(findings.is_empty(), "Should skip non-async code");
     }
 
     #[tokio::test]
@@ -376,7 +376,11 @@ async fn handle(state: Arc<Mutex<Data>>) {
 
         for finding in &findings {
             if finding.rule_id == "rust.arc_mutex_contention" {
-                assert_eq!(finding.severity, Severity::High, "Async functions should have High severity");
+                assert_eq!(
+                    finding.severity,
+                    Severity::High,
+                    "Async functions should have High severity"
+                );
                 assert_eq!(finding.dimension, Dimension::Performance);
             }
         }

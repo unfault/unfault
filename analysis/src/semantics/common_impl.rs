@@ -7,18 +7,21 @@ use crate::parse::ast::FileId;
 use crate::types::context::Language;
 
 use super::common::{
+    CommonLocation, CommonSemantics,
     async_ops::{AsyncOperation, AsyncOperationType, AsyncRuntime},
     db::{DbLibrary, DbOperation, DbOperationType},
     functions::{FunctionDef, FunctionKind, FunctionParam, Visibility},
     http::{HttpCall, HttpClientLibrary, HttpMethod},
     imports::{Import, ImportSource, ImportStyle, ImportedItem},
-    CommonLocation, CommonSemantics,
 };
 
-use super::go::model::{GoFileSemantics, GoImport, GoFunction};
-use super::python::model::{PyFileSemantics, PyImport, PyFunction, ImportCategory as PyImportCategory, ImportStyle as PyImportStyle};
-use super::rust::model::{RustFileSemantics, RustUse, RustFunction, Visibility as RustVisibility};
-use super::typescript::model::{TsFileSemantics, TsImport, TsFunction};
+use super::go::model::{GoFileSemantics, GoFunction, GoImport};
+use super::python::model::{
+    ImportCategory as PyImportCategory, ImportStyle as PyImportStyle, PyFileSemantics, PyFunction,
+    PyImport,
+};
+use super::rust::model::{RustFileSemantics, RustFunction, RustUse, Visibility as RustVisibility};
+use super::typescript::model::{TsFileSemantics, TsFunction, TsImport};
 
 // =============================================================================
 // Python Implementation
@@ -39,7 +42,7 @@ impl CommonSemantics for PyFileSemantics {
 
     fn http_calls(&self) -> Vec<HttpCall> {
         use super::python::http::HttpClientKind;
-        
+
         self.http_calls
             .iter()
             .map(|call| {
@@ -85,7 +88,7 @@ impl CommonSemantics for PyFileSemantics {
     fn db_operations(&self) -> Vec<DbOperation> {
         use super::common::db::EagerLoadingStrategy;
         use super::python::orm::{OrmKind, QueryType};
-        
+
         self.orm_queries
             .iter()
             .map(|query| {
@@ -271,7 +274,7 @@ impl CommonSemantics for GoFileSemantics {
 
     fn http_calls(&self) -> Vec<HttpCall> {
         use super::go::http::HttpClientKind;
-        
+
         self.http_calls
             .iter()
             .map(|call| {
@@ -400,7 +403,13 @@ fn convert_go_import(go_import: &GoImport, file_id: FileId) -> Option<Import> {
 
 /// Convert a Go function to the common FunctionDef type
 fn convert_go_function(go_func: &GoFunction, file_id: FileId) -> Option<FunctionDef> {
-    let visibility = if go_func.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+    let visibility = if go_func
+        .name
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
+    {
         Visibility::Public
     } else {
         Visibility::Package
@@ -469,7 +478,8 @@ impl CommonSemantics for RustFileSemantics {
     }
 
     fn async_operations(&self) -> Vec<AsyncOperation> {
-        self.async_info.spawn_calls
+        self.async_info
+            .spawn_calls
             .iter()
             .map(|spawn| {
                 let runtime = if self.async_info.uses_tokio {
@@ -526,7 +536,10 @@ impl CommonSemantics for RustFileSemantics {
 fn convert_rust_use(rust_use: &RustUse, file_id: FileId) -> Option<Import> {
     let source = if rust_use.path.starts_with("std::") || rust_use.path.starts_with("core::") {
         ImportSource::StandardLib
-    } else if rust_use.path.starts_with("crate::") || rust_use.path.starts_with("super::") || rust_use.path.starts_with("self::") {
+    } else if rust_use.path.starts_with("crate::")
+        || rust_use.path.starts_with("super::")
+        || rust_use.path.starts_with("self::")
+    {
         ImportSource::Local
     } else {
         ImportSource::External
@@ -624,7 +637,7 @@ impl CommonSemantics for TsFileSemantics {
 
     fn http_calls(&self) -> Vec<HttpCall> {
         use super::typescript::http::HttpClientKind;
-        
+
         self.http_calls
             .iter()
             .map(|call| {
@@ -636,7 +649,9 @@ impl CommonSemantics for TsFileSemantics {
                     HttpClientKind::NodeFetch => HttpClientLibrary::Other("node-fetch".to_string()),
                     HttpClientKind::Undici => HttpClientLibrary::Other("undici".to_string()),
                     HttpClientKind::Ky => HttpClientLibrary::Other("ky".to_string()),
-                    HttpClientKind::Superagent => HttpClientLibrary::Other("superagent".to_string()),
+                    HttpClientKind::Superagent => {
+                        HttpClientLibrary::Other("superagent".to_string())
+                    }
                     HttpClientKind::Unknown => HttpClientLibrary::Other("unknown".to_string()),
                 };
                 let method = match call.method.to_uppercase().as_str() {
@@ -726,7 +741,10 @@ fn convert_ts_import(ts_import: &TsImport, file_id: FileId) -> Option<Import> {
         style,
         source,
         items,
-        module_alias: ts_import.default_import.clone().or(ts_import.namespace_import.clone()),
+        module_alias: ts_import
+            .default_import
+            .clone()
+            .or(ts_import.namespace_import.clone()),
         raw_text: String::new(),
         is_type_only: ts_import.is_type_only,
         is_dynamic: false,
@@ -811,33 +829,40 @@ mod tests {
         };
         let parsed = parse_python_file(FileId(1), &sf).expect("parsing should succeed");
         let mut sem = PyFileSemantics::from_parsed(&parsed);
-        sem.analyze_frameworks(&parsed).expect("analysis should succeed");
+        sem.analyze_frameworks(&parsed)
+            .expect("analysis should succeed");
         sem
     }
 
     #[test]
     fn python_imports_via_common_trait() {
-        let sem = parse_python(r#"
+        let sem = parse_python(
+            r#"
 import os
 from typing import List, Optional
 import requests
-"#);
-        
+"#,
+        );
+
         let imports = sem.imports();
         assert_eq!(imports.len(), 3);
-        
+
         // Check that os is identified as stdlib
         let os_import = imports.iter().find(|i| i.module_path == "os").unwrap();
         assert!(os_import.is_stdlib());
-        
+
         // Check that requests is identified as external
-        let requests_import = imports.iter().find(|i| i.module_path == "requests").unwrap();
+        let requests_import = imports
+            .iter()
+            .find(|i| i.module_path == "requests")
+            .unwrap();
         assert!(requests_import.is_external());
     }
 
     #[test]
     fn python_functions_via_common_trait() {
-        let sem = parse_python(r#"
+        let sem = parse_python(
+            r#"
 def sync_function():
     pass
 
@@ -846,26 +871,36 @@ async def async_function():
 
 def _private_function():
     pass
-"#);
-        
+"#,
+        );
+
         let functions = sem.functions();
         assert_eq!(functions.len(), 3);
-        
-        let sync_fn = functions.iter().find(|f| f.name == "sync_function").unwrap();
+
+        let sync_fn = functions
+            .iter()
+            .find(|f| f.name == "sync_function")
+            .unwrap();
         assert!(!sync_fn.is_async);
         assert!(sync_fn.is_public());
-        
-        let async_fn = functions.iter().find(|f| f.name == "async_function").unwrap();
+
+        let async_fn = functions
+            .iter()
+            .find(|f| f.name == "async_function")
+            .unwrap();
         assert!(async_fn.is_async);
-        
-        let private_fn = functions.iter().find(|f| f.name == "_private_function").unwrap();
+
+        let private_fn = functions
+            .iter()
+            .find(|f| f.name == "_private_function")
+            .unwrap();
         assert!(!private_fn.is_public());
     }
 
     #[test]
     fn python_file_metadata_via_common_trait() {
         let sem = parse_python("x = 1");
-        
+
         assert_eq!(sem.file_id(), FileId(1));
         assert_eq!(sem.file_path(), "test.py");
         assert_eq!(sem.language(), Language::Python);

@@ -45,10 +45,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::UnwrapPattern;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::UnwrapPattern;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -126,14 +126,15 @@ impl Rule for RustRegexCompileRule {
 
                 // Determine if this is in a constructor (new, build, create, etc.)
                 let is_constructor = is_constructor_name(function_name);
-                
+
                 let title = if is_constructor {
                     format!(
                         "Regex recompiled on every `{}()` call - use `OnceLock` for compile-once",
                         function_name
                     )
                 } else {
-                    "Regex compiled at runtime - consider static compilation with `OnceLock`".to_string()
+                    "Regex compiled at runtime - consider static compilation with `OnceLock`"
+                        .to_string()
                 };
 
                 let description = generate_description(function_name, line, is_constructor);
@@ -154,7 +155,7 @@ impl Rule for RustRegexCompileRule {
                     column: Some(unwrap.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -175,8 +176,7 @@ impl Rule for RustRegexCompileRule {
 
                 // Skip if we already have a finding at this location
                 if findings.iter().any(|f| {
-                    f.file_id == *file_id
-                        && f.line == Some(call.function_call.location.line)
+                    f.file_id == *file_id && f.line == Some(call.function_call.location.line)
                 }) {
                     continue;
                 }
@@ -188,7 +188,10 @@ impl Rule for RustRegexCompileRule {
 
                 // Skip test code and main()
                 let function_name = call.function_name.as_deref().unwrap_or("<unknown>");
-                if function_name.starts_with("test_") || function_name.contains("_test") || function_name == "main" {
+                if function_name.starts_with("test_")
+                    || function_name.contains("_test")
+                    || function_name == "main"
+                {
                     continue;
                 }
 
@@ -201,11 +204,13 @@ impl Rule for RustRegexCompileRule {
                         function_name
                     )
                 } else {
-                    "Regex compiled at runtime - consider static compilation with `OnceLock`".to_string()
+                    "Regex compiled at runtime - consider static compilation with `OnceLock`"
+                        .to_string()
                 };
 
                 let description = generate_description(function_name, line, is_constructor);
-                let fix_preview = generate_fix_preview(&call.function_call.callee_expr, is_constructor);
+                let fix_preview =
+                    generate_fix_preview(&call.function_call.callee_expr, is_constructor);
 
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),
@@ -221,14 +226,10 @@ impl Rule for RustRegexCompileRule {
                     column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: None, // No patch for non-unwrap calls (need more context)
                     fix_preview: Some(fix_preview),
-                    tags: vec![
-                        "rust".into(),
-                        "performance".into(),
-                        "regex".into(),
-                    ],
+                    tags: vec!["rust".into(), "performance".into(), "regex".into()],
                 });
             }
         }
@@ -301,8 +302,8 @@ fn generate_description(function_name: &str, line: u32, is_constructor: bool) ->
     }
 }
 
-use crate::semantics::rust::model::UnwrapCall;
 use crate::semantics::rust::model::RustFileSemantics;
+use crate::semantics::rust::model::UnwrapCall;
 
 /// Generate a patch to convert Regex::new().unwrap() to LazyLock static.
 ///
@@ -322,9 +323,10 @@ fn generate_static_regex_patch(
     let static_name = generate_static_name(&pattern);
 
     // Check if LazyLock import already exists
-    let has_lazy_lock_import = rust_sem.uses.iter().any(|u| {
-        u.path.contains("LazyLock") || u.path.contains("std::sync::LazyLock")
-    });
+    let has_lazy_lock_import = rust_sem
+        .uses
+        .iter()
+        .any(|u| u.path.contains("LazyLock") || u.path.contains("std::sync::LazyLock"));
 
     // Hunk 1: Add import if needed (at line 1 or after existing use statements)
     if !has_lazy_lock_import {
@@ -497,8 +499,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -533,7 +535,7 @@ mod tests {
         assert!(is_constructor_name("create"));
         assert!(is_constructor_name("new_with_config"));
         assert!(is_constructor_name("from_str"));
-        
+
         assert!(!is_constructor_name("process"));
         assert!(!is_constructor_name("validate"));
         assert!(!is_constructor_name("run"));
@@ -732,8 +734,14 @@ fn get_pattern() -> &'static Regex {
 
     #[test]
     fn extract_regex_pattern_works() {
-        assert_eq!(extract_regex_pattern(r#"Regex::new(r"\d+").unwrap()"#), r#"r"\d+""#);
-        assert_eq!(extract_regex_pattern(r#"Regex::new("test").unwrap()"#), r#""test""#);
+        assert_eq!(
+            extract_regex_pattern(r#"Regex::new(r"\d+").unwrap()"#),
+            r#"r"\d+""#
+        );
+        assert_eq!(
+            extract_regex_pattern(r#"Regex::new("test").unwrap()"#),
+            r#""test""#
+        );
     }
 
     #[test]

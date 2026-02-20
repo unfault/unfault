@@ -2,14 +2,14 @@
 //!
 //! Detects recover() calls without proper handling.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -56,21 +56,22 @@ impl Rule for GoBareRecoverRule {
             for defer_stmt in &go.defers {
                 if defer_stmt.call_text.contains("recover()") {
                     // Check if there's logging/handling after recover
-                    let has_proper_handling = 
-                        defer_stmt.call_text.contains("log.") ||
-                        defer_stmt.call_text.contains("slog.") ||
-                        defer_stmt.call_text.contains("zap.") ||
-                        defer_stmt.call_text.contains("logrus.") ||
-                        defer_stmt.call_text.contains("fmt.Print") ||
-                        defer_stmt.call_text.contains("Error(") ||
-                        defer_stmt.call_text.contains("debug.Stack()") ||
-                        defer_stmt.call_text.contains("runtime.Stack");
+                    let has_proper_handling = defer_stmt.call_text.contains("log.")
+                        || defer_stmt.call_text.contains("slog.")
+                        || defer_stmt.call_text.contains("zap.")
+                        || defer_stmt.call_text.contains("logrus.")
+                        || defer_stmt.call_text.contains("fmt.Print")
+                        || defer_stmt.call_text.contains("Error(")
+                        || defer_stmt.call_text.contains("debug.Stack()")
+                        || defer_stmt.call_text.contains("runtime.Stack");
 
                     // Check for empty recover handling
-                    let is_bare_recover = !has_proper_handling && (
-                        defer_stmt.call_text.contains("recover()") &&
-                        defer_stmt.call_text.len() < 50 // Short block likely just recover()
-                    );
+                    let is_bare_recover = !has_proper_handling
+                        && (
+                            defer_stmt.call_text.contains("recover()")
+                                && defer_stmt.call_text.len() < 50
+                            // Short block likely just recover()
+                        );
 
                     if is_bare_recover {
                         findings.push(RuleFinding {
@@ -79,7 +80,8 @@ impl Rule for GoBareRecoverRule {
                             description: Some(
                                 "recover() without logging or handling silently swallows panics, \
                                  making debugging extremely difficult. Always log the recovered \
-                                 panic value and stack trace.".to_string()
+                                 panic value and stack trace."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::High,
@@ -89,24 +91,24 @@ impl Rule for GoBareRecoverRule {
                             file_path: go.path.clone(),
                             line: Some(defer_stmt.line),
                             column: Some(defer_stmt.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
-                                    range: PatchRange::InsertBeforeLine { 
+                                    range: PatchRange::InsertBeforeLine {
                                         line: defer_stmt.line,
                                     },
-                                    replacement: 
-"defer func() {
+                                    replacement: "defer func() {
     if r := recover(); r != nil {
         // Log the panic and stack trace
         log.Printf(\"panic recovered: %v\\n%s\", r, debug.Stack())
         // Optionally re-panic or return error
         // panic(r) 
     }
-}()".to_string(),
+}()"
+                                    .to_string(),
                                 }],
                             }),
                             fix_preview: Some("Add panic logging with stack trace".to_string()),
@@ -115,16 +117,18 @@ impl Rule for GoBareRecoverRule {
                     }
 
                     // Check for recover that doesn't check return value
-                    if defer_stmt.call_text.contains("recover()") && 
-                       !defer_stmt.call_text.contains("if ") &&
-                       !defer_stmt.call_text.contains(":=") {
+                    if defer_stmt.call_text.contains("recover()")
+                        && !defer_stmt.call_text.contains("if ")
+                        && !defer_stmt.call_text.contains(":=")
+                    {
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "recover() return value not checked".to_string(),
                             description: Some(
                                 "recover() returns nil if no panic occurred. Check the return \
                                  value to determine if a panic actually happened before \
-                                 handling it.".to_string()
+                                 handling it."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::Medium,
@@ -134,18 +138,20 @@ impl Rule for GoBareRecoverRule {
                             file_path: go.path.clone(),
                             line: Some(defer_stmt.line),
                             column: Some(defer_stmt.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
-                                    range: PatchRange::InsertBeforeLine { line: defer_stmt.line },
-                                    replacement: 
-"// Check recover() return value:
+                                    range: PatchRange::InsertBeforeLine {
+                                        line: defer_stmt.line,
+                                    },
+                                    replacement: "// Check recover() return value:
 // if r := recover(); r != nil {
 //     // Handle panic
-// }".to_string(),
+// }"
+                                        .to_string(),
                                 }],
                             }),
                             fix_preview: Some("Check recover() return value".to_string()),
@@ -160,30 +166,31 @@ impl Rule for GoBareRecoverRule {
             for func in &go.functions {
                 // Check if this looks like an HTTP handler by checking params
                 let is_handler = func.params.iter().any(|p| {
-                    p.param_type.contains("http.ResponseWriter") ||
-                    p.param_type.contains("*gin.Context") ||
-                    p.param_type.contains("echo.Context") ||
-                    p.param_type.contains("*fiber.Ctx")
+                    p.param_type.contains("http.ResponseWriter")
+                        || p.param_type.contains("*gin.Context")
+                        || p.param_type.contains("echo.Context")
+                        || p.param_type.contains("*fiber.Ctx")
                 });
 
                 if is_handler || func.name.contains("Handler") {
                     // HTTP handlers should have panic recovery
                     let has_recover = go.defers.iter().any(|d| {
-                        d.function_name.as_deref() == Some(&func.name) &&
-                        d.call_text.contains("recover()")
+                        d.function_name.as_deref() == Some(&func.name)
+                            && d.call_text.contains("recover()")
                     });
 
                     if !has_recover {
                         let line = func.location.range.start_line + 1; // Convert 0-based to 1-based
                         let column = func.location.range.start_col + 1;
-                        
+
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: format!("HTTP handler '{}' without panic recovery", func.name),
                             description: Some(
                                 "HTTP handlers should recover from panics to prevent the \
                                  entire server from crashing. Add a deferred recover() \
-                                 that logs the panic and returns a 500 error.".to_string()
+                                 that logs the panic and returns a 500 error."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::Medium,
@@ -193,20 +200,20 @@ impl Rule for GoBareRecoverRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
                                     range: PatchRange::InsertAfterLine { line },
-                                    replacement: 
-"\tdefer func() {
+                                    replacement: "\tdefer func() {
 \t\tif r := recover(); r != nil {
 \t\t\tlog.Printf(\"panic in handler: %v\\n%s\", r, debug.Stack())
 \t\t\thttp.Error(w, \"Internal Server Error\", http.StatusInternalServerError)
 \t\t}
-\t}()".to_string(),
+\t}()"
+                                        .to_string(),
                                 }],
                             }),
                             fix_preview: Some("Add panic recovery to handler".to_string()),

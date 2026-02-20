@@ -9,11 +9,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::python::model::{ImportInsertionType, PyCallSite, PyImport};
 use crate::semantics::SourceSemantics;
+use crate::semantics::python::model::{ImportInsertionType, PyCallSite, PyImport};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -75,8 +75,11 @@ impl Rule for PythonUnboundedRetryRule {
                         && !args.contains("stop_after_delay")
                     {
                         // Use third_party_from_import line for `from tenacity import stop_after_attempt`
-                        let import_line = py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
-                        let patch = generate_tenacity_retry_patch(call, *file_id, &py.imports, import_line);
+                        let import_line = py.import_insertion_line_for(
+                            ImportInsertionType::third_party_from_import(),
+                        );
+                        let patch =
+                            generate_tenacity_retry_patch(call, *file_id, &py.imports, import_line);
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Tenacity retry without stop condition".to_string(),
@@ -147,36 +150,50 @@ impl Rule for PythonUnboundedRetryRule {
 
 /// Check if stop_after_attempt is already imported from tenacity
 fn has_stop_after_attempt_import(imports: &[PyImport]) -> bool {
-    imports.iter().any(|imp| {
-        imp.module == "tenacity" && imp.names.iter().any(|n| n == "stop_after_attempt")
-    })
+    imports
+        .iter()
+        .any(|imp| imp.module == "tenacity" && imp.names.iter().any(|n| n == "stop_after_attempt"))
 }
 
 /// Generate a patch to add stop condition to a tenacity @retry decorator.
 ///
 /// Transforms: `@retry()` → `@retry(stop=stop_after_attempt(3))`
 /// Transforms: `@retry(wait=...)` → `@retry(wait=..., stop=stop_after_attempt(3))`
-fn generate_tenacity_retry_patch(call: &PyCallSite, file_id: FileId, imports: &[PyImport], import_insertion_line: u32) -> FilePatch {
+fn generate_tenacity_retry_patch(
+    call: &PyCallSite,
+    file_id: FileId,
+    imports: &[PyImport],
+    import_insertion_line: u32,
+) -> FilePatch {
     let args_trimmed = call.args_repr.trim();
-    
+
     let replacement = if args_trimmed.is_empty() {
         // @retry() → @retry(stop=stop_after_attempt(3))
-        format!("{}(stop=stop_after_attempt(3))", call.function_call.callee_expr)
+        format!(
+            "{}(stop=stop_after_attempt(3))",
+            call.function_call.callee_expr
+        )
     } else {
         // @retry(wait=...) → @retry(wait=..., stop=stop_after_attempt(3))
-        format!("{}({}, stop=stop_after_attempt(3))", call.function_call.callee_expr, args_trimmed)
+        format!(
+            "{}({}, stop=stop_after_attempt(3))",
+            call.function_call.callee_expr, args_trimmed
+        )
     };
 
     let mut hunks = Vec::new();
-    
+
     // Only add import for stop_after_attempt if not already present
     if !has_stop_after_attempt_import(imports) {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_insertion_line },
-            replacement: "from tenacity import stop_after_attempt  # Added by unfault\n".to_string(),
+            range: PatchRange::InsertBeforeLine {
+                line: import_insertion_line,
+            },
+            replacement: "from tenacity import stop_after_attempt  # Added by unfault\n"
+                .to_string(),
         });
     }
-    
+
     // Replace the @retry() call with bounded version
     hunks.push(PatchHunk {
         range: PatchRange::ReplaceBytes {
@@ -195,13 +212,16 @@ fn generate_tenacity_retry_patch(call: &PyCallSite, file_id: FileId, imports: &[
 ///          → `@backoff.on_exception(backoff.expo, Exception, max_tries=5)`
 fn generate_backoff_patch(call: &PyCallSite, file_id: FileId) -> FilePatch {
     let args_trimmed = call.args_repr.trim();
-    
+
     let replacement = if args_trimmed.is_empty() {
         // Edge case: no args (shouldn't happen in practice)
         format!("{}(max_tries=5)", call.function_call.callee_expr)
     } else {
         // Add max_tries to existing arguments
-        format!("{}({}, max_tries=5)", call.function_call.callee_expr, args_trimmed)
+        format!(
+            "{}({}, max_tries=5)",
+            call.function_call.callee_expr, args_trimmed
+        )
     };
 
     FilePatch {
@@ -233,7 +253,8 @@ mod tests {
         let file_id = FileId(1);
         let parsed = parse_python_file(file_id, &sf).expect("parsing should succeed");
         let mut sem = PyFileSemantics::from_parsed(&parsed);
-        sem.analyze_frameworks(&parsed).expect("framework analysis should succeed");
+        sem.analyze_frameworks(&parsed)
+            .expect("framework analysis should succeed");
         (file_id, Arc::new(SourceSemantics::Python(sem)))
     }
 
@@ -265,7 +286,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect retry without stop condition");
+        assert!(
+            !findings.is_empty(),
+            "Should detect retry without stop condition"
+        );
         assert!(findings[0].patch.is_some(), "Should have a patch");
     }
 
@@ -283,7 +307,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag retry with stop condition");
+        assert!(
+            findings.is_empty(),
+            "Should not flag retry with stop condition"
+        );
     }
 
     #[tokio::test]
@@ -300,7 +327,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect backoff without max_tries");
+        assert!(
+            !findings.is_empty(),
+            "Should detect backoff without max_tries"
+        );
         assert!(findings[0].patch.is_some(), "Should have a patch");
     }
 
@@ -318,7 +348,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag backoff with max_tries");
+        assert!(
+            findings.is_empty(),
+            "Should not flag backoff with max_tries"
+        );
     }
 
     // ==================== Patch Application Tests ====================
@@ -332,12 +365,18 @@ def fetch_data():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty(), "Should detect retry without stop");
-        
+
         let patch = findings[0].patch.as_ref().expect("Should have a patch");
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("stop=stop_after_attempt(3)"), "Patched code should contain stop condition");
-        assert!(patched.contains("from tenacity import stop_after_attempt"), "Patched code should add import");
+
+        assert!(
+            patched.contains("stop=stop_after_attempt(3)"),
+            "Patched code should contain stop condition"
+        );
+        assert!(
+            patched.contains("from tenacity import stop_after_attempt"),
+            "Patched code should add import"
+        );
     }
 
     #[tokio::test]
@@ -348,12 +387,18 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect backoff without max_tries");
-        
+        assert!(
+            !findings.is_empty(),
+            "Should detect backoff without max_tries"
+        );
+
         let patch = findings[0].patch.as_ref().expect("Should have a patch");
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("max_tries=5"), "Patched code should contain max_tries");
+
+        assert!(
+            patched.contains("max_tries=5"),
+            "Patched code should contain max_tries"
+        );
     }
 
     #[tokio::test]
@@ -365,13 +410,17 @@ def fetch_data():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let patch = findings[0].patch.as_ref().expect("Should have a patch");
-        
+
         // Verify that one hunk is ReplaceBytes (the actual fix)
-        let has_replace_bytes = patch.hunks.iter().any(|h| {
-            matches!(h.range, PatchRange::ReplaceBytes { .. })
-        });
-        assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+        let has_replace_bytes = patch
+            .hunks
+            .iter()
+            .any(|h| matches!(h.range, PatchRange::ReplaceBytes { .. }));
+        assert!(
+            has_replace_bytes,
+            "Patch should use ReplaceBytes for actual code replacement"
+        );
     }
 }

@@ -37,10 +37,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::{UnwrapCall, UnwrapPattern, UnwrapType};
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::{UnwrapCall, UnwrapPattern, UnwrapType};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -150,7 +150,7 @@ impl Rule for RustUnsafeUnwrapRule {
                     column: Some(unwrap.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -184,7 +184,10 @@ fn generate_smart_title(pattern: &UnwrapPattern, type_name: &str) -> String {
         }
         UnwrapPattern::Parse { target_type } => {
             let type_hint = target_type.as_deref().unwrap_or("T");
-            format!("`.parse::<{}>().unwrap()` may panic on invalid input", type_hint)
+            format!(
+                "`.parse::<{}>().unwrap()` may panic on invalid input",
+                type_hint
+            )
         }
         UnwrapPattern::RegexNew => {
             "Consider using `lazy_static!` or `OnceLock` for compiled regex".to_string()
@@ -212,7 +215,10 @@ fn generate_smart_title(pattern: &UnwrapPattern, type_name: &str) -> String {
             "Use `if let Some(pos) = find()` instead of `contains` + `find().unwrap()`".to_string()
         }
         UnwrapPattern::Generic => {
-            format!("Unsafe `.unwrap()` on {} may panic in production", type_name)
+            format!(
+                "Unsafe `.unwrap()` on {} may panic in production",
+                type_name
+            )
         }
     }
 }
@@ -431,15 +437,16 @@ fn generate_patch_replacement(unwrap: &UnwrapCall) -> String {
             // without knowing the variable name, so provide expect with good message
             unwrap.expr_text.replace(
                 ".unwrap()",
-                &format!(".expect(\"find({}) succeeds after starts_with check\")", needle),
+                &format!(
+                    ".expect(\"find({}) succeeds after starts_with check\")",
+                    needle
+                ),
             )
         }
-        UnwrapPattern::EnvVar { var_name } => {
-            unwrap.expr_text.replace(
-                ".unwrap()",
-                &format!(".expect(\"{} environment variable must be set\")", var_name),
-            )
-        }
+        UnwrapPattern::EnvVar { var_name } => unwrap.expr_text.replace(
+            ".unwrap()",
+            &format!(".expect(\"{} environment variable must be set\")", var_name),
+        ),
         UnwrapPattern::Parse { target_type } => {
             let type_hint = target_type.as_deref().unwrap_or("value");
             unwrap.expr_text.replace(
@@ -450,17 +457,14 @@ fn generate_patch_replacement(unwrap: &UnwrapCall) -> String {
         UnwrapPattern::RegexNew => {
             // Keep unwrap for regex - it's acceptable for const patterns
             // but add a comment explaining why
-            unwrap.expr_text.replace(
-                ".unwrap()",
-                ".expect(\"regex pattern is valid\")",
-            )
+            unwrap
+                .expr_text
+                .replace(".unwrap()", ".expect(\"regex pattern is valid\")")
         }
-        UnwrapPattern::CollectionGet { index_expr } => {
-            unwrap.expr_text.replace(
-                ".unwrap()",
-                &format!(".expect(\"index {} should be in bounds\")", index_expr),
-            )
-        }
+        UnwrapPattern::CollectionGet { index_expr } => unwrap.expr_text.replace(
+            ".unwrap()",
+            &format!(".expect(\"index {} should be in bounds\")", index_expr),
+        ),
         UnwrapPattern::FirstOrLast { is_first } => {
             let method = if *is_first { "first" } else { "last" };
             unwrap.expr_text.replace(
@@ -472,15 +476,16 @@ fn generate_patch_replacement(unwrap: &UnwrapCall) -> String {
             // For locks, suggest recovering from poison
             unwrap.expr_text.replace(
                 ".unwrap()",
-                &format!(".unwrap_or_else(|e| e.into_inner()) /* handle poisoned {} */", lock_method),
+                &format!(
+                    ".unwrap_or_else(|e| e.into_inner()) /* handle poisoned {} */",
+                    lock_method
+                ),
             )
         }
-        UnwrapPattern::IteratorNext => {
-            unwrap.expr_text.replace(
-                ".unwrap()",
-                ".expect(\"iterator should have next element\")",
-            )
-        }
+        UnwrapPattern::IteratorNext => unwrap.expr_text.replace(
+            ".unwrap()",
+            ".expect(\"iterator should have next element\")",
+        ),
         UnwrapPattern::IsSomeUnwrap | UnwrapPattern::IsOkUnwrap => {
             // For is_some/is_ok guards, suggest pattern with explanation
             unwrap.expr_text.replace(
@@ -488,24 +493,19 @@ fn generate_patch_replacement(unwrap: &UnwrapCall) -> String {
                 ".expect(\"checked with is_some/is_ok; consider using if let instead\")",
             )
         }
-        UnwrapPattern::ContainsFind { needle } => {
-            unwrap.expr_text.replace(
-                ".unwrap()",
-                &format!(".expect(\"find({}) after contains check\")", needle),
-            )
-        }
+        UnwrapPattern::ContainsFind { needle } => unwrap.expr_text.replace(
+            ".unwrap()",
+            &format!(".expect(\"find({}) after contains check\")", needle),
+        ),
         UnwrapPattern::Generic => {
             // Generic fallback based on type
             match unwrap.on_type {
-                UnwrapType::Option => {
-                    unwrap.expr_text.replace(".unwrap()", ".unwrap_or_default()")
-                }
-                UnwrapType::Result | UnwrapType::Unknown => {
-                    unwrap.expr_text.replace(
-                        ".unwrap()",
-                        ".expect(\"TODO: add proper error handling\")",
-                    )
-                }
+                UnwrapType::Option => unwrap
+                    .expr_text
+                    .replace(".unwrap()", ".unwrap_or_default()"),
+                UnwrapType::Result | UnwrapType::Unknown => unwrap
+                    .expr_text
+                    .replace(".unwrap()", ".expect(\"TODO: add proper error handling\")"),
             }
         }
     }
@@ -684,8 +684,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -738,7 +738,10 @@ fn process(data: Option<String>) -> String {
             .iter()
             .filter(|f| f.rule_id == "rust.unsafe_unwrap")
             .collect();
-        assert!(!unwrap_findings.is_empty(), "Should detect unwrap in function");
+        assert!(
+            !unwrap_findings.is_empty(),
+            "Should detect unwrap in function"
+        );
     }
 
     #[tokio::test]
@@ -788,10 +791,7 @@ fn main() {
             .iter()
             .filter(|f| f.rule_id == "rust.unsafe_unwrap")
             .collect();
-        assert!(
-            unwrap_findings.is_empty(),
-            "Should skip unwrap in main()"
-        );
+        assert!(unwrap_findings.is_empty(), "Should skip unwrap in main()");
     }
 
     #[tokio::test]
@@ -830,10 +830,7 @@ fn process(data: Option<String>) -> String {
             .iter()
             .filter(|f| f.rule_id == "rust.unsafe_unwrap")
             .collect();
-        assert!(
-            unwrap_findings.is_empty(),
-            "Should skip unwrap_or_default"
-        );
+        assert!(unwrap_findings.is_empty(), "Should skip unwrap_or_default");
     }
 
     #[tokio::test]
@@ -855,10 +852,7 @@ fn process(data: Option<String>) -> String {
             .iter()
             .filter(|f| f.rule_id == "rust.unsafe_unwrap")
             .collect();
-        assert!(
-            unwrap_findings.is_empty(),
-            "Should skip unwrap_or"
-        );
+        assert!(unwrap_findings.is_empty(), "Should skip unwrap_or");
     }
 
     #[tokio::test]
@@ -917,10 +911,7 @@ fn process(a: Option<i32>, b: Option<i32>) -> i32 {
             .filter(|f| f.rule_id == "rust.unsafe_unwrap")
             .collect();
         // Should detect both unwraps
-        assert!(
-            unwrap_findings.len() >= 1,
-            "Should detect multiple unwraps"
-        );
+        assert!(unwrap_findings.len() >= 1, "Should detect multiple unwraps");
     }
 
     // =========================================================================
@@ -947,10 +938,10 @@ fn get_config() -> String {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::EnvVar { var_name } => {
                 assert_eq!(var_name, "DATABASE_URL");
@@ -968,10 +959,10 @@ fn parse_port() -> u16 {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::Parse { target_type } => {
                 assert_eq!(target_type.as_deref(), Some("u16"));
@@ -989,10 +980,10 @@ fn get_item(items: &[i32]) -> i32 {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::CollectionGet { index_expr } => {
                 assert_eq!(index_expr, "0");
@@ -1010,10 +1001,10 @@ fn get_first(items: &[i32]) -> i32 {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::FirstOrLast { is_first } => {
                 assert!(*is_first, "Should be first, not last");
@@ -1031,10 +1022,10 @@ fn get_last(items: &[i32]) -> i32 {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::FirstOrLast { is_first } => {
                 assert!(!*is_first, "Should be last, not first");
@@ -1052,10 +1043,10 @@ fn access_mutex(mutex: &std::sync::Mutex<i32>) -> i32 {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::LockUnwrap { lock_method } => {
                 assert_eq!(lock_method, "lock");
@@ -1073,10 +1064,10 @@ fn get_next(iter: &mut std::vec::IntoIter<i32>) -> i32 {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::IteratorNext => {}
             other => panic!("Expected IteratorNext pattern, got {:?}", other),
@@ -1092,10 +1083,10 @@ fn find_char(text: &str) -> usize {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         // Should detect as ContainsFind since there's no guard
         match &unwrap.pattern {
             UnwrapPattern::ContainsFind { needle } => {
@@ -1116,10 +1107,10 @@ fn extract_prefix(text: &str) {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         // Should detect as StartsWithFind since there's a starts_with guard
         match &unwrap.pattern {
             UnwrapPattern::StartsWithFind { needle, .. } => {
@@ -1138,10 +1129,10 @@ fn compile_regex() {
 }
 "#,
         );
-        
+
         assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap");
         let unwrap = &sem.unwrap_calls[0];
-        
+
         match &unwrap.pattern {
             UnwrapPattern::RegexNew => {}
             other => panic!("Expected RegexNew pattern, got {:?}", other),
@@ -1155,7 +1146,9 @@ fn compile_regex() {
     #[test]
     fn smart_title_for_env_var() {
         let title = generate_smart_title(
-            &UnwrapPattern::EnvVar { var_name: "API_KEY".to_string() },
+            &UnwrapPattern::EnvVar {
+                var_name: "API_KEY".to_string(),
+            },
             "Result",
         );
         assert!(title.contains("API_KEY"));
@@ -1165,7 +1158,7 @@ fn compile_regex() {
     #[test]
     fn smart_title_for_strip_prefix() {
         let title = generate_smart_title(
-            &UnwrapPattern::StartsWithFind { 
+            &UnwrapPattern::StartsWithFind {
                 needle: "\"prefix\"".to_string(),
                 guard_start_byte: None,
             },
@@ -1178,7 +1171,9 @@ fn compile_regex() {
     #[test]
     fn smart_title_for_lock() {
         let title = generate_smart_title(
-            &UnwrapPattern::LockUnwrap { lock_method: "lock".to_string() },
+            &UnwrapPattern::LockUnwrap {
+                lock_method: "lock".to_string(),
+            },
             "Result",
         );
         assert!(title.contains("lock"));
@@ -1198,7 +1193,7 @@ fn get_item(items: &[i32]) -> i32 {
 }
 "#,
         );
-        
+
         let unwrap = &sem.unwrap_calls[0];
         assert_eq!(unwrap.on_type, UnwrapType::Option);
     }
@@ -1212,7 +1207,7 @@ fn parse_num() -> i32 {
 }
 "#,
         );
-        
+
         let unwrap = &sem.unwrap_calls[0];
         assert_eq!(unwrap.on_type, UnwrapType::Result);
     }
@@ -1226,7 +1221,7 @@ fn get_env() -> String {
 }
 "#,
         );
-        
+
         let unwrap = &sem.unwrap_calls[0];
         assert_eq!(unwrap.on_type, UnwrapType::Result);
     }
@@ -1240,7 +1235,7 @@ fn find_pos(s: &str) -> usize {
 }
 "#,
         );
-        
+
         let unwrap = &sem.unwrap_calls[0];
         assert_eq!(unwrap.on_type, UnwrapType::Option);
     }

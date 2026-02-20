@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::hardcoded_secrets;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -74,10 +74,7 @@ impl Rule for GoHardcodedSecretsRule {
                 if is_suspicious {
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "Potential hardcoded secret at line {}",
-                        line
-                    );
+                    let title = format!("Potential hardcoded secret at line {}", line);
 
                     let description = format!(
                         "A potential hardcoded secret was detected at line {}. \
@@ -101,9 +98,9 @@ impl Rule for GoHardcodedSecretsRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("// Use os.Getenv() for secrets".to_string()),
                         tags: vec![
@@ -126,7 +123,8 @@ fn generate_secrets_patch(file_id: FileId, line: u32) -> FilePatch {
 // password := os.Getenv("DB_PASSWORD")
 // apiKey := os.Getenv("API_KEY")
 // Or use a secrets manager like HashiCorp Vault
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

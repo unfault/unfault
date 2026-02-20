@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::PyImport;
@@ -78,23 +78,25 @@ impl Rule for PythonRaceConditionRiskRule {
 
             // Check for locking imports
             let has_locking = py.imports.iter().any(|imp| {
-                imp.names.iter().any(|n| {
-                    n == "Lock" || n == "RLock" || n == "Semaphore" || n == "asyncio.Lock"
-                })
+                imp.names
+                    .iter()
+                    .any(|n| n == "Lock" || n == "RLock" || n == "Semaphore" || n == "asyncio.Lock")
             });
 
             // Look for read-modify-write patterns in calls
             let has_read_modify_write = check_read_modify_write_pattern(&py.calls);
 
             if has_read_modify_write && !has_locking {
-                let title = "Potential race condition: read-modify-write without locking".to_string();
+                let title =
+                    "Potential race condition: read-modify-write without locking".to_string();
 
                 let description =
                     "This code performs read-modify-write operations in a concurrent \
                      context without locking. When multiple threads/tasks access shared \
                      state simultaneously, updates may be lost or state may become inconsistent. \
                      Using threading.Lock, asyncio.Lock, or atomic operations makes the access \
-                     pattern explicit.".to_string();
+                     pattern explicit."
+                        .to_string();
 
                 let fix_preview = generate_fix_preview_rmw();
 
@@ -118,7 +120,7 @@ impl Rule for PythonRaceConditionRiskRule {
                     column: Some(1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -135,13 +137,15 @@ impl Rule for PythonRaceConditionRiskRule {
             let has_counter_pattern = check_counter_pattern(&py.calls);
 
             if has_counter_pattern && !has_locking {
-                let title = "Potential race condition: counter increment without atomic operation".to_string();
+                let title = "Potential race condition: counter increment without atomic operation"
+                    .to_string();
 
                 let description =
                     "This code increments a counter in a concurrent context. The increment \
                      operation (read-add-write) is not atomic, so concurrent increments may \
                      lose updates. Using threading.Lock or atomic counters makes the increment \
-                     behavior predictable.".to_string();
+                     behavior predictable."
+                        .to_string();
 
                 let fix_preview = generate_fix_preview_counter();
 
@@ -165,7 +169,7 @@ impl Rule for PythonRaceConditionRiskRule {
                     column: Some(1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -211,7 +215,11 @@ fn check_counter_pattern(calls: &[crate::semantics::python::model::PyCallSite]) 
 }
 
 /// Generate race condition patch.
-fn generate_race_condition_patch(file_id: FileId, import_line: u32, imports: &[PyImport]) -> FilePatch {
+fn generate_race_condition_patch(
+    file_id: FileId,
+    import_line: u32,
+    imports: &[PyImport],
+) -> FilePatch {
     let mut hunks = Vec::new();
 
     // Only add import if threading is not already imported
@@ -220,7 +228,7 @@ fn generate_race_condition_patch(file_id: FileId, import_line: u32, imports: &[P
     } else {
         "import threading\n\n# Lock for protecting shared state\n_lock = threading.Lock()\n\n"
     };
-    
+
     hunks.push(PatchHunk {
         range: PatchRange::InsertBeforeLine { line: import_line },
         replacement: import_section.to_string(),
@@ -277,7 +285,8 @@ class ThreadSafeDict:
     def increment(self, key, delta=1):
         with self._lock:
             self._dict[key] += delta
-            return self._dict[key]"#.to_string()
+            return self._dict[key]"#
+        .to_string()
 }
 
 /// Generate fix preview for counter patterns.
@@ -334,7 +343,8 @@ from concurrent.futures import ThreadPoolExecutor
 def process_items(items):
     with ThreadPoolExecutor(max_workers=4) as executor:
         results = list(executor.map(process_item, items))
-    return results"#.to_string()
+    return results"#
+        .to_string()
 }
 
 #[cfg(test)]

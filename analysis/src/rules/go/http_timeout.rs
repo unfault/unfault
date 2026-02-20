@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{
@@ -59,7 +59,9 @@ impl Rule for GoHttpTimeoutRule {
             decision_level: DecisionLevel::Code,
             benefits: vec![Benefit::Reliability, Benefit::Latency],
             prerequisites: vec![],
-            notes: Some("Time bounds are helpful even in demos; pick a sensible default.".to_string()),
+            notes: Some(
+                "Time bounds are helpful even in demos; pick a sensible default.".to_string(),
+            ),
         })
     }
 
@@ -82,10 +84,7 @@ impl Rule for GoHttpTimeoutRule {
                     continue;
                 }
 
-                let title = format!(
-                    "HTTP {} call has no timeout",
-                    http_call.method_name
-                );
+                let title = format!("HTTP {} call has no timeout", http_call.method_name);
 
                 let description = format!(
                     "The HTTP {} request at line {} doesn't have a timeout configured. \
@@ -95,7 +94,8 @@ impl Rule for GoHttpTimeoutRule {
                      1. Use http.Client with Timeout field set\n\
                      2. Use context.WithTimeout() for per-request timeouts\n\
                      3. Configure Transport.ResponseHeaderTimeout and Transport.IdleConnTimeout",
-                    http_call.method_name, http_call.location.range.start_line + 1
+                    http_call.method_name,
+                    http_call.location.range.start_line + 1
                 );
 
                 let patch = generate_timeout_patch(http_call, *file_id);
@@ -132,7 +132,7 @@ impl Rule for GoHttpTimeoutRule {
                     column: Some(http_call.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -156,7 +156,7 @@ use crate::semantics::go::http::HttpCallSite;
 fn generate_timeout_patch(http_call: &HttpCallSite, file_id: FileId) -> FilePatch {
     // Check if using http.Get/Post/etc directly vs client.Get/etc
     let is_default_client = http_call.call_text.starts_with("http.");
-    
+
     let replacement = if is_default_client {
         // Using http.Get/Post/etc directly - suggest using custom client
         format!(
@@ -192,8 +192,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -50,18 +50,20 @@ impl Rule for EchoMissingMiddlewareRule {
             };
 
             // Check if Echo is imported
-            let has_echo = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("github.com/labstack/echo")
-            });
+            let has_echo = go_sem
+                .imports
+                .iter()
+                .any(|imp| imp.path.contains("github.com/labstack/echo"));
 
             if !has_echo {
                 continue;
             }
 
             // Check for Echo server creation
-            let has_echo_new = go_sem.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("echo.New")
-            });
+            let has_echo_new = go_sem
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr.contains("echo.New"));
 
             if !has_echo_new {
                 continue;
@@ -69,18 +71,22 @@ impl Rule for EchoMissingMiddlewareRule {
 
             // Check for essential middleware
             let has_recover = go_sem.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains(".Use") && go_sem.calls.iter().any(|c2| {
-                    c2.function_call.callee_expr.contains("middleware.Recover")
-                })
+                c.function_call.callee_expr.contains(".Use")
+                    && go_sem
+                        .calls
+                        .iter()
+                        .any(|c2| c2.function_call.callee_expr.contains("middleware.Recover"))
             });
 
-            let has_logger = go_sem.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("middleware.Logger")
-            });
+            let has_logger = go_sem
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr.contains("middleware.Logger"));
 
-            let has_request_id = go_sem.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("middleware.RequestID")
-            });
+            let has_request_id = go_sem
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr.contains("middleware.RequestID"));
 
             let mut missing = Vec::new();
             if !has_recover {
@@ -94,10 +100,7 @@ impl Rule for EchoMissingMiddlewareRule {
             }
 
             if !missing.is_empty() {
-                let title = format!(
-                    "Echo server missing middleware: {}",
-                    missing.join(", ")
-                );
+                let title = format!("Echo server missing middleware: {}", missing.join(", "));
 
                 let description = format!(
                     "Echo server is missing essential middleware: {}. \
@@ -123,7 +126,7 @@ impl Rule for EchoMissingMiddlewareRule {
                     column: Some(1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("// Add essential Echo middleware".to_string()),
                     tags: vec![
@@ -150,7 +153,8 @@ fn generate_middleware_patch(file_id: FileId) -> FilePatch {
 // e.Use(middleware.Recover())
 // e.Use(middleware.Logger())
 // e.Use(middleware.RequestID())
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

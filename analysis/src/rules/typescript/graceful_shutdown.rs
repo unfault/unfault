@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -87,7 +87,12 @@ impl Rule for TypescriptMissingGracefulShutdownRule {
                 .find(|call| call.callee.to_lowercase().contains(".listen"));
 
             let (line, column) = server_call
-                .map(|c| (c.location.range.start_line + 1, c.location.range.start_col + 1))
+                .map(|c| {
+                    (
+                        c.location.range.start_line + 1,
+                        c.location.range.start_col + 1,
+                    )
+                })
                 .unwrap_or((1, 1));
 
             let patch = FilePatch {
@@ -101,7 +106,7 @@ impl Rule for TypescriptMissingGracefulShutdownRule {
 //   process.exit(0);
 // });
 "#
-                        .to_string(),
+                    .to_string(),
                 }],
             };
 

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::rules::Rule;
 
 // Go core rules
+use crate::rules::go::bare_recover::GoBareRecoverRule;
 use crate::rules::go::context_background::GoContextBackgroundRule;
 use crate::rules::go::defer_in_loop::GoDeferInLoopRule;
 use crate::rules::go::empty_critical_section::GoEmptyCriticalSectionRule;
@@ -12,55 +13,54 @@ use crate::rules::go::http_timeout::GoHttpTimeoutRule;
 use crate::rules::go::sql_injection::GoSqlInjectionRule;
 use crate::rules::go::unchecked_error::GoUncheckedErrorRule;
 use crate::rules::go::unhandled_error_goroutine::GoUnhandledErrorGoroutineRule;
-use crate::rules::go::bare_recover::GoBareRecoverRule;
 
 // Go observability rules
+use crate::rules::go::missing_correlation_id::GoMissingCorrelationIdRule;
 use crate::rules::go::missing_structured_logging::GoMissingStructuredLoggingRule;
 use crate::rules::go::missing_tracing::GoMissingTracingRule;
-use crate::rules::go::missing_correlation_id::GoMissingCorrelationIdRule;
 
 // Go resilience rules
-use crate::rules::go::unbounded_retry::GoUnboundedRetryRule;
 use crate::rules::go::circuit_breaker::GoMissingCircuitBreakerRule;
 use crate::rules::go::graceful_shutdown::GoMissingGracefulShutdownRule;
 use crate::rules::go::http_retry::GoHttpRetryRule;
 use crate::rules::go::rate_limiting::GoRateLimitingRule;
+use crate::rules::go::unbounded_retry::GoUnboundedRetryRule;
 
 // Go security rules
 use crate::rules::go::hardcoded_secrets::GoHardcodedSecretsRule;
 use crate::rules::go::unsafe_template::GoUnsafeTemplateRule;
 
 // Go concurrency rules
-use crate::rules::go::unbounded_goroutines::GoUnboundedGoroutinesRule;
-use crate::rules::go::race_condition::GoRaceConditionRule;
-use crate::rules::go::global_mutable_state::GoGlobalMutableStateRule;
-use crate::rules::go::regex_compile::GoRegexCompileRule;
-use crate::rules::go::uncancelled_context::GoUncancelledContextRule;
 use crate::rules::go::channel_never_closed::GoChannelNeverClosedRule;
 use crate::rules::go::concurrent_map_access::GoConcurrentMapAccessRule;
+use crate::rules::go::global_mutable_state::GoGlobalMutableStateRule;
+use crate::rules::go::race_condition::GoRaceConditionRule;
+use crate::rules::go::regex_compile::GoRegexCompileRule;
+use crate::rules::go::unbounded_goroutines::GoUnboundedGoroutinesRule;
+use crate::rules::go::uncancelled_context::GoUncancelledContextRule;
 
 // Go memory/performance rules
-use crate::rules::go::unbounded_memory::GoUnboundedMemoryRule;
-use crate::rules::go::unbounded_cache::GoUnboundedCacheRule;
-use crate::rules::go::large_response_memory::GoLargeResponseMemoryRule;
 use crate::rules::go::cpu_in_hot_path::GoCpuInHotPathRule;
-use crate::rules::go::slice_memory_leak::GoSliceMemoryLeakRule;
-use crate::rules::go::slice_append_in_loop::GoSliceAppendInLoopRule;
+use crate::rules::go::large_response_memory::GoLargeResponseMemoryRule;
 use crate::rules::go::map_without_size_hint::GoMapWithoutSizeHintRule;
 use crate::rules::go::reflect_in_hot_path::GoReflectInHotPathRule;
+use crate::rules::go::slice_append_in_loop::GoSliceAppendInLoopRule;
+use crate::rules::go::slice_memory_leak::GoSliceMemoryLeakRule;
+use crate::rules::go::unbounded_cache::GoUnboundedCacheRule;
+use crate::rules::go::unbounded_memory::GoUnboundedMemoryRule;
 
 // Go type safety rules
 use crate::rules::go::type_assertion_no_ok::GoTypeAssertionNoOkRule;
 
 // Go error handling rules
-use crate::rules::go::sentinel_error_comparison::GoSentinelErrorComparisonRule;
 use crate::rules::go::error_type_assertion::GoErrorTypeAssertionRule;
 use crate::rules::go::panic_in_library::GoPanicInLibraryRule;
+use crate::rules::go::sentinel_error_comparison::GoSentinelErrorComparisonRule;
 
 // Go data/storage rules
-use crate::rules::go::transaction_boundary::GoTransactionBoundaryRule;
-use crate::rules::go::idempotency_key::GoIdempotencyKeyRule;
 use crate::rules::go::ephemeral_filesystem_write::GoEphemeralFilesystemWriteRule;
+use crate::rules::go::idempotency_key::GoIdempotencyKeyRule;
+use crate::rules::go::transaction_boundary::GoTransactionBoundaryRule;
 
 // Go network rules
 use crate::rules::go::sync_dns_lookup::GoSyncDnsLookupRule;
@@ -69,48 +69,53 @@ use crate::rules::go::sync_dns_lookup::GoSyncDnsLookupRule;
 use crate::rules::go::halstead_complexity::GoHalsteadComplexityRule;
 
 // Go framework rules
-use crate::rules::go::frameworks::gin::{GinMissingValidationRule, GinUntrustedInputRule};
-use crate::rules::go::frameworks::nethttp::{NetHttpHandlerTimeoutRule, NetHttpServerTimeoutRule};
 use crate::rules::go::frameworks::echo::{EchoMissingMiddlewareRule, EchoRequestValidationRule};
-use crate::rules::go::frameworks::gorm::{GormConnectionPoolRule, GormNPlusOneRule, GormQueryTimeoutRule, GormSessionManagementRule};
+use crate::rules::go::frameworks::gin::{GinMissingValidationRule, GinUntrustedInputRule};
+use crate::rules::go::frameworks::gorm::{
+    GormConnectionPoolRule, GormNPlusOneRule, GormQueryTimeoutRule, GormSessionManagementRule,
+};
 use crate::rules::go::frameworks::grpc::GrpcMissingDeadlineRule;
-use crate::rules::go::frameworks::redis::{RedisMissingTtlRule as GoRedisMissingTtlRule, RedisConnectionPoolRule as GoRedisConnectionPoolRule};
+use crate::rules::go::frameworks::nethttp::{NetHttpHandlerTimeoutRule, NetHttpServerTimeoutRule};
+use crate::rules::go::frameworks::redis::{
+    RedisConnectionPoolRule as GoRedisConnectionPoolRule,
+    RedisMissingTtlRule as GoRedisMissingTtlRule,
+};
 
 // Rust rules - Error handling
-use crate::rules::rust::RustUnsafeUnwrapRule;
-use crate::rules::rust::RustPanicInLibraryRule;
 use crate::rules::rust::RustIgnoredResultRule;
+use crate::rules::rust::RustPanicInLibraryRule;
+use crate::rules::rust::RustUnsafeUnwrapRule;
 
 // Rust rules - Async/concurrency
+use crate::rules::rust::RustArcMutexContentionRule;
 use crate::rules::rust::RustBlockingInAsyncRule;
+use crate::rules::rust::RustCpuInAsyncRule;
+use crate::rules::rust::RustMissingAsyncTimeoutRule;
+use crate::rules::rust::RustMissingSelectTimeoutRule;
 use crate::rules::rust::RustSpawnNoErrorHandlingRule;
 use crate::rules::rust::RustUnboundedChannelRule;
-use crate::rules::rust::RustMissingSelectTimeoutRule;
-use crate::rules::rust::RustArcMutexContentionRule;
-use crate::rules::rust::RustMissingAsyncTimeoutRule;
-use crate::rules::rust::RustCpuInAsyncRule;
 use crate::rules::rust::RustUnboundedConcurrencyRule;
 use crate::rules::rust::RustUncancelledTasksRule;
 
 // Rust rules - Safety/security
-use crate::rules::rust::RustUnsafeBlockUnauditedRule;
 use crate::rules::rust::RustHardcodedSecretsRule;
 use crate::rules::rust::RustSqlInjectionRule;
+use crate::rules::rust::RustUnsafeBlockUnauditedRule;
 
 // Rust rules - Performance (additional)
 use crate::rules::rust::RustRegexCompileRule;
 
 // Rust rules - Observability
-use crate::rules::rust::RustPrintlnInLibRule;
-use crate::rules::rust::RustMissingTracingRule;
 use crate::rules::rust::RustMissingStructuredLoggingRule;
+use crate::rules::rust::RustMissingTracingRule;
+use crate::rules::rust::RustPrintlnInLibRule;
 
 // Rust rules - Performance
 use crate::rules::rust::RustCloneInLoopRule;
 use crate::rules::rust::RustIoInHotPathRule;
 use crate::rules::rust::RustNPlusOneRule;
-use crate::rules::rust::RustUnboundedMemoryRule;
 use crate::rules::rust::RustSyncDnsLookupRule;
+use crate::rules::rust::RustUnboundedMemoryRule;
 use crate::rules::rust::RustUnboundedRecursionRule;
 
 // Rust rules - Datetime
@@ -138,15 +143,15 @@ use crate::rules::rust::RustUnboundedRetryRule;
 use crate::rules::rust::RustMissingCorrelationIdRule;
 
 // Rust rules - Memory
-use crate::rules::rust::RustUnboundedCacheRule;
 use crate::rules::rust::RustLargeResponseMemoryRule;
+use crate::rules::rust::RustUnboundedCacheRule;
 
 // Rust rules - Concurrency
 use crate::rules::rust::RustGlobalMutableStateRule;
 
 // Rust rules - Data/Storage
-use crate::rules::rust::RustMissingIdempotencyKeyRule;
 use crate::rules::rust::RustEphemeralFilesystemWriteRule;
+use crate::rules::rust::RustMissingIdempotencyKeyRule;
 
 // Rust rules - Network
 use crate::rules::rust::RustGrpcNoDeadlineRule;
@@ -163,27 +168,6 @@ use crate::rules::python::code_duplication::PythonCodeDuplicationRule;
 use crate::rules::python::cpu_in_event_loop::PythonCpuInEventLoopRule;
 use crate::rules::python::db_timeout::PythonDbTimeoutRule;
 use crate::rules::python::ephemeral_filesystem_write::PythonEphemeralFilesystemWriteRule;
-use crate::rules::python::global_mutable_state::PythonGlobalMutableStateRule;
-use crate::rules::python::graceful_shutdown::PythonMissingGracefulShutdownRule;
-use crate::rules::python::grpc_no_deadline::PythonGrpcNoDeadlineRule;
-use crate::rules::python::halstead_complexity::PythonHalsteadComplexityRule;
-use crate::rules::python::idempotency_key::PythonMissingIdempotencyKeyRule;
-use crate::rules::python::io_in_hot_path::PythonIoInHotPathRule;
-use crate::rules::python::large_response_memory::PythonLargeResponseMemoryRule;
-use crate::rules::python::missing_correlation_id::PythonMissingCorrelationIdRule;
-use crate::rules::python::missing_structured_logging::PythonMissingStructuredLoggingRule;
-use crate::rules::python::missing_tracing::PythonMissingTracingRule;
-use crate::rules::python::n_plus_one_queries::PythonNPlusOneQueriesRule;
-use crate::rules::python::race_condition::PythonRaceConditionRiskRule;
-use crate::rules::python::recursive_no_base_case::PythonRecursiveNoBaseCaseRule;
-use crate::rules::python::sync_dns_lookup::PythonSyncDnsLookupRule;
-use crate::rules::python::transaction_boundary::PythonMissingTransactionBoundaryRule;
-use crate::rules::python::unbounded_cache::PythonUnboundedCacheRule;
-use crate::rules::python::unbounded_concurrency::PythonUnboundedConcurrencyRule;
-use crate::rules::python::unbounded_memory::PythonUnboundedMemoryOperationRule;
-use crate::rules::python::unbounded_retry::PythonUnboundedRetryRule;
-use crate::rules::python::uncancelled_tasks::PythonUncancelledTasksRule;
-use crate::rules::python::unsafe_eval::PythonUnsafeEvalRule;
 use crate::rules::python::frameworks::async_resource_cleanup::PythonAsyncResourceCleanupRule;
 use crate::rules::python::frameworks::django::allowed_hosts::DjangoAllowedHostsRule;
 use crate::rules::python::frameworks::django::missing_csrf::DjangoMissingCsrfRule;
@@ -212,46 +196,67 @@ use crate::rules::python::frameworks::sqlalchemy::lazy_loading::SqlAlchemyLazyLo
 use crate::rules::python::frameworks::sqlalchemy::pgvector_optimization::PgvectorOptimizationRule;
 use crate::rules::python::frameworks::sqlalchemy::query_timeout::SqlAlchemyQueryTimeoutRule;
 use crate::rules::python::frameworks::sqlalchemy::session_management::SqlAlchemySessionManagementRule;
+use crate::rules::python::global_mutable_state::PythonGlobalMutableStateRule;
+use crate::rules::python::graceful_shutdown::PythonMissingGracefulShutdownRule;
+use crate::rules::python::grpc_no_deadline::PythonGrpcNoDeadlineRule;
+use crate::rules::python::halstead_complexity::PythonHalsteadComplexityRule;
+use crate::rules::python::idempotency_key::PythonMissingIdempotencyKeyRule;
+use crate::rules::python::io_in_hot_path::PythonIoInHotPathRule;
+use crate::rules::python::large_response_memory::PythonLargeResponseMemoryRule;
+use crate::rules::python::missing_correlation_id::PythonMissingCorrelationIdRule;
+use crate::rules::python::missing_structured_logging::PythonMissingStructuredLoggingRule;
+use crate::rules::python::missing_tracing::PythonMissingTracingRule;
+use crate::rules::python::n_plus_one_queries::PythonNPlusOneQueriesRule;
 use crate::rules::python::naive_datetime::PythonNaiveDatetimeRule;
+use crate::rules::python::race_condition::PythonRaceConditionRiskRule;
+use crate::rules::python::recursive_no_base_case::PythonRecursiveNoBaseCaseRule;
 use crate::rules::python::regex_compile::PythonRegexCompileRule;
 use crate::rules::python::sql_injection::PythonSqlInjectionRule;
+use crate::rules::python::sync_dns_lookup::PythonSyncDnsLookupRule;
+use crate::rules::python::transaction_boundary::PythonMissingTransactionBoundaryRule;
+use crate::rules::python::unbounded_cache::PythonUnboundedCacheRule;
+use crate::rules::python::unbounded_concurrency::PythonUnboundedConcurrencyRule;
+use crate::rules::python::unbounded_memory::PythonUnboundedMemoryOperationRule;
+use crate::rules::python::unbounded_retry::PythonUnboundedRetryRule;
+use crate::rules::python::uncancelled_tasks::PythonUncancelledTasksRule;
+use crate::rules::python::unsafe_eval::PythonUnsafeEvalRule;
 
 // TypeScript rules - Core
+use crate::rules::typescript::TypescriptAsyncWithoutErrorHandlingRule;
+use crate::rules::typescript::TypescriptBareCatchRule;
+use crate::rules::typescript::TypescriptConsoleInProductionRule;
 use crate::rules::typescript::TypescriptEmptyCatchRule;
 use crate::rules::typescript::TypescriptGlobalMutableStateRule;
-use crate::rules::typescript::TypescriptHttpMissingTimeoutRule;
-use crate::rules::typescript::TypescriptAsyncWithoutErrorHandlingRule;
-use crate::rules::typescript::TypescriptUnsafeAnyRule;
-use crate::rules::typescript::TypescriptMissingNullCheckRule;
-use crate::rules::typescript::TypescriptBareCatchRule;
-use crate::rules::typescript::TypescriptUnboundedConcurrencyRule;
-use crate::rules::typescript::TypescriptConsoleInProductionRule;
 use crate::rules::typescript::TypescriptHardcodedSecretsRule;
+use crate::rules::typescript::TypescriptHttpMissingTimeoutRule;
+use crate::rules::typescript::TypescriptMissingCircuitBreakerRule;
+use crate::rules::typescript::TypescriptMissingCorrelationIdRule;
+use crate::rules::typescript::TypescriptMissingGracefulShutdownRule;
+use crate::rules::typescript::TypescriptMissingNullCheckRule;
 use crate::rules::typescript::TypescriptPromiseNoCatchRule;
 use crate::rules::typescript::TypescriptSqlInjectionRule;
-use crate::rules::typescript::TypescriptMissingCircuitBreakerRule;
-use crate::rules::typescript::TypescriptMissingGracefulShutdownRule;
-use crate::rules::typescript::TypescriptMissingCorrelationIdRule;
+use crate::rules::typescript::TypescriptUnboundedConcurrencyRule;
+use crate::rules::typescript::TypescriptUnsafeAnyRule;
 
 // TypeScript rules - Additional
-use crate::rules::typescript::TypescriptUnboundedRetryRule;
-use crate::rules::typescript::TypescriptMissingStructuredLoggingRule;
-use crate::rules::typescript::TypescriptUnboundedCacheRule;
-use crate::rules::typescript::TypescriptNaiveDatetimeRule;
 use crate::rules::typescript::TypescriptCpuInEventLoopRule;
-use crate::rules::typescript::TypescriptLargeResponseMemoryRule;
-use crate::rules::typescript::TypescriptMissingIdempotencyKeyRule;
-use crate::rules::typescript::TypescriptMissingTracingRule;
-use crate::rules::typescript::TypescriptTransactionBoundaryRule;
-use crate::rules::typescript::TypescriptUnboundedMemoryRule;
-use crate::rules::typescript::TypescriptRaceConditionRule;
-use crate::rules::typescript::TypescriptSyncDnsLookupRule;
-use crate::rules::typescript::TypescriptUnsafeEvalRule;
-use crate::rules::typescript::TypescriptNPlusOneQueriesRule;
 use crate::rules::typescript::TypescriptGrpcNoDeadlineRule;
 use crate::rules::typescript::TypescriptHttpMissingRetryRule;
+use crate::rules::typescript::TypescriptLargeResponseMemoryRule;
+use crate::rules::typescript::TypescriptMissingIdempotencyKeyRule;
 use crate::rules::typescript::TypescriptMissingRateLimitingRule;
+use crate::rules::typescript::TypescriptMissingStructuredLoggingRule;
+use crate::rules::typescript::TypescriptMissingTracingRule;
+use crate::rules::typescript::TypescriptNPlusOneQueriesRule;
+use crate::rules::typescript::TypescriptNaiveDatetimeRule;
+use crate::rules::typescript::TypescriptRaceConditionRule;
 use crate::rules::typescript::TypescriptRegexCompileRule;
+use crate::rules::typescript::TypescriptSyncDnsLookupRule;
+use crate::rules::typescript::TypescriptTransactionBoundaryRule;
+use crate::rules::typescript::TypescriptUnboundedCacheRule;
+use crate::rules::typescript::TypescriptUnboundedMemoryRule;
+use crate::rules::typescript::TypescriptUnboundedRetryRule;
+use crate::rules::typescript::TypescriptUnsafeEvalRule;
 
 // TypeScript rules - Maintainability
 use crate::rules::typescript::TypescriptHalsteadComplexityRule;
@@ -988,9 +993,7 @@ mod tests {
         let registry = RuleRegistry::with_builtin_rules();
         let rules = registry.all();
 
-        let has_db_timeout_rule = rules
-            .iter()
-            .any(|r| r.id() == "python.db.missing_timeout");
+        let has_db_timeout_rule = rules.iter().any(|r| r.id() == "python.db.missing_timeout");
         assert!(
             has_db_timeout_rule,
             "Registry should contain database timeout rule"
@@ -1058,9 +1061,7 @@ mod tests {
         let registry = RuleRegistry::with_builtin_rules();
         let rules = registry.all();
 
-        let has_sql_injection_rule = rules
-            .iter()
-            .any(|r| r.id() == "python.sql_injection");
+        let has_sql_injection_rule = rules.iter().any(|r| r.id() == "python.sql_injection");
         assert!(
             has_sql_injection_rule,
             "Registry should contain SQL injection rule"
@@ -1072,9 +1073,7 @@ mod tests {
         let registry = RuleRegistry::with_builtin_rules();
         let rules = registry.all();
 
-        let has_naive_datetime_rule = rules
-            .iter()
-            .any(|r| r.id() == "python.naive_datetime");
+        let has_naive_datetime_rule = rules.iter().any(|r| r.id() == "python.naive_datetime");
         assert!(
             has_naive_datetime_rule,
             "Registry should contain naive datetime rule"
@@ -1086,9 +1085,7 @@ mod tests {
         let registry = RuleRegistry::with_builtin_rules();
         let rules = registry.all();
 
-        let has_retry_rule = rules
-            .iter()
-            .any(|r| r.id() == "python.http.missing_retry");
+        let has_retry_rule = rules.iter().any(|r| r.id() == "python.http.missing_retry");
         assert!(
             has_retry_rule,
             "Registry should contain HTTP missing retry rule"

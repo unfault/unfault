@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -80,8 +80,8 @@ impl Rule for TypescriptGrpcNoDeadlineRule {
                 }
 
                 // Check if deadline/timeout is set
-                let has_deadline = call.args_repr.contains("deadline")
-                    || call.args_repr.contains("timeout");
+                let has_deadline =
+                    call.args_repr.contains("deadline") || call.args_repr.contains("timeout");
 
                 if has_deadline {
                     continue;
@@ -121,7 +121,7 @@ impl Rule for TypescriptGrpcNoDeadlineRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Add deadline option".to_string()),
                     tags: vec!["grpc".into(), "timeout".into(), "reliability".into()],

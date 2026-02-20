@@ -26,8 +26,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -50,27 +50,107 @@ impl RustBlockingInAsyncRule {
 /// Blocking function patterns to detect with their async alternatives
 const BLOCKING_PATTERNS: &[(&str, &str, &str)] = &[
     // (pattern, description, suggestion)
-    ("std::fs::read", "synchronous file read", "tokio::fs::read or spawn_blocking"),
-    ("std::fs::read_to_string", "synchronous file read", "tokio::fs::read_to_string"),
-    ("std::fs::write", "synchronous file write", "tokio::fs::write"),
-    ("std::fs::read_dir", "synchronous directory read", "tokio::fs::read_dir"),
-    ("std::fs::create_dir", "synchronous directory creation", "tokio::fs::create_dir"),
-    ("std::fs::remove_file", "synchronous file removal", "tokio::fs::remove_file"),
-    ("std::fs::remove_dir", "synchronous directory removal", "tokio::fs::remove_dir"),
+    (
+        "std::fs::read",
+        "synchronous file read",
+        "tokio::fs::read or spawn_blocking",
+    ),
+    (
+        "std::fs::read_to_string",
+        "synchronous file read",
+        "tokio::fs::read_to_string",
+    ),
+    (
+        "std::fs::write",
+        "synchronous file write",
+        "tokio::fs::write",
+    ),
+    (
+        "std::fs::read_dir",
+        "synchronous directory read",
+        "tokio::fs::read_dir",
+    ),
+    (
+        "std::fs::create_dir",
+        "synchronous directory creation",
+        "tokio::fs::create_dir",
+    ),
+    (
+        "std::fs::remove_file",
+        "synchronous file removal",
+        "tokio::fs::remove_file",
+    ),
+    (
+        "std::fs::remove_dir",
+        "synchronous directory removal",
+        "tokio::fs::remove_dir",
+    ),
     ("std::fs::copy", "synchronous file copy", "tokio::fs::copy"),
-    ("std::fs::rename", "synchronous file rename", "tokio::fs::rename"),
-    ("std::fs::metadata", "synchronous metadata read", "tokio::fs::metadata"),
-    ("std::fs::File::open", "synchronous file open", "tokio::fs::File::open"),
-    ("std::fs::File::create", "synchronous file create", "tokio::fs::File::create"),
-    ("std::thread::sleep", "thread sleep blocks runtime", "tokio::time::sleep"),
-    ("std::io::stdin", "synchronous stdin read", "tokio::io::stdin"),
-    ("std::net::TcpStream", "synchronous TCP", "tokio::net::TcpStream"),
-    ("std::net::TcpListener", "synchronous TCP listener", "tokio::net::TcpListener"),
-    ("std::net::UdpSocket", "synchronous UDP", "tokio::net::UdpSocket"),
-    ("reqwest::blocking", "blocking HTTP client", "reqwest::Client (async)"),
-    (".read_to_end(", "potentially blocking read", "async read methods"),
-    (".read_to_string(", "potentially blocking read", "async read methods"),
-    (".write_all(", "potentially blocking write", "async write methods"),
+    (
+        "std::fs::rename",
+        "synchronous file rename",
+        "tokio::fs::rename",
+    ),
+    (
+        "std::fs::metadata",
+        "synchronous metadata read",
+        "tokio::fs::metadata",
+    ),
+    (
+        "std::fs::File::open",
+        "synchronous file open",
+        "tokio::fs::File::open",
+    ),
+    (
+        "std::fs::File::create",
+        "synchronous file create",
+        "tokio::fs::File::create",
+    ),
+    (
+        "std::thread::sleep",
+        "thread sleep blocks runtime",
+        "tokio::time::sleep",
+    ),
+    (
+        "std::io::stdin",
+        "synchronous stdin read",
+        "tokio::io::stdin",
+    ),
+    (
+        "std::net::TcpStream",
+        "synchronous TCP",
+        "tokio::net::TcpStream",
+    ),
+    (
+        "std::net::TcpListener",
+        "synchronous TCP listener",
+        "tokio::net::TcpListener",
+    ),
+    (
+        "std::net::UdpSocket",
+        "synchronous UDP",
+        "tokio::net::UdpSocket",
+    ),
+    (
+        "reqwest::blocking",
+        "blocking HTTP client",
+        "reqwest::Client (async)",
+    ),
+    (
+        ".read_to_end(",
+        "potentially blocking read",
+        "async read methods",
+    ),
+    (
+        ".read_to_string(",
+        "potentially blocking read",
+        "async read methods",
+    ),
+    (
+        ".write_all(",
+        "potentially blocking write",
+        "async write methods",
+    ),
 ];
 
 #[async_trait]
@@ -108,16 +188,13 @@ impl Rule for RustBlockingInAsyncRule {
                 }
 
                 let callee = &call.function_call.callee_expr;
-                
+
                 // Check for blocking patterns
                 for (pattern, description, suggestion) in BLOCKING_PATTERNS {
                     if callee.contains(pattern) {
                         let line = call.function_call.location.line;
 
-                        let title = format!(
-                            "Blocking {} in async function",
-                            description
-                        );
+                        let title = format!("Blocking {} in async function", description);
 
                         let description_text = format!(
                             "The call `{}` at line {} performs a {} operation in an async context.\n\n\
@@ -142,8 +219,9 @@ impl Rule for RustBlockingInAsyncRule {
                                  {}\n\
                              }}).await.unwrap()",
                             callee,
-                            callee.replace("std::fs", "tokio::fs")
-                                  .replace("std::thread::sleep", "tokio::time::sleep"),
+                            callee
+                                .replace("std::fs", "tokio::fs")
+                                .replace("std::thread::sleep", "tokio::time::sleep"),
                             callee
                         );
 
@@ -173,9 +251,9 @@ impl Rule for RustBlockingInAsyncRule {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -185,7 +263,7 @@ impl Rule for RustBlockingInAsyncRule {
                                 "performance".into(),
                             ],
                         });
-                        
+
                         // Found one pattern, no need to check others for this call
                         break;
                     }
@@ -199,10 +277,11 @@ impl Rule for RustBlockingInAsyncRule {
                 }
 
                 let callee = &call.function_call.callee_expr;
-                
+
                 // Check for common blocking patterns via method chaining
-                if callee.contains("sleep") && 
-                   (callee.contains("std::thread") || callee.contains("thread::sleep")) {
+                if callee.contains("sleep")
+                    && (callee.contains("std::thread") || callee.contains("thread::sleep"))
+                {
                     let line = call.function_call.location.line;
 
                     findings.push(RuleFinding {
@@ -221,15 +300,16 @@ impl Rule for RustBlockingInAsyncRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(
                             "// Before:\n\
                              std::thread::sleep(Duration::from_secs(1));\n\n\
                              // After:\n\
-                             tokio::time::sleep(Duration::from_secs(1)).await;".to_string()
+                             tokio::time::sleep(Duration::from_secs(1)).await;"
+                                .to_string(),
                         ),
                         tags: vec![
                             "rust".into(),
@@ -251,8 +331,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{
@@ -69,9 +69,10 @@ impl Rule for GoMissingCorrelationIdRule {
 
             // Check if there are HTTP handlers
             let has_http_handler = go_sem.functions.iter().any(|f| {
-                f.params.iter().any(|p| 
-                    p.param_type.contains("http.ResponseWriter") || p.param_type.contains("*http.Request")
-                )
+                f.params.iter().any(|p| {
+                    p.param_type.contains("http.ResponseWriter")
+                        || p.param_type.contains("*http.Request")
+                })
             }) || go_sem.imports.iter().any(|i| i.path.contains("net/http"));
 
             if !has_http_handler {
@@ -97,7 +98,8 @@ impl Rule for GoMissingCorrelationIdRule {
             let description = "This file contains HTTP handlers but does not appear to track \
                 correlation IDs (X-Request-ID/X-Correlation-ID). Correlation IDs are essential \
                 for tracing requests across services, debugging distributed systems, and \
-                correlating logs from different services handling the same request.".to_string();
+                correlating logs from different services handling the same request."
+                .to_string();
 
             let patch = generate_correlation_id_patch(*file_id);
 
@@ -113,9 +115,9 @@ impl Rule for GoMissingCorrelationIdRule {
                 file_path: go_sem.path.clone(),
                 line: Some(1),
                 column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                end_line: None,
+                end_column: None,
+                byte_range: None,
                 patch: Some(patch),
                 fix_preview: Some("// Add correlation ID middleware".to_string()),
                 tags: vec![
@@ -144,7 +146,8 @@ fn generate_correlation_id_patch(file_id: FileId) -> FilePatch {
 //         next.ServeHTTP(w, r.WithContext(ctx))
 //     })
 // }
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

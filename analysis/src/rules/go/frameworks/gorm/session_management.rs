@@ -8,11 +8,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::transaction_boundary;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::go::GoFileSemantics;
 use crate::semantics::SourceSemantics;
+use crate::semantics::go::GoFileSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -70,8 +70,7 @@ impl Rule for GormSessionManagementRule {
 
             // Check if GORM is imported
             let has_gorm = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("gorm.io/gorm")
-                    || imp.path.contains("github.com/jinzhu/gorm")
+                imp.path.contains("gorm.io/gorm") || imp.path.contains("github.com/jinzhu/gorm")
             });
 
             if !has_gorm {
@@ -111,7 +110,9 @@ fn analyze_for_session_issues(sem: &GoFileSemantics) -> Option<SessionIssue> {
         }
 
         // Check for transaction handling
-        if call.function_call.callee_expr.contains("Begin") || call.function_call.callee_expr.contains(".Transaction(") {
+        if call.function_call.callee_expr.contains("Begin")
+            || call.function_call.callee_expr.contains(".Transaction(")
+        {
             has_transaction = true;
             has_begin = true;
         }
@@ -189,10 +190,7 @@ fn create_finding(
             (title, desc, patch)
         }
         SessionIssueType::TransactionNoRollback => {
-            let title = format!(
-                "GORM transaction missing rollback at line {}",
-                issue.line
-            );
+            let title = format!("GORM transaction missing rollback at line {}", issue.line);
             let desc = format!(
                 "GORM transaction at line {} may be missing rollback on error. \
                  Ensure proper rollback handling to avoid leaving connections in \
@@ -236,9 +234,9 @@ fn create_finding(
         file_path: sem.path.clone(),
         line: Some(issue.line),
         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some("// Use db.Transaction() for atomicity".to_string()),
         tags: vec![

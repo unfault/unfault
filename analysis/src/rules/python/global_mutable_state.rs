@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -107,30 +107,32 @@ impl Rule for PythonGlobalMutableStateRule {
                 if !assignment.is_module_level {
                     continue;
                 }
-                
+
                 // Skip __all__ - it's a standard Python module-level variable used to define
                 // the public API of a module. While technically mutable, it's not intended
                 // to be mutated at runtime and is a well-established Python idiom.
                 if assignment.target == "__all__" {
                     continue;
                 }
-                
+
                 if let Some(mutable_type) = detect_mutable_type(&assignment.value_repr) {
                     // Check if the variable name is UPPERCASE (Python constant convention)
                     // Variables like LANGUAGE_MAP are typically read-only configuration
                     let is_likely_constant = is_uppercase_name(&assignment.target);
-                    
+
                     // Check if the type annotation contains ReadOnly (Python 3.13+ / PEP 705)
                     // If so, the developer has explicitly marked it as read-only
-                    let has_readonly_annotation = assignment.type_annotation.as_ref()
+                    let has_readonly_annotation = assignment
+                        .type_annotation
+                        .as_ref()
                         .map(|ann| ann.contains("ReadOnly"))
                         .unwrap_or(false);
-                    
+
                     // Skip findings for variables explicitly annotated as ReadOnly
                     if has_readonly_annotation {
                         continue;
                     }
-                    
+
                     let global_mutable = GlobalMutableAssignment {
                         name: assignment.target.clone(),
                         mutable_type,
@@ -149,25 +151,29 @@ impl Rule for PythonGlobalMutableStateRule {
                             global_mutable.mutable_type.as_str(),
                             global_mutable.name
                         );
-                        
+
                         // Generate patch to add ReadOnly annotation (Python 3.13+ / PEP 705)
-                        let (patch, fix_preview, extra_advice) = if global_mutable.type_annotation.is_some() {
+                        let (patch, fix_preview, extra_advice) = if global_mutable
+                            .type_annotation
+                            .is_some()
+                        {
                             // Has annotation but no ReadOnly - suggest wrapping with ReadOnly
-                            let (preview, generated_patch) = generate_readonly_annotation_patch(
-                                &global_mutable,
-                                py,
-                                *file_id,
-                            );
+                            let (preview, generated_patch) =
+                                generate_readonly_annotation_patch(&global_mutable, py, *file_id);
                             (
                                 Some(generated_patch),
                                 Some(preview),
-                                "Consider adding `ReadOnly` annotation (Python 3.13+) for type safety."
+                                "Consider adding `ReadOnly` annotation (Python 3.13+) for type safety.",
                             )
                         } else {
                             // No annotation - mention ReadOnly as an option
-                            (None, None, "Consider adding a type annotation with `ReadOnly` (Python 3.13+) for explicit immutability.")
+                            (
+                                None,
+                                None,
+                                "Consider adding a type annotation with `ReadOnly` (Python 3.13+) for explicit immutability.",
+                            )
                         };
-                        
+
                         let description = format!(
                             "The module-level variable `{}` is initialized as a mutable {} (`{}`). \
                              While this uses a mutable type, the UPPERCASE naming convention suggests \
@@ -197,18 +203,22 @@ impl Rule for PythonGlobalMutableStateRule {
                             global_mutable.mutable_type.as_str(),
                             assignment.value_repr
                         );
-                        
+
                         // Generate patch to wrap in a function or use thread-local
-                        let (patched_text, generated_patch) = generate_global_mutable_patch(
-                            &global_mutable,
-                            *file_id,
-                        );
+                        let (patched_text, generated_patch) =
+                            generate_global_mutable_patch(&global_mutable, *file_id);
                         let preview = format!(
                             "# Before:\n#   {}\n# After:\n#   {}",
                             global_mutable.text.trim(),
                             patched_text.trim()
                         );
-                        (title, description, Severity::High, Some(generated_patch), Some(preview))
+                        (
+                            title,
+                            description,
+                            Severity::High,
+                            Some(generated_patch),
+                            Some(preview),
+                        )
                     };
 
                     findings.push(RuleFinding {
@@ -225,7 +235,7 @@ impl Rule for PythonGlobalMutableStateRule {
                         column: Some(global_mutable.column),
                         end_line: None,
                         end_column: None,
-            byte_range: None,
+                        byte_range: None,
                         patch,
                         fix_preview,
                         tags: vec![
@@ -246,7 +256,7 @@ impl Rule for PythonGlobalMutableStateRule {
 /// Detect if a value represents a mutable type
 fn detect_mutable_type(value_repr: &str) -> Option<MutableType> {
     let trimmed = value_repr.trim();
-    
+
     // Empty list literal: []
     if trimmed == "[]" || trimmed.starts_with('[') && trimmed.ends_with(']') {
         // Check it's not a list comprehension
@@ -254,12 +264,12 @@ fn detect_mutable_type(value_repr: &str) -> Option<MutableType> {
             return Some(MutableType::List);
         }
     }
-    
+
     // Empty dict literal: {} or dict()
     if trimmed == "{}" || trimmed == "dict()" {
         return Some(MutableType::Dict);
     }
-    
+
     // Dict with content: {key: value, ...}
     if trimmed.starts_with('{') && trimmed.ends_with('}') && trimmed.contains(':') {
         // Check it's not a dict comprehension
@@ -267,24 +277,28 @@ fn detect_mutable_type(value_repr: &str) -> Option<MutableType> {
             return Some(MutableType::Dict);
         }
     }
-    
+
     // list() constructor
     if trimmed == "list()" || trimmed.starts_with("list(") {
         return Some(MutableType::List);
     }
-    
+
     // set() constructor or set literal {1, 2, 3}
     if trimmed == "set()" || trimmed.starts_with("set(") {
         return Some(MutableType::Set);
     }
-    
+
     // Set literal (no colons, has commas)
-    if trimmed.starts_with('{') && trimmed.ends_with('}') && !trimmed.contains(':') && trimmed.len() > 2 {
+    if trimmed.starts_with('{')
+        && trimmed.ends_with('}')
+        && !trimmed.contains(':')
+        && trimmed.len() > 2
+    {
         if !is_comprehension(trimmed) {
             return Some(MutableType::Set);
         }
     }
-    
+
     None
 }
 
@@ -311,7 +325,7 @@ fn is_comprehension(expr: &str) -> bool {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    
+
     // Check for the comprehension pattern: `for ... in`
     // This looks for " for " followed by " in " (with content in between)
     // This is a simple heuristic that works for most comprehensions
@@ -322,7 +336,7 @@ fn is_comprehension(expr: &str) -> bool {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -332,24 +346,24 @@ fn find_comment_start(line: &str) -> Option<usize> {
     let mut in_single_quote = false;
     let mut in_double_quote = false;
     let mut prev_char = '\0';
-    
+
     for (i, c) in line.char_indices() {
         // Handle escape sequences
         if prev_char == '\\' {
             prev_char = c;
             continue;
         }
-        
+
         match c {
             '\'' if !in_double_quote => in_single_quote = !in_single_quote,
             '"' if !in_single_quote => in_double_quote = !in_double_quote,
             '#' if !in_single_quote && !in_double_quote => return Some(i),
             _ => {}
         }
-        
+
         prev_char = c;
     }
-    
+
     None
 }
 
@@ -378,21 +392,24 @@ fn generate_global_mutable_patch(
         MutableType::List => (
             format!(
                 "def get_{}():\n    \"\"\"Get a fresh {} instance (thread-safe).\"\"\"\n    return []",
-                global_mutable.name, global_mutable.mutable_type.as_str()
+                global_mutable.name,
+                global_mutable.mutable_type.as_str()
             ),
             "[]".to_string(),
         ),
         MutableType::Dict => (
             format!(
                 "def get_{}():\n    \"\"\"Get a fresh {} instance (thread-safe).\"\"\"\n    return {{}}",
-                global_mutable.name, global_mutable.mutable_type.as_str()
+                global_mutable.name,
+                global_mutable.mutable_type.as_str()
             ),
             "{}".to_string(),
         ),
         MutableType::Set => (
             format!(
                 "def get_{}():\n    \"\"\"Get a fresh {} instance (thread-safe).\"\"\"\n    return set()",
-                global_mutable.name, global_mutable.mutable_type.as_str()
+                global_mutable.name,
+                global_mutable.mutable_type.as_str()
             ),
             "set()".to_string(),
         ),
@@ -440,21 +457,22 @@ fn generate_readonly_annotation_patch(
     file_id: FileId,
 ) -> (String, FilePatch) {
     let type_annotation = global_mutable.type_annotation.as_deref().unwrap_or("dict");
-    
+
     // Generate the preview of what the fix looks like
     let preview = format!(
         "# Before:\n#   {name}: {ann} = ...\n# After:\n#   {name}: ReadOnly[{ann}] = ...\n#   (requires: from typing import ReadOnly  # Python 3.13+)",
         name = global_mutable.name,
         ann = type_annotation
     );
-    
+
     // Check if ReadOnly is already imported
-    let has_readonly_import = py.imports.iter().any(|imp| {
-        imp.module == "typing" && imp.names.iter().any(|n| n == "ReadOnly")
-    });
-    
+    let has_readonly_import = py
+        .imports
+        .iter()
+        .any(|imp| imp.module == "typing" && imp.names.iter().any(|n| n == "ReadOnly"));
+
     let mut hunks = Vec::new();
-    
+
     // Add import if not present
     if !has_readonly_import {
         let import_line = py.import_insertion_line();
@@ -463,17 +481,14 @@ fn generate_readonly_annotation_patch(
             replacement: "from typing import ReadOnly  # Python 3.13+, PEP 705\n".to_string(),
         });
     }
-    
+
     // Note: We don't modify the actual type annotation in the code because:
     // 1. Reconstructing the full annotated assignment is complex
     // 2. The user may want to review before making type changes
     // Instead, we provide clear guidance in the description
-    
-    let patch = FilePatch {
-        file_id,
-        hunks,
-    };
-    
+
+    let patch = FilePatch { file_id, hunks };
+
     (preview, patch)
 }
 
@@ -529,7 +544,10 @@ mod tests {
 
     #[test]
     fn detects_dict_with_content() {
-        assert_eq!(detect_mutable_type("{'key': 'value'}"), Some(MutableType::Dict));
+        assert_eq!(
+            detect_mutable_type("{'key': 'value'}"),
+            Some(MutableType::Dict)
+        );
     }
 
     #[test]
@@ -728,7 +746,13 @@ ENABLED = True
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(findings[0].fix_preview.is_some());
-        assert!(findings[0].fix_preview.as_ref().unwrap().contains("def get_cache"));
+        assert!(
+            findings[0]
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("def get_cache")
+        );
     }
 
     #[tokio::test]
@@ -778,7 +802,7 @@ LANGUAGE_MAP = {
         let (file_id, sem) = parse_and_build_semantics(src);
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 1, "Should detect multiline dict");
         assert!(findings[0].title.contains("dict"));
     }
@@ -795,8 +819,12 @@ LANGUAGE_TO_LSP_PROFILE = {
         let (file_id, sem) = parse_and_build_semantics(src);
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert_eq!(findings.len(), 1, "Should detect multiline dict with comment");
+
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should detect multiline dict with comment"
+        );
         assert!(findings[0].title.contains("dict"));
     }
 
@@ -817,7 +845,7 @@ LANGUAGE_MAP = {
         let (file_id, sem) = parse_and_build_semantics(src);
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert_eq!(findings.len(), 2, "Should detect both multiline dicts");
     }
 
@@ -878,7 +906,10 @@ LANGUAGE_MAP = {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "__all__ should be ignored as it's a standard Python idiom");
+        assert!(
+            findings.is_empty(),
+            "__all__ should be ignored as it's a standard Python idiom"
+        );
     }
 
     #[tokio::test]
@@ -907,7 +938,10 @@ def my_function():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "__all__ should be ignored even with surrounding code");
+        assert!(
+            findings.is_empty(),
+            "__all__ should be ignored even with surrounding code"
+        );
     }
 
     #[tokio::test]
@@ -958,7 +992,10 @@ cache = []
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
         assert!(matches!(findings[0].severity, Severity::High));
-        assert!(findings[0].patch.is_some(), "lowercase mutable should have patch");
+        assert!(
+            findings[0].patch.is_some(),
+            "lowercase mutable should have patch"
+        );
         assert!(findings[0].fix_preview.is_some());
     }
 
@@ -971,7 +1008,10 @@ cache = []
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
         assert!(matches!(findings[0].severity, Severity::Low));
-        assert!(findings[0].patch.is_none(), "UPPERCASE mutable should not have patch");
+        assert!(
+            findings[0].patch.is_none(),
+            "UPPERCASE mutable should not have patch"
+        );
         assert!(findings[0].fix_preview.is_none());
         assert!(findings[0].title.contains("appears to be a constant"));
     }
@@ -1000,7 +1040,10 @@ CONFIG: ReadOnly[dict[str, str]] = {'key': 'value'}
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "ReadOnly annotated variables should be skipped");
+        assert!(
+            findings.is_empty(),
+            "ReadOnly annotated variables should be skipped"
+        );
     }
 
     #[tokio::test]
@@ -1015,8 +1058,17 @@ CONFIG: ReadOnly[dict[str, str]] = {'key': 'value'}
         assert_eq!(findings.len(), 1);
         assert!(matches!(findings[0].severity, Severity::Low));
         // Should have patch suggesting ReadOnly
-        assert!(findings[0].patch.is_some(), "UPPERCASE with annotation should have ReadOnly patch");
-        assert!(findings[0].fix_preview.as_ref().unwrap().contains("ReadOnly"));
+        assert!(
+            findings[0].patch.is_some(),
+            "UPPERCASE with annotation should have ReadOnly patch"
+        );
+        assert!(
+            findings[0]
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("ReadOnly")
+        );
     }
 
     #[tokio::test]
@@ -1029,7 +1081,10 @@ CONFIG: ReadOnly[dict[str, str]] = {'key': 'value'}
         assert_eq!(findings.len(), 1);
         assert!(matches!(findings[0].severity, Severity::Low));
         // No type annotation, so no ReadOnly patch
-        assert!(findings[0].patch.is_none(), "UPPERCASE without annotation should not have patch");
+        assert!(
+            findings[0].patch.is_none(),
+            "UPPERCASE without annotation should not have patch"
+        );
     }
 
     #[tokio::test]

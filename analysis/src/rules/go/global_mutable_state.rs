@@ -2,14 +2,14 @@
 //!
 //! Detects package-level mutable variables that can cause race conditions.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -27,10 +27,10 @@ impl GoGlobalMutableStateRule {
     fn is_mutable_type(type_str: &Option<String>) -> bool {
         match type_str {
             Some(t) => {
-                t.starts_with("map[") ||
-                t.starts_with("[]") ||
-                t.starts_with("*") ||
-                t.contains("chan ")
+                t.starts_with("map[")
+                    || t.starts_with("[]")
+                    || t.starts_with("*")
+                    || t.contains("chan ")
             }
             None => false,
         }
@@ -113,16 +113,12 @@ impl Rule for GoGlobalMutableStateRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("Add sync.Mutex protection".to_string()),
-                        tags: vec![
-                            "go".into(),
-                            "concurrency".into(),
-                            "race-condition".into(),
-                        ],
+                        tags: vec!["go".into(), "concurrency".into(), "race-condition".into()],
                     });
                 }
             }
@@ -145,10 +141,18 @@ mod tests {
 
     #[test]
     fn test_is_mutable_type() {
-        assert!(GoGlobalMutableStateRule::is_mutable_type(&Some("map[string]int".to_string())));
-        assert!(GoGlobalMutableStateRule::is_mutable_type(&Some("[]string".to_string())));
-        assert!(GoGlobalMutableStateRule::is_mutable_type(&Some("*Config".to_string())));
-        assert!(!GoGlobalMutableStateRule::is_mutable_type(&Some("int".to_string())));
+        assert!(GoGlobalMutableStateRule::is_mutable_type(&Some(
+            "map[string]int".to_string()
+        )));
+        assert!(GoGlobalMutableStateRule::is_mutable_type(&Some(
+            "[]string".to_string()
+        )));
+        assert!(GoGlobalMutableStateRule::is_mutable_type(&Some(
+            "*Config".to_string()
+        )));
+        assert!(!GoGlobalMutableStateRule::is_mutable_type(&Some(
+            "int".to_string()
+        )));
         assert!(!GoGlobalMutableStateRule::is_mutable_type(&None));
     }
 }

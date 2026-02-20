@@ -3,14 +3,14 @@
 //! Detects type assertions that don't use the comma-ok idiom,
 //! which can cause panics at runtime.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -59,18 +59,18 @@ impl Rule for GoTypeAssertionNoOkRule {
             // Scan through calls looking for type assertion patterns
             // Type assertions in Go look like: expr.(Type)
             // We need to detect when they're used without the comma-ok idiom
-            
+
             for call in &go.calls {
                 let args = &call.args_repr;
-                
+
                 // Check for type assertion pattern in call arguments
                 // This is a heuristic - type assertions look like .( followed by a type
                 if args.contains(".(") && !args.contains(", ok") && !args.contains(",ok") {
                     // Look for patterns like: x.(string), x.(int), x.(*Type), x.(SomeInterface)
                     // but not in type switch context
-                    
+
                     let line = call.function_call.location.line;
-                    
+
                     let title = "Type assertion without ok check".to_string();
 
                     let description = format!(
@@ -95,7 +95,9 @@ impl Rule for GoTypeAssertionNoOkRule {
                         file_id: *file_id,
                         hunks: vec![PatchHunk {
                             range: PatchRange::InsertBeforeLine { line },
-                            replacement: "// Use comma-ok idiom: v, ok := x.(Type); if !ok { handle error }".to_string(),
+                            replacement:
+                                "// Use comma-ok idiom: v, ok := x.(Type); if !ok { handle error }"
+                                    .to_string(),
                         }],
                     };
 
@@ -111,16 +113,12 @@ impl Rule for GoTypeAssertionNoOkRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("Use comma-ok idiom".to_string()),
-                        tags: vec![
-                            "go".into(),
-                            "type-assertion".into(),
-                            "panic".into(),
-                        ],
+                        tags: vec!["go".into(), "type-assertion".into(), "panic".into()],
                     });
                 }
             }
@@ -131,13 +129,11 @@ impl Rule for GoTypeAssertionNoOkRule {
                     // Check if value contains a type assertion without ok
                     if value.contains(".(") && !value.contains(",") {
                         let line = decl.location.range.start_line + 1;
-                        
+
                         // Make sure it's not a type switch case
                         if decl.name != "_" {
-                            let title = format!(
-                                "Unsafe type assertion in declaration of '{}'",
-                                decl.name
-                            );
+                            let title =
+                                format!("Unsafe type assertion in declaration of '{}'", decl.name);
 
                             let description = format!(
                                 "Variable '{}' at line {} is assigned from a type assertion \
@@ -179,16 +175,15 @@ impl Rule for GoTypeAssertionNoOkRule {
                                 file_path: go.path.clone(),
                                 line: Some(line),
                                 column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
                                 patch: Some(patch),
-                                fix_preview: Some(format!("Change '{}' to '{}'", old_text, new_text)),
-                                tags: vec![
-                                    "go".into(),
-                                    "type-assertion".into(),
-                                    "panic".into(),
-                                ],
+                                fix_preview: Some(format!(
+                                    "Change '{}' to '{}'",
+                                    old_text, new_text
+                                )),
+                                tags: vec!["go".into(), "type-assertion".into(), "panic".into()],
                             });
                         }
                     }
@@ -205,8 +200,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -231,17 +226,19 @@ mod tests {
     #[tokio::test]
     async fn test_detects_unsafe_type_assertion() {
         let rule = GoTypeAssertionNoOkRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func process(x interface{}) {
     s := x.(string)  // Unsafe - will panic if x is not string
     println(s)
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // With current heuristics, may or may not be detected at declaration level
         // The test validates the rule runs without error
         let _ = findings;
@@ -250,7 +247,8 @@ func process(x interface{}) {
     #[tokio::test]
     async fn test_safe_type_assertion_not_flagged() {
         let rule = GoTypeAssertionNoOkRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func process(x interface{}) {
@@ -260,12 +258,14 @@ func process(x interface{}) {
     }
     println(s)
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag safe patterns
-        let assertion_findings: Vec<_> = findings.iter()
+        let assertion_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.type_assertion_no_ok")
             .collect();
         // Safe usage should not be flagged at the call/declaration level

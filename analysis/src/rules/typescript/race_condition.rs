@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -65,7 +65,7 @@ impl Rule for TypescriptRaceConditionRule {
                     // Check if function name or inner calls suggest access to this variable
                     let var_name = &global_state.variable_name;
                     let accesses_var = func.inner_calls.iter().any(|c| c.contains(var_name));
-                    
+
                     if !accesses_var {
                         continue;
                     }
@@ -88,10 +88,7 @@ impl Rule for TypescriptRaceConditionRule {
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
-                        title: format!(
-                            "Potential race condition on '{}'",
-                            var_name
-                        ),
+                        title: format!("Potential race condition on '{}'", var_name),
                         description: Some(format!(
                             "Global mutable variable '{}' may be accessed by async function \
                              '{}'. This can cause race conditions when multiple \
@@ -106,12 +103,16 @@ impl Rule for TypescriptRaceConditionRule {
                         file_path: ts.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("Use Mutex for synchronization".to_string()),
-                        tags: vec!["concurrency".into(), "race-condition".into(), "async".into()],
+                        tags: vec![
+                            "concurrency".into(),
+                            "race-condition".into(),
+                            "async".into(),
+                        ],
                     });
                 }
             }

@@ -57,10 +57,10 @@ pub enum HttpClientKind {
 /// Summarize HTTP client calls in a TypeScript file.
 pub fn summarize_http_clients(parsed: &ParsedFile) -> Vec<HttpCallSite> {
     let mut calls = Vec::new();
-    
+
     let root = parsed.tree.root_node();
     walk_for_http_calls(root, parsed, &mut calls, None, false);
-    
+
     calls
 }
 
@@ -132,7 +132,8 @@ fn detect_http_call(
         .and_then(|args| args.named_child(0))
         .map(|arg| {
             let text = parsed.text_for_node(&arg);
-            text.trim_matches(|c| c == '\'' || c == '"' || c == '`').to_string()
+            text.trim_matches(|c| c == '\'' || c == '"' || c == '`')
+                .to_string()
         });
 
     // Check for timeout configuration
@@ -241,32 +242,32 @@ fn is_http_method_call(callee: &str) -> bool {
 /// This prevents false positives from unrelated APIs like `config.get()`, `map.get()`.
 fn is_likely_http_client_receiver(callee: &str) -> bool {
     let callee_lower = callee.to_lowercase();
-    
+
     // Extract the receiver (everything before the last '.')
     let receiver = match callee_lower.rfind('.') {
         Some(pos) => &callee_lower[..pos],
         None => return false,
     };
-    
+
     // Allowlist of patterns that suggest HTTP client usage
     let http_client_patterns = [
-        "client",       // httpClient, apiClient, client
-        "http",         // http, httpService
-        "api",          // api, apiService
-        "service",      // someService (when combined with HTTP methods)
-        "request",      // request instance
-        "instance",     // axios instance
-        "agent",        // superagent instance
-        "fetch",        // fetch wrapper
+        "client",   // httpClient, apiClient, client
+        "http",     // http, httpService
+        "api",      // api, apiService
+        "service",  // someService (when combined with HTTP methods)
+        "request",  // request instance
+        "instance", // axios instance
+        "agent",    // superagent instance
+        "fetch",    // fetch wrapper
     ];
-    
+
     // Check if receiver contains any HTTP client pattern
     for pattern in http_client_patterns {
         if receiver.contains(pattern) {
             return true;
         }
     }
-    
+
     // Also allow if receiver ends with common HTTP client suffixes
     let http_suffixes = ["client", "api", "http", "service"];
     for suffix in http_suffixes {
@@ -274,7 +275,7 @@ fn is_likely_http_client_receiver(callee: &str) -> bool {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -299,23 +300,23 @@ fn check_timeout(parsed: &ParsedFile, node: &tree_sitter::Node, callee: &str) ->
     // Check arguments for timeout configuration
     if let Some(args_node) = node.child_by_field_name("arguments") {
         let args_text = parsed.text_for_node(&args_node);
-        
+
         // Common timeout patterns
         if args_text.contains("timeout") {
             return true;
         }
-        
+
         // Fetch with AbortController/signal
         if callee == "fetch" && args_text.contains("signal") {
             return true;
         }
-        
+
         // Axios timeout option
         if callee.starts_with("axios") && args_text.contains("timeout") {
             return true;
         }
     }
-    
+
     false
 }
 
@@ -347,21 +348,21 @@ fn check_error_handling(node: &tree_sitter::Node) -> bool {
 fn check_retry(parsed: &ParsedFile, node: &tree_sitter::Node) -> bool {
     if let Some(args_node) = node.child_by_field_name("arguments") {
         let args_text = parsed.text_for_node(&args_node);
-        
+
         // Check for retry configuration
         if args_text.contains("retry") || args_text.contains("retries") {
             return true;
         }
     }
-    
+
     false
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parse::typescript::parse_typescript_file;
     use crate::parse::ast::FileId;
+    use crate::parse::typescript::parse_typescript_file;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_summarize(source: &str) -> Vec<HttpCallSite> {
@@ -472,7 +473,11 @@ const config = vscode.workspace.getConfiguration("unfault");
 config.get<boolean>("enable", true);
 "#;
         let calls = parse_and_summarize(src);
-        assert!(calls.is_empty(), "config.get should not be detected as HTTP call. Found: {:?}", calls);
+        assert!(
+            calls.is_empty(),
+            "config.get should not be detected as HTTP call. Found: {:?}",
+            calls
+        );
     }
 
     #[test]
@@ -483,7 +488,11 @@ const map = new Map();
 map.get("key");
 "#;
         let calls = parse_and_summarize(src);
-        assert!(calls.is_empty(), "map.get should not be detected as HTTP call. Found: {:?}", calls);
+        assert!(
+            calls.is_empty(),
+            "map.get should not be detected as HTTP call. Found: {:?}",
+            calls
+        );
     }
 
     #[test]

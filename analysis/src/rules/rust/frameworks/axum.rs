@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{
@@ -57,7 +57,8 @@ impl Rule for AxumMissingErrorHandlerRule {
             benefits: vec![Benefit::Reliability, Benefit::Correctness],
             prerequisites: vec![],
             notes: Some(
-                "Worth fixing even in demos: panics/unwraps in request paths crash or 500.".to_string(),
+                "Worth fixing even in demos: panics/unwraps in request paths crash or 500."
+                    .to_string(),
             ),
         })
     }
@@ -109,10 +110,10 @@ impl Rule for AxumMissingErrorHandlerRule {
 
                 let line = func.location.range.start_line + 1;
 
-                 let title = format!(
-                     "Axum handler '{}' contains .unwrap() without error handling",
-                     func.name
-                 );
+                let title = format!(
+                    "Axum handler '{}' contains .unwrap() without error handling",
+                    func.name
+                );
 
                 let description = format!(
                     "The async function '{}' at line {} appears to be an Axum handler \
@@ -133,8 +134,7 @@ impl Rule for AxumMissingErrorHandlerRule {
                          Ok(Json(data))\n\
                      }}\n\
                      ```",
-                    func.name,
-                    line
+                    func.name, line
                 );
 
                 let fix_preview = format!(
@@ -168,7 +168,7 @@ impl Rule for AxumMissingErrorHandlerRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -217,10 +217,12 @@ impl Rule for AxumMissingCorsRule {
             decision_level: DecisionLevel::ApiContract,
             benefits: vec![Benefit::Operability, Benefit::Security],
             prerequisites: vec![
-                "Decide allowed origins/methods/headers (avoid allow-any in production)".to_string(),
+                "Decide allowed origins/methods/headers (avoid allow-any in production)"
+                    .to_string(),
             ],
             notes: Some(
-                "For demos, permissive CORS may be acceptable; for production, be explicit.".to_string(),
+                "For demos, permissive CORS may be acceptable; for production, be explicit."
+                    .to_string(),
             ),
         })
     }
@@ -244,9 +246,10 @@ impl Rule for AxumMissingCorsRule {
             }
 
             // Check if CORS is configured
-            let has_cors = rust.uses.iter().any(|u| {
-                u.path.contains("tower_http::cors") || u.path.contains("CorsLayer")
-            });
+            let has_cors = rust
+                .uses
+                .iter()
+                .any(|u| u.path.contains("tower_http::cors") || u.path.contains("CorsLayer"));
 
             if has_cors {
                 continue;
@@ -254,7 +257,8 @@ impl Rule for AxumMissingCorsRule {
 
             // Look for Router creation
             let has_router = rust.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("Router::new") || c.function_call.callee_expr.contains("Router::with_state")
+                c.function_call.callee_expr.contains("Router::new")
+                    || c.function_call.callee_expr.contains("Router::with_state")
             });
 
             if !has_router {
@@ -263,7 +267,8 @@ impl Rule for AxumMissingCorsRule {
 
             // Find the router creation location
             if let Some(router_call) = rust.calls.iter().find(|c| {
-                c.function_call.callee_expr.contains("Router::new") || c.function_call.callee_expr.contains("Router::with_state")
+                c.function_call.callee_expr.contains("Router::new")
+                    || c.function_call.callee_expr.contains("Router::with_state")
             }) {
                 let line = router_call.function_call.location.line;
 
@@ -295,21 +300,23 @@ impl Rule for AxumMissingCorsRule {
                     line
                 );
 
-                let fix_preview = 
-                    "use tower_http::cors::{CorsLayer, Any};\n\n\
+                let fix_preview = "use tower_http::cors::{CorsLayer, Any};\n\n\
                      let cors = CorsLayer::new()\n    \
                          .allow_origin(Any)\n    \
                          .allow_methods(Any)\n    \
                          .allow_headers(Any);\n\n\
                      let app = Router::new()\n    \
                          // ... routes ...\n    \
-                         .layer(cors);".to_string();
+                         .layer(cors);"
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Add CORS middleware - use tower_http::cors::CorsLayer".to_string(),
+                        replacement:
+                            "// TODO: Add CORS middleware - use tower_http::cors::CorsLayer"
+                                .to_string(),
                     }],
                 };
 
@@ -327,15 +334,10 @@ impl Rule for AxumMissingCorsRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
-                    tags: vec![
-                        "rust".into(),
-                        "axum".into(),
-                        "cors".into(),
-                        "web".into(),
-                    ],
+                    tags: vec!["rust".into(), "axum".into(), "cors".into(), "web".into()],
                 });
             }
         }
@@ -397,7 +399,8 @@ impl Rule for AxumMissingTimeoutRule {
                     || u.path.contains("TimeoutLayer")
                     || u.path.contains("tower::timeout")
             }) || rust.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("TimeoutLayer") || c.function_call.callee_expr.contains("timeout")
+                c.function_call.callee_expr.contains("TimeoutLayer")
+                    || c.function_call.callee_expr.contains("timeout")
             });
 
             if has_timeout {
@@ -406,7 +409,8 @@ impl Rule for AxumMissingTimeoutRule {
 
             // Look for Router creation
             let has_router = rust.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("Router::new") || c.function_call.callee_expr.contains("Router::with_state")
+                c.function_call.callee_expr.contains("Router::new")
+                    || c.function_call.callee_expr.contains("Router::with_state")
             });
 
             if !has_router {
@@ -415,7 +419,8 @@ impl Rule for AxumMissingTimeoutRule {
 
             // Find the router creation location
             if let Some(router_call) = rust.calls.iter().find(|c| {
-                c.function_call.callee_expr.contains("Router::new") || c.function_call.callee_expr.contains("Router::with_state")
+                c.function_call.callee_expr.contains("Router::new")
+                    || c.function_call.callee_expr.contains("Router::with_state")
             }) {
                 let line = router_call.function_call.location.line;
 
@@ -444,12 +449,12 @@ impl Rule for AxumMissingTimeoutRule {
                     line
                 );
 
-                let fix_preview = 
-                    "use tower_http::timeout::TimeoutLayer;\n\
+                let fix_preview = "use tower_http::timeout::TimeoutLayer;\n\
                      use std::time::Duration;\n\n\
                      let app = Router::new()\n    \
                          // ... routes ...\n    \
-                         .layer(TimeoutLayer::new(Duration::from_secs(30)));".to_string();
+                         .layer(TimeoutLayer::new(Duration::from_secs(30)));"
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
@@ -473,15 +478,10 @@ impl Rule for AxumMissingTimeoutRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
-                    tags: vec![
-                        "rust".into(),
-                        "axum".into(),
-                        "timeout".into(),
-                        "web".into(),
-                    ],
+                    tags: vec!["rust".into(), "axum".into(), "timeout".into(), "web".into()],
                 });
             }
         }
@@ -493,12 +493,12 @@ impl Rule for AxumMissingTimeoutRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
+    use std::sync::Arc;
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
         let sf = SourceFile {
@@ -568,7 +568,9 @@ fn create_router() {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.axum.missing_cors"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.axum.missing_cors"),
             "Should detect missing CORS"
         );
     }
@@ -630,7 +632,10 @@ fn create_router() {
             .iter()
             .filter(|f| f.rule_id == "rust.axum.missing_cors")
             .collect();
-        assert!(cors_findings.is_empty(), "Should not flag when CORS present");
+        assert!(
+            cors_findings.is_empty(),
+            "Should not flag when CORS present"
+        );
     }
 
     #[tokio::test]
@@ -655,7 +660,9 @@ fn create_router() {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.axum.missing_timeout"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.axum.missing_timeout"),
             "Should detect missing timeout"
         );
     }

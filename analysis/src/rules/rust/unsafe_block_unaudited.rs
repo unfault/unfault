@@ -32,10 +32,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::UnsafeOp;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::UnsafeOp;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -87,10 +87,10 @@ impl Rule for RustUnsafeBlockUnauditedRule {
                 }
 
                 let line = unsafe_block.location.range.start_line + 1;
-                
+
                 // Determine severity based on operations in the block
                 let severity = determine_severity(&unsafe_block.operations);
-                
+
                 // Generate description based on detected operations
                 let ops_description = describe_operations(&unsafe_block.operations);
 
@@ -139,7 +139,8 @@ impl Rule for RustUnsafeBlockUnauditedRule {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// SAFETY: TODO: Document the safety invariants here".to_string(),
+                        replacement: "// SAFETY: TODO: Document the safety invariants here"
+                            .to_string(),
                     }],
                 };
 
@@ -157,7 +158,7 @@ impl Rule for RustUnsafeBlockUnauditedRule {
                     column: Some(unsafe_block.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -220,8 +221,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -265,7 +266,9 @@ fn dangerous(ptr: *mut i32) {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.unsafe_block_unaudited"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.unsafe_block_unaudited"),
             "Should detect unsafe block without SAFETY comment"
         );
     }

@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{
@@ -53,7 +53,9 @@ impl Rule for TypescriptHttpMissingRetryRule {
                 "Only retry idempotent operations (or add idempotency keys)".to_string(),
                 "Define which failures are retryable and apply backoff + max attempts".to_string(),
             ],
-            notes: Some("Retries can increase load during outages; tune carefully and measure.".to_string()),
+            notes: Some(
+                "Retries can increase load during outages; tune carefully and measure.".to_string(),
+            ),
         })
     }
 
@@ -119,7 +121,7 @@ impl Rule for TypescriptHttpMissingRetryRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Add retry logic with exponential backoff".to_string()),
                     tags: vec!["http".into(), "retry".into(), "resilience".into()],

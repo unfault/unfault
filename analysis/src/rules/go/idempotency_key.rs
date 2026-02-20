@@ -2,14 +2,14 @@
 //!
 //! Detects POST/PUT/DELETE endpoints without idempotency key handling.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::idempotency_key;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -27,10 +27,10 @@ impl GoIdempotencyKeyRule {
     /// Check if a function looks like an HTTP handler based on its parameters
     fn is_http_handler(func: &crate::semantics::go::model::GoFunction) -> bool {
         func.params.iter().any(|p| {
-            p.param_type.contains("http.ResponseWriter") ||
-            p.param_type.contains("*gin.Context") ||
-            p.param_type.contains("echo.Context") ||
-            p.param_type.contains("*fiber.Ctx")
+            p.param_type.contains("http.ResponseWriter")
+                || p.param_type.contains("*gin.Context")
+                || p.param_type.contains("echo.Context")
+                || p.param_type.contains("*fiber.Ctx")
         })
     }
 
@@ -38,27 +38,27 @@ impl GoIdempotencyKeyRule {
     fn is_mutating_function(name: &str) -> bool {
         let lower = name.to_lowercase();
         // Check for read-only prefixes that should NOT be considered mutating
-        let is_read_only = lower.starts_with("get") ||
-            lower.starts_with("list") ||
-            lower.starts_with("fetch") ||
-            lower.starts_with("find") ||
-            lower.starts_with("search") ||
-            lower.starts_with("query") ||
-            lower.starts_with("read");
-        
+        let is_read_only = lower.starts_with("get")
+            || lower.starts_with("list")
+            || lower.starts_with("fetch")
+            || lower.starts_with("find")
+            || lower.starts_with("search")
+            || lower.starts_with("query")
+            || lower.starts_with("read");
+
         if is_read_only {
             return false;
         }
-        
-        lower.contains("create") ||
-        lower.contains("post") ||
-        lower.contains("update") ||
-        lower.contains("put") ||
-        lower.contains("delete") ||
-        lower.contains("payment") ||
-        lower.contains("order") ||
-        lower.contains("transfer") ||
-        lower.contains("submit")
+
+        lower.contains("create")
+            || lower.contains("post")
+            || lower.contains("update")
+            || lower.contains("put")
+            || lower.contains("delete")
+            || lower.contains("payment")
+            || lower.contains("order")
+            || lower.contains("transfer")
+            || lower.contains("submit")
     }
 }
 
@@ -92,8 +92,7 @@ impl Rule for GoIdempotencyKeyRule {
             // Check for idempotency handling patterns in calls
             let has_idempotency = go.calls.iter().any(|c| {
                 let callee = c.function_call.callee_expr.to_lowercase();
-                callee.contains("idempotency") ||
-                callee.contains("idempotent")
+                callee.contains("idempotency") || callee.contains("idempotent")
             });
 
             if has_idempotency {
@@ -103,13 +102,13 @@ impl Rule for GoIdempotencyKeyRule {
             // Check for mutating calls that suggest state modification
             let has_mutating_calls = go.calls.iter().any(|c| {
                 let callee = &c.function_call.callee_expr;
-                callee.ends_with(".Create") ||
-                callee.ends_with(".Insert") ||
-                callee.ends_with(".Update") ||
-                callee.ends_with(".Delete") ||
-                callee.ends_with(".Exec") ||
-                callee.starts_with("http.Post") ||
-                callee.contains("SendMessage")
+                callee.ends_with(".Create")
+                    || callee.ends_with(".Insert")
+                    || callee.ends_with(".Update")
+                    || callee.ends_with(".Delete")
+                    || callee.ends_with(".Exec")
+                    || callee.starts_with("http.Post")
+                    || callee.contains("SendMessage")
             });
 
             for func in &go.functions {
@@ -129,7 +128,8 @@ impl Rule for GoIdempotencyKeyRule {
                         description: Some(
                             "Mutating operations should support idempotency keys to safely \
                              handle retries. Accept an 'X-Idempotency-Key' header and track \
-                             processed keys to prevent duplicate operations.".to_string()
+                             processed keys to prevent duplicate operations."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -139,15 +139,14 @@ impl Rule for GoIdempotencyKeyRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertAfterLine { line },
-                                replacement: 
-"\t// Extract idempotency key from request
+                                replacement: "\t// Extract idempotency key from request
 \tidempotencyKey := r.Header.Get(\"X-Idempotency-Key\")
 \tif idempotencyKey == \"\" {
 \t\thttp.Error(w, \"X-Idempotency-Key header required\", http.StatusBadRequest)
@@ -162,7 +161,8 @@ impl Rule for GoIdempotencyKeyRule {
 \t}
 \t
 \t// After successful operation:
-\t// idempotencyStore.Set(idempotencyKey, result, 24*time.Hour)".to_string(),
+\t// idempotencyStore.Set(idempotencyKey, result, 24*time.Hour)"
+                                    .to_string(),
                             }],
                         }),
                         fix_preview: Some("Add idempotency key handling".to_string()),
@@ -179,8 +179,8 @@ impl Rule for GoIdempotencyKeyRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::go::model::GoFunction;
     use crate::parse::ast::{AstLocation, TextRange};
+    use crate::semantics::go::model::GoFunction;
 
     #[test]
     fn test_rule_metadata() {

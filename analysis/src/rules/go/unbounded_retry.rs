@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -79,10 +79,7 @@ impl Rule for GoUnboundedRetryRule {
                 if is_retryable_call {
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "Potential unbounded retry loop at line {}",
-                        line
-                    );
+                    let title = format!("Potential unbounded retry loop at line {}", line);
 
                     let description = format!(
                         "The call to `{}` at line {} appears to be in a retry loop without \
@@ -106,9 +103,9 @@ impl Rule for GoUnboundedRetryRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("// Use retry-go with exponential backoff".to_string()),
                         tags: vec![
@@ -139,7 +136,8 @@ fn generate_retry_patch(file_id: FileId, line: u32) -> FilePatch {
 //     retry.DelayType(retry.BackOffDelay),
 //     retry.MaxJitter(100*time.Millisecond),
 // )
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

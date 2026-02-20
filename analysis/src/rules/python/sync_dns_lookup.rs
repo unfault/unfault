@@ -32,11 +32,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::python::model::{ImportInsertionType, PyCallSite, PyFileSemantics, PyImport};
 use crate::semantics::SourceSemantics;
+use crate::semantics::python::model::{ImportInsertionType, PyCallSite, PyFileSemantics, PyImport};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -99,9 +99,7 @@ impl DnsLookupType {
     fn description(&self) -> &'static str {
         match self {
             DnsLookupType::GetHostByName => "gethostbyname() performs synchronous DNS lookup",
-            DnsLookupType::GetHostByNameEx => {
-                "gethostbyname_ex() performs synchronous DNS lookup"
-            }
+            DnsLookupType::GetHostByNameEx => "gethostbyname_ex() performs synchronous DNS lookup",
             DnsLookupType::GetHostByAddr => "gethostbyaddr() performs synchronous reverse DNS",
             DnsLookupType::GetAddrInfo => "getaddrinfo() performs synchronous address resolution",
             DnsLookupType::GetNameInfo => "getnameinfo() performs synchronous name resolution",
@@ -167,11 +165,18 @@ impl Rule for PythonSyncDnsLookupRule {
 
             // Use stdlib_import since we're adding "import asyncio"
             let import_line = py.import_insertion_line_for(ImportInsertionType::stdlib_import());
-            
+
             // Check all calls for DNS lookups
             for call in &py.calls {
                 if let Some(lookup) = detect_dns_lookup(call, py) {
-                    findings.push(create_finding(self.id(), &lookup, *file_id, &py.path, &py.imports, import_line));
+                    findings.push(create_finding(
+                        self.id(),
+                        &lookup,
+                        *file_id,
+                        &py.path,
+                        &py.imports,
+                        import_line,
+                    ));
                 }
             }
         }
@@ -237,9 +242,9 @@ fn detect_dns_lookup(call: &PyCallSite, py: &PyFileSemantics) -> Option<SyncDnsL
 
 /// Check if a function is directly imported
 fn has_direct_import(py: &PyFileSemantics, func_name: &str) -> bool {
-    py.imports.iter().any(|imp| {
-        imp.module == "socket" && imp.names.iter().any(|n| n == func_name || n == "*")
-    })
+    py.imports
+        .iter()
+        .any(|imp| imp.module == "socket" && imp.names.iter().any(|n| n == func_name || n == "*"))
 }
 
 fn create_finding(
@@ -303,11 +308,7 @@ result = await resolver.query(hostname, 'A')"#,
         Severity::Medium
     };
 
-    let confidence = if lookup.in_async_context {
-        0.90
-    } else {
-        0.85
-    };
+    let confidence = if lookup.in_async_context { 0.90 } else { 0.85 };
 
     RuleFinding {
         rule_id: rule_id.to_string(),
@@ -321,9 +322,9 @@ result = await resolver.query(hostname, 'A')"#,
         file_path: file_path.to_string(),
         line: Some(lookup.line),
         column: Some(lookup.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -338,27 +339,34 @@ result = await resolver.query(hostname, 'A')"#,
 
 /// Check if asyncio is already imported
 fn has_asyncio_import(imports: &[PyImport]) -> bool {
-    imports.iter().any(|imp| {
-        imp.module == "asyncio" || imp.names.iter().any(|n| n == "asyncio")
-    })
+    imports
+        .iter()
+        .any(|imp| imp.module == "asyncio" || imp.names.iter().any(|n| n == "asyncio"))
 }
 
-fn generate_async_dns_patch(lookup: &SyncDnsLookup, file_id: FileId, imports: &[PyImport], import_insertion_line: u32) -> FilePatch {
+fn generate_async_dns_patch(
+    lookup: &SyncDnsLookup,
+    file_id: FileId,
+    imports: &[PyImport],
+    import_insertion_line: u32,
+) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // If in async context and we have byte offsets, use ReplaceBytes for direct code fix
     if lookup.in_async_context && lookup.start_byte > 0 && lookup.end_byte > lookup.start_byte {
         // Only add asyncio import if not already present
         if !has_asyncio_import(imports) {
             hunks.push(PatchHunk {
-                range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+                range: PatchRange::InsertBeforeLine {
+                    line: import_insertion_line,
+                },
                 replacement: "import asyncio\n".to_string(),
             });
         }
-        
+
         // Generate async replacement using asyncio.get_event_loop()
         let args_trimmed = lookup.args_repr.trim_matches(|c| c == '(' || c == ')');
-        
+
         let replacement = match lookup.lookup_type {
             DnsLookupType::GetHostByName => {
                 // socket.gethostbyname(hostname) -> (await asyncio.get_event_loop().getaddrinfo(hostname, None))[0][4][0]
@@ -396,7 +404,7 @@ fn generate_async_dns_patch(lookup: &SyncDnsLookup, file_id: FileId, imports: &[
                 )
             }
         };
-        
+
         hunks.push(PatchHunk {
             range: PatchRange::ReplaceBytes {
                 start: lookup.start_byte,
@@ -408,14 +416,18 @@ fn generate_async_dns_patch(lookup: &SyncDnsLookup, file_id: FileId, imports: &[
         // Fallback: not in async context or no byte offsets - use comment-based patch
         if !has_asyncio_import(imports) {
             hunks.push(PatchHunk {
-                range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+                range: PatchRange::InsertBeforeLine {
+                    line: import_insertion_line,
+                },
                 replacement: "import asyncio\n".to_string(),
             });
         }
-        
+
         // Generate the async replacement suggestion as a comment
         let replacement = match lookup.lookup_type {
-            DnsLookupType::GetHostByName | DnsLookupType::GetHostByNameEx | DnsLookupType::GetAddrInfo => {
+            DnsLookupType::GetHostByName
+            | DnsLookupType::GetHostByNameEx
+            | DnsLookupType::GetAddrInfo => {
                 format!(
                     "# Fix: Replace socket.{} with async DNS:\n\
                      # loop = asyncio.get_event_loop()\n\
@@ -440,17 +452,14 @@ fn generate_async_dns_patch(lookup: &SyncDnsLookup, file_id: FileId, imports: &[
                 )
             }
         };
-        
+
         hunks.push(PatchHunk {
             range: PatchRange::InsertBeforeLine { line: lookup.line },
             replacement,
         });
     }
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -458,8 +467,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::python::build_python_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::python::build_python_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -612,7 +621,10 @@ async def resolve(host):
         let rule = PythonSyncDnsLookupRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(findings.is_empty(), "Should not detect without socket import");
+        assert!(
+            findings.is_empty(),
+            "Should not detect without socket import"
+        );
     }
 
     #[tokio::test]

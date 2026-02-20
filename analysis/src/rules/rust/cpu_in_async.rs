@@ -28,8 +28,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -225,9 +225,7 @@ fn detect_cpu_intensive_operation(callee: &str) -> Option<CpuOperationType> {
 fn is_offloaded_to_blocking(callee: &str, context_calls: &[&str]) -> bool {
     // Check if spawn_blocking is in the surrounding context
     context_calls.iter().any(|c| {
-        c.contains("spawn_blocking")
-            || c.contains("block_in_place")
-            || c.contains("rayon::")
+        c.contains("spawn_blocking") || c.contains("block_in_place") || c.contains("rayon::")
     }) || callee.contains("spawn_blocking")
 }
 
@@ -275,14 +273,14 @@ impl Rule for RustCpuInAsyncRule {
                     continue;
                 }
 
-                if let Some(op_type) = detect_cpu_intensive_operation(&call.function_call.callee_expr) {
+                if let Some(op_type) =
+                    detect_cpu_intensive_operation(&call.function_call.callee_expr)
+                {
                     // Get surrounding calls for context check
                     let context_calls: Vec<&str> = rust
                         .calls
                         .iter()
-                        .filter(|c| {
-                            c.function_name == call.function_name
-                        })
+                        .filter(|c| c.function_name == call.function_name)
                         .map(|c| c.function_call.callee_expr.as_str())
                         .collect();
 
@@ -305,12 +303,7 @@ impl Rule for RustCpuInAsyncRule {
                         end_byte: call.end_byte,
                     };
 
-                    findings.push(create_finding(
-                        self.id(),
-                        &cpu_call,
-                        *file_id,
-                        &rust.path,
-                    ));
+                    findings.push(create_finding(self.id(), &cpu_call, *file_id, &rust.path));
                 }
             }
         }
@@ -364,7 +357,11 @@ async fn {func}() {{
     }}).await?;
 }}"#,
         func = cpu_call.async_function,
-        callee = cpu_call.callee.split("::").last().unwrap_or(&cpu_call.callee)
+        callee = cpu_call
+            .callee
+            .split("::")
+            .last()
+            .unwrap_or(&cpu_call.callee)
     );
 
     let patch = FilePatch {
@@ -391,9 +388,9 @@ async fn {func}() {{
         file_path: file_path.to_string(),
         line: Some(cpu_call.line),
         column: Some(cpu_call.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -411,8 +408,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -469,9 +466,21 @@ mod tests {
 
     #[test]
     fn cpu_operation_type_descriptions_are_meaningful() {
-        assert!(CpuOperationType::JsonProcessing.description().contains("JSON"));
-        assert!(CpuOperationType::Cryptography.description().contains("cryptographic"));
-        assert!(CpuOperationType::Compression.description().contains("compression"));
+        assert!(
+            CpuOperationType::JsonProcessing
+                .description()
+                .contains("JSON")
+        );
+        assert!(
+            CpuOperationType::Cryptography
+                .description()
+                .contains("cryptographic")
+        );
+        assert!(
+            CpuOperationType::Compression
+                .description()
+                .contains("compression")
+        );
     }
 
     #[tokio::test]

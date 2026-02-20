@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -84,10 +84,7 @@ impl Rule for PythonRecursiveNoBaseCaseRule {
 
             for func in recursive_funcs {
                 if !func.has_apparent_base_case {
-                    let title = format!(
-                        "Recursive function '{}' may lack base case",
-                        func.name
-                    );
+                    let title = format!("Recursive function '{}' may lack base case", func.name);
 
                     let description = format!(
                         "The function '{}' appears to call itself recursively but no clear base case \
@@ -112,9 +109,9 @@ impl Rule for PythonRecursiveNoBaseCaseRule {
                         file_path: py.path.clone(),
                         line: Some(func.line),
                         column: Some(func.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -132,7 +129,9 @@ impl Rule for PythonRecursiveNoBaseCaseRule {
     }
 }
 
-fn detect_recursive_functions(py: &crate::semantics::python::model::PyFileSemantics) -> Vec<RecursiveFunction> {
+fn detect_recursive_functions(
+    py: &crate::semantics::python::model::PyFileSemantics,
+) -> Vec<RecursiveFunction> {
     let mut recursive_funcs = Vec::new();
 
     // Check each function for recursive calls
@@ -162,8 +161,9 @@ fn detect_recursive_functions(py: &crate::semantics::python::model::PyFileSemant
             //
             // Since we don't have full AST access here, we use heuristics based on
             // the function structure and calls
-            
-            let has_apparent_base_case = check_for_base_case(py, func_name, func_start_line, func_end_line);
+
+            let has_apparent_base_case =
+                check_for_base_case(py, func_name, func_start_line, func_end_line);
 
             recursive_funcs.push(RecursiveFunction {
                 name: func_name.clone(),
@@ -192,8 +192,12 @@ fn check_for_base_case(
             for param in &func.params {
                 if let Some(default) = &param.default {
                     // Common base case defaults: 0, 1, None, [], {}
-                    if default == "0" || default == "1" || default == "None"
-                        || default == "[]" || default == "{}" {
+                    if default == "0"
+                        || default == "1"
+                        || default == "None"
+                        || default == "[]"
+                        || default == "{}"
+                    {
                         return true;
                     }
                 }
@@ -242,14 +246,11 @@ fn get_fix_preview(func: &RecursiveFunction) -> String {
     )
 }
 
-fn generate_base_case_patch(
-    func: &RecursiveFunction,
-    file_id: FileId,
-) -> FilePatch {
+fn generate_base_case_patch(func: &RecursiveFunction, file_id: FileId) -> FilePatch {
     // Generate a base case template based on the function
     let async_prefix = if func.is_async { "async " } else { "" };
     let await_prefix = if func.is_async { "await " } else { "" };
-    
+
     let replacement = format!(
         "# Fix: Add base case to prevent infinite recursion:\n\
          # {async_prefix}def {name}(n, ...):\n\
@@ -264,9 +265,7 @@ fn generate_base_case_patch(
     FilePatch {
         file_id,
         hunks: vec![PatchHunk {
-            range: PatchRange::InsertBeforeLine {
-                line: func.line,
-            },
+            range: PatchRange::InsertBeforeLine { line: func.line },
             replacement,
         }],
     }
@@ -329,8 +328,11 @@ def factorial(n):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(!findings.is_empty(), "Should detect recursive function without base case");
+
+        assert!(
+            !findings.is_empty(),
+            "Should detect recursive function without base case"
+        );
         assert_eq!(findings[0].rule_id, "python.recursive_no_base_case");
     }
 
@@ -348,8 +350,11 @@ def multiply(a, b):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.is_empty(), "Should not flag non-recursive functions");
+
+        assert!(
+            findings.is_empty(),
+            "Should not flag non-recursive functions"
+        );
     }
 
     #[tokio::test]
@@ -363,7 +368,7 @@ async def fetch_all(urls):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect async recursive function
         if !findings.is_empty() {
             assert!(findings[0].tags.contains(&"recursion".to_string()));
@@ -400,7 +405,7 @@ def recurse(x):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             let finding = &findings[0];
             assert_eq!(finding.rule_id, "python.recursive_no_base_case");
@@ -428,7 +433,7 @@ def is_odd(n):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect both recursive functions
         assert!(findings.len() >= 1, "Should detect recursive functions");
     }
@@ -461,7 +466,7 @@ def list_recent_sessions(limit=10):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should NOT flag _build_session_summary as recursive
         // because the call to it is from list_recent_sessions, not from itself
         assert!(
@@ -491,7 +496,7 @@ def instrument_app(app):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should NOT flag instrument_app as recursive
         // because FastAPIInstrumentor.instrument_app() is a method call on a different class
         assert!(

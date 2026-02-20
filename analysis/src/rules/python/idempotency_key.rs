@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::idempotency_key;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::idempotency_key;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -79,7 +79,9 @@ impl Rule for PythonMissingIdempotencyKeyRule {
                 }
 
                 // Check if idempotency key is present in args
-                if call.args_repr.contains("idempotency_key") || call.args_repr.contains("idempotency-key") {
+                if call.args_repr.contains("idempotency_key")
+                    || call.args_repr.contains("idempotency-key")
+                {
                     continue;
                 }
 
@@ -122,7 +124,7 @@ impl Rule for PythonMissingIdempotencyKeyRule {
                     column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -166,7 +168,9 @@ fn is_payment_operation(callee: &str) -> bool {
         "create_transfer",
     ];
 
-    payment_patterns.iter().any(|pattern| callee.contains(pattern))
+    payment_patterns
+        .iter()
+        .any(|pattern| callee.contains(pattern))
 }
 
 /// Generate idempotency patch that modifies the payment call to add idempotency_key parameter.
@@ -182,7 +186,7 @@ fn generate_idempotency_call_patch(
 
     // First, add the helper function as an import
     let import_str = "import hashlib\n\ndef generate_idempotency_key(prefix: str, *args) -> str:\n    \"\"\"Generate a deterministic idempotency key from inputs.\"\"\"\n    data = f\"{prefix}:\" + \":\".join(str(a) for a in args)\n    return hashlib.sha256(data.encode()).hexdigest()[:32]\n\n";
-    
+
     hunks.push(PatchHunk {
         range: PatchRange::InsertBeforeLine { line: import_line },
         replacement: import_str.to_string(),
@@ -191,7 +195,7 @@ fn generate_idempotency_call_patch(
     // Then, modify the call to add idempotency_key parameter
     // Parse the existing args and add idempotency_key
     let args_inner = args_repr.trim_start_matches('(').trim_end_matches(')');
-    
+
     // Build the new call with idempotency_key added
     let new_call = if args_inner.is_empty() {
         format!(
@@ -263,7 +267,8 @@ def create_transfer(destination: str, amount: int, transfer_group: str):
         transfer_group=transfer_group,
         idempotency_key=idempotency_key,
     )
-    return transfer"#.to_string()
+    return transfer"#
+            .to_string()
     } else {
         r#"# Generic idempotency pattern for payment operations
 import hashlib
@@ -327,7 +332,8 @@ def idempotent(key_func):
 @idempotent(key_func=lambda order_id, amount: f"payment:{order_id}")
 def process_payment(order_id: str, amount: float):
     # This function is now idempotent
-    return payment_gateway.charge(amount)"#.to_string()
+    return payment_gateway.charge(amount)"#
+            .to_string()
     }
 }
 

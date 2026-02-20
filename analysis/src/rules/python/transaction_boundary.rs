@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -62,7 +62,10 @@ impl Rule for PythonMissingTransactionBoundaryRule {
             let has_orm = py.imports.iter().any(|imp| {
                 imp.module.contains("sqlalchemy")
                     || imp.module.contains("django")
-                    || imp.names.iter().any(|n| n == "Session" || n == "transaction")
+                    || imp
+                        .names
+                        .iter()
+                        .any(|n| n == "Session" || n == "transaction")
             });
 
             if !has_orm {
@@ -70,9 +73,11 @@ impl Rule for PythonMissingTransactionBoundaryRule {
             }
 
             // Count database write operations in file-level calls
-            let db_writes: Vec<_> = py.calls.iter().filter(|call| {
-                is_db_write_operation(&call.function_call.callee_expr)
-            }).collect();
+            let db_writes: Vec<_> = py
+                .calls
+                .iter()
+                .filter(|call| is_db_write_operation(&call.function_call.callee_expr))
+                .collect();
 
             if db_writes.len() < 2 {
                 continue;
@@ -85,7 +90,9 @@ impl Rule for PythonMissingTransactionBoundaryRule {
                     || call.function_call.callee_expr.contains("atomic")
                     || call.function_call.callee_expr.contains("commit")
             }) || py.imports.iter().any(|imp| {
-                imp.names.iter().any(|n| n == "transaction" || n == "atomic")
+                imp.names
+                    .iter()
+                    .any(|n| n == "transaction" || n == "atomic")
             });
 
             if has_transaction {
@@ -123,11 +130,16 @@ impl Rule for PythonMissingTransactionBoundaryRule {
                 dimension: Dimension::Correctness,
                 file_id: *file_id,
                 file_path: py.path.clone(),
-                line: Some(db_writes.first().map(|c| c.function_call.location.line + 1).unwrap_or(1)),
+                line: Some(
+                    db_writes
+                        .first()
+                        .map(|c| c.function_call.location.line + 1)
+                        .unwrap_or(1),
+                ),
                 column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                end_line: None,
+                end_column: None,
+                byte_range: None,
                 patch: Some(patch),
                 fix_preview: Some(fix_preview),
                 tags: vec![
@@ -159,7 +171,9 @@ fn is_db_write_operation(callee: &str) -> bool {
         ".flush",
     ];
 
-    write_patterns.iter().any(|pattern| callee.contains(pattern))
+    write_patterns
+        .iter()
+        .any(|pattern| callee.contains(pattern))
 }
 
 /// Generate transaction patch with actual imports and context manager wrapper.
@@ -240,7 +254,8 @@ def create_order(db: Session = Depends(get_db)):
         db.add(order)
         payment = Payment(order_id=order.id, ...)
         db.add(payment)
-    return {"order_id": order.id}"#.to_string()
+    return {"order_id": order.id}"#
+        .to_string()
 }
 
 #[cfg(test)]

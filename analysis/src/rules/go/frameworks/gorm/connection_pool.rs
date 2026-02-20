@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -50,9 +50,10 @@ impl Rule for GormConnectionPoolRule {
             };
 
             // Check if GORM is imported
-            let has_gorm = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("gorm.io/gorm")
-            });
+            let has_gorm = go_sem
+                .imports
+                .iter()
+                .any(|imp| imp.path.contains("gorm.io/gorm"));
 
             if !has_gorm {
                 continue;
@@ -104,9 +105,9 @@ impl Rule for GormConnectionPoolRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("// Configure connection pool settings".to_string()),
                         tags: vec![
@@ -134,7 +135,8 @@ fn generate_pool_patch(file_id: FileId, line: u32) -> FilePatch {
 // sqlDB.SetMaxIdleConns(10)           // Idle connections in pool
 // sqlDB.SetMaxOpenConns(100)          // Max open connections
 // sqlDB.SetConnMaxLifetime(time.Hour) // Connection max lifetime
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

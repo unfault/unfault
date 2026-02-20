@@ -31,8 +31,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -67,7 +67,6 @@ const IO_PATTERNS: &[(&str, &str)] = &[
     (".write(", "write operation"),
     (".read_to_end(", "read all"),
     (".read_to_string(", "read to string"),
-    
     // Network I/O
     ("TcpStream::connect", "TCP connect"),
     ("UdpSocket::bind", "UDP bind"),
@@ -76,14 +75,12 @@ const IO_PATTERNS: &[(&str, &str)] = &[
     (".send().await", "HTTP send"),
     ("client.get(", "HTTP GET"),
     ("http_client.get(", "HTTP GET"),
-    
     // Database I/O
     ("sqlx::query", "database query"),
     (".fetch_one(", "database fetch"),
     (".fetch_all(", "database fetch"),
     (".execute(", "database execute"),
     ("diesel::", "database operation"),
-    
     // Other I/O
     ("Command::new", "process spawn"),
     ("std::io::stdin", "stdin read"),
@@ -139,7 +136,10 @@ impl Rule for RustIoInHotPathRule {
 
                 // Skip calls on string literals (false positives from documentation/examples)
                 // This includes regular strings ("...") and raw strings (r#"..."#, r"...")
-                if callee.starts_with('"') || callee.starts_with("r#\"") || callee.starts_with("r\"") {
+                if callee.starts_with('"')
+                    || callee.starts_with("r#\"")
+                    || callee.starts_with("r\"")
+                {
                     continue;
                 }
 
@@ -153,10 +153,13 @@ impl Rule for RustIoInHotPathRule {
                     let func_name = call.function_name.clone().unwrap_or_default();
                     let has_caching = rust.calls.iter().any(|c| {
                         c.function_name.as_deref() == Some(&func_name)
-                            && CACHED_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
-                    }) || rust.uses.iter().any(|u| {
-                        CACHED_PATTERNS.iter().any(|p| u.path.contains(p))
-                    });
+                            && CACHED_PATTERNS
+                                .iter()
+                                .any(|p| c.function_call.callee_expr.contains(p))
+                    }) || rust
+                        .uses
+                        .iter()
+                        .any(|u| CACHED_PATTERNS.iter().any(|p| u.path.contains(p)));
 
                     if has_caching {
                         continue;
@@ -164,10 +167,7 @@ impl Rule for RustIoInHotPathRule {
 
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "I/O in hot path: {} inside loop",
-                        io_type
-                    );
+                    let title = format!("I/O in hot path: {} inside loop", io_type);
 
                     let description = format!(
                         "The {} operation '{}' at line {} is inside a loop.\n\n\
@@ -222,9 +222,9 @@ for item in items {{
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -271,10 +271,7 @@ for item in items {{
             for (func_name, line, io_count) in functions_with_many_io {
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),
-                    title: format!(
-                        "Function '{}' has {} I/O operations",
-                        func_name, io_count
-                    ),
+                    title: format!("Function '{}' has {} I/O operations", func_name, io_count),
                     description: Some(format!(
                         "Function '{}' at line {} contains {} I/O operations.\n\
                         Consider batching, caching, or parallelizing these operations.",
@@ -290,14 +287,10 @@ for item in items {{
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: None,
                     fix_preview: None,
-                    tags: vec![
-                        "rust".into(),
-                        "io".into(),
-                        "performance".into(),
-                    ],
+                    tags: vec!["rust".into(), "io".into(), "performance".into()],
                 });
             }
         }
@@ -311,8 +304,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -375,7 +368,7 @@ fn process_items() {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // No loop = no hot path finding
         let hot_path_findings: Vec<_> = findings
             .iter()

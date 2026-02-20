@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -142,7 +142,7 @@ impl Rule for FastApiHealthCheckRule {
                     column: Some(location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(file_patch),
                     fix_preview: Some(format!(
                         "# Add health check endpoints:\n{}",
@@ -201,8 +201,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::python::model::PyFileSemantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::python::model::PyFileSemantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -416,10 +416,7 @@ app = FastAPI()
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        assert_eq!(
-            findings[0].rule_id,
-            "python.fastapi.missing_health_check"
-        );
+        assert_eq!(findings[0].rule_id, "python.fastapi.missing_health_check");
     }
 
     #[tokio::test]
@@ -484,7 +481,11 @@ app = FastAPI()
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
         let patch = findings[0].patch.as_ref().unwrap();
-        assert_eq!(patch.hunks.len(), 1, "Should have one hunk for health endpoints");
+        assert_eq!(
+            patch.hunks.len(),
+            1,
+            "Should have one hunk for health endpoints"
+        );
     }
 
     #[tokio::test]

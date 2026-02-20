@@ -3,14 +3,14 @@
 //! Detects append() calls in loops without pre-allocating slice capacity,
 //! which causes multiple memory allocations and copies.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -61,12 +61,12 @@ impl Rule for GoSliceAppendInLoopRule {
             for call in &go.calls {
                 if call.function_call.callee_expr == "append" && call.in_loop {
                     let line = call.function_call.location.line;
-                    
+
                     // Check if there's a make() call with capacity nearby
                     // This is heuristic - we look for make with 3 args (type, len, cap)
                     let has_prealloc = go.calls.iter().any(|c| {
-                        c.function_call.callee_expr == "make" && 
-                        c.args_repr.matches(',').count() >= 2 // make([]T, len, cap)
+                        c.function_call.callee_expr == "make"
+                            && c.args_repr.matches(',').count() >= 2 // make([]T, len, cap)
                     });
 
                     if !has_prealloc {
@@ -116,9 +116,9 @@ impl Rule for GoSliceAppendInLoopRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some("Pre-allocate with make([]T, 0, cap)".to_string()),
                             tags: vec![
@@ -128,7 +128,7 @@ impl Rule for GoSliceAppendInLoopRule {
                                 "slice".into(),
                             ],
                         });
-                        
+
                         // Only one finding per file for append in loop
                         break;
                     }
@@ -145,8 +145,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -171,7 +171,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_append_without_prealloc() {
         let rule = GoSliceAppendInLoopRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func collect(items []int) []int {
@@ -181,17 +182,23 @@ func collect(items []int) []int {
     }
     return result
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.iter().any(|f| f.rule_id == "go.slice_append_in_loop"));
+
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == "go.slice_append_in_loop")
+        );
     }
 
     #[tokio::test]
     async fn test_no_finding_with_prealloc() {
         let rule = GoSliceAppendInLoopRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func collect(items []int) []int {
@@ -201,11 +208,13 @@ func collect(items []int) []int {
     }
     return result
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
-        let append_findings: Vec<_> = findings.iter()
+
+        let append_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.slice_append_in_loop")
             .collect();
         assert!(append_findings.is_empty());

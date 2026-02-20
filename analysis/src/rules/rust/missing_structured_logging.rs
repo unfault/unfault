@@ -26,8 +26,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingKind, Severity};
@@ -106,11 +106,14 @@ impl Rule for RustMissingStructuredLoggingRule {
             };
 
             // Check if structured logging is already used in the file
-            let uses_structured = rust.uses.iter().any(|u| {
-                STRUCTURED_LOG_PATTERNS.iter().any(|p| u.path.contains(p))
-            }) || rust.macro_invocations.iter().any(|m| {
-                STRUCTURED_LOG_PATTERNS.iter().any(|p| m.name.contains(p))
-            });
+            let uses_structured = rust
+                .uses
+                .iter()
+                .any(|u| STRUCTURED_LOG_PATTERNS.iter().any(|p| u.path.contains(p)))
+                || rust
+                    .macro_invocations
+                    .iter()
+                    .any(|m| STRUCTURED_LOG_PATTERNS.iter().any(|p| m.name.contains(p)));
 
             // If already using tracing, check for mixed usage
             if uses_structured {
@@ -141,7 +144,8 @@ impl Rule for RustMissingStructuredLoggingRule {
                                 - Missing span context in log:: calls\n\
                                 - Confusion in log aggregation systems\n\n\
                                 Use `tracing::{}` instead for consistency.",
-                                macro_inv.name, line,
+                                macro_inv.name,
+                                line,
                                 macro_inv.name.replace("log::", "")
                             )),
                             kind: FindingKind::AntiPattern,
@@ -152,9 +156,9 @@ impl Rule for RustMissingStructuredLoggingRule {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(macro_inv.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
@@ -170,18 +174,17 @@ impl Rule for RustMissingStructuredLoggingRule {
                                 }],
                             }),
                             fix_preview: None,
-                            tags: vec![
-                                "rust".into(),
-                                "logging".into(),
-                                "observability".into(),
-                            ],
+                            tags: vec!["rust".into(), "logging".into(), "observability".into()],
                         });
                     }
                 }
             } else {
                 // Not using tracing at all - check for any logging
                 let has_logging = rust.macro_invocations.iter().any(|m| {
-                    !m.in_test && UNSTRUCTURED_LOG_PATTERNS.iter().any(|p| m.name == *p || m.name.starts_with(p))
+                    !m.in_test
+                        && UNSTRUCTURED_LOG_PATTERNS
+                            .iter()
+                            .any(|p| m.name == *p || m.name.starts_with(p))
                 });
 
                 if has_logging {
@@ -253,11 +256,11 @@ fn process_order(order_id: u64) {
                 }
 
                 // Check for format string interpolation in log args
-                if macro_inv.args.contains("{}") && 
-                   (macro_inv.name.contains("info") || 
-                    macro_inv.name.contains("debug") ||
-                    macro_inv.name.contains("warn") ||
-                    macro_inv.name.contains("error"))
+                if macro_inv.args.contains("{}")
+                    && (macro_inv.name.contains("info")
+                        || macro_inv.name.contains("debug")
+                        || macro_inv.name.contains("warn")
+                        || macro_inv.name.contains("error"))
                 {
                     // This is fine for message, but check if values should be fields
                     let has_potential_fields = macro_inv.args.contains("user")
@@ -288,16 +291,12 @@ fn process_order(order_id: u64) {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(macro_inv.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: None,
-                            tags: vec![
-                                "rust".into(),
-                                "logging".into(),
-                                "structured".into(),
-                            ],
+                            tags: vec!["rust".into(), "logging".into(), "structured".into()],
                         });
                     }
                 }
@@ -313,8 +312,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

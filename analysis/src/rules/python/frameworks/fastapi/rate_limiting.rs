@@ -74,7 +74,9 @@ impl Rule for FastApiMissingRateLimitingRule {
 
             // Check for rate limit decorators on routes - check via calls
             let has_rate_limit_decorator = py.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("limit") || c.function_call.callee_expr.contains("rate") || c.function_call.callee_expr.contains("throttle")
+                c.function_call.callee_expr.contains("limit")
+                    || c.function_call.callee_expr.contains("rate")
+                    || c.function_call.callee_expr.contains("throttle")
             });
 
             if has_rate_limit_decorator {
@@ -83,11 +85,11 @@ impl Rule for FastApiMissingRateLimitingRule {
 
             let title = "FastAPI application lacks rate limiting protection".to_string();
 
-            let description = 
-                "This FastAPI application does not have rate limiting configured. \
+            let description = "This FastAPI application does not have rate limiting configured. \
                  Without rate limiting, the API is vulnerable to abuse, DoS attacks, \
                  and resource exhaustion. Consider using slowapi or fastapi-limiter \
-                 to add rate limiting protection.".to_string();
+                 to add rate limiting protection."
+                .to_string();
 
             let fix_preview = generate_fix_preview();
 
@@ -109,9 +111,9 @@ impl Rule for FastApiMissingRateLimitingRule {
                 file_path: py.path.clone(),
                 line: Some(1),
                 column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                end_line: None,
+                end_column: None,
+                byte_range: None,
                 patch: Some(patch),
                 fix_preview: Some(fix_preview),
                 tags: vec![
@@ -154,7 +156,9 @@ limiter = Limiter(key_func=get_remote_address)
 
 "#;
     hunks.push(PatchHunk {
-        range: PatchRange::InsertBeforeLine { line: import_line + 4 },
+        range: PatchRange::InsertBeforeLine {
+            line: import_line + 4,
+        },
         replacement: limiter_code.to_string(),
     });
 
@@ -206,7 +210,8 @@ async def limited_route(request: Request):
 # Add rate limiter as dependency
 @app.get("/api/strict", dependencies=[Depends(RateLimiter(times=2, seconds=5))])
 async def strict_route():
-    return {"message": "Only 2 requests per 5 seconds"}"#.to_string()
+    return {"message": "Only 2 requests per 5 seconds"}"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -329,6 +334,12 @@ app = FastAPI()
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(findings[0].fix_preview.is_some());
-        assert!(findings[0].fix_preview.as_ref().unwrap().contains("slowapi"));
+        assert!(
+            findings[0]
+                .fix_preview
+                .as_ref()
+                .unwrap()
+                .contains("slowapi")
+        );
     }
 }

@@ -10,9 +10,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::sql_injection;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -77,11 +77,11 @@ impl Rule for GoSqlInjectionRule {
                 // Check if the arguments look like string concatenation or interpolation
                 let args = &call.args_repr;
                 let risk = analyze_sql_injection_risk(args);
-                
+
                 if let Some(injection_pattern) = risk {
                     let line = call.function_call.location.line;
                     let col = call.function_call.location.column;
-                    
+
                     let title = format!(
                         "Potential SQL injection in {}",
                         call.function_call.callee_expr
@@ -96,9 +96,7 @@ impl Rule for GoSqlInjectionRule {
                          db.Query(\"SELECT * FROM users WHERE id = $1\", userID)\n\
                          ```\n\n\
                          Or use a query builder that handles escaping properly.",
-                        call.function_call.callee_expr,
-                        line,
-                        injection_pattern
+                        call.function_call.callee_expr, line, injection_pattern
                     );
 
                     let patch = generate_parameterized_query_patch(call, *file_id);
@@ -124,9 +122,9 @@ impl Rule for GoSqlInjectionRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(col),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -167,7 +165,9 @@ fn is_sql_query_method(callee: &str) -> bool {
         "NamedExec",
     ];
 
-    sql_methods.iter().any(|method| callee.ends_with(method) || callee.contains(&format!(".{}", method)))
+    sql_methods
+        .iter()
+        .any(|method| callee.ends_with(method) || callee.contains(&format!(".{}", method)))
 }
 
 /// Patterns that indicate SQL injection risk
@@ -258,8 +258,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

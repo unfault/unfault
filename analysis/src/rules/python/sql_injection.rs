@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::sql_injection;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::sql_injection;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -99,7 +99,7 @@ impl Rule for PythonSqlInjectionRule {
             // Check assignments for SQL queries with string interpolation
             for assignment in &py.assignments {
                 let value = &assignment.value_repr;
-                
+
                 // Check if it looks like a SQL query
                 if !Self::is_sql_query(value) {
                     continue;
@@ -118,7 +118,7 @@ impl Rule for PythonSqlInjectionRule {
 
                 if is_dangerous {
                     let location = &assignment.location;
-                    
+
                     // Generate a fix suggestion
                     let sql_template = Self::extract_sql_template(value);
                     let fix_suggestion = format!(
@@ -141,9 +141,7 @@ impl Rule for PythonSqlInjectionRule {
                                     "# FIXME: SQL injection risk! Replace with parameterized query:\n\
                                      # {} = \"{}\"\n\
                                      # cursor.execute({}, (param1, param2, ...))\n",
-                                    assignment.target,
-                                    sql_template,
-                                    assignment.target
+                                    assignment.target, sql_template, assignment.target
                                 ),
                             },
                         ],
@@ -173,9 +171,9 @@ impl Rule for PythonSqlInjectionRule {
                         file_path: py.path.clone(),
                         line: Some(location.range.start_line + 1),
                         column: Some(location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(file_patch),
                         fix_preview: Some(fix_suggestion),
                         tags: vec![
@@ -191,14 +189,16 @@ impl Rule for PythonSqlInjectionRule {
             // Also check call sites for execute() calls with interpolated strings
             for call in &py.calls {
                 // Look for cursor.execute(), connection.execute(), etc.
-                if !call.function_call.callee_expr.ends_with(".execute") && !call.function_call.callee_expr.ends_with(".executemany") {
+                if !call.function_call.callee_expr.ends_with(".execute")
+                    && !call.function_call.callee_expr.ends_with(".executemany")
+                {
                     continue;
                 }
 
                 // Check the first argument (the SQL query)
                 if let Some(first_arg) = call.args.first() {
                     let value = &first_arg.value_repr;
-                    
+
                     if !Self::is_sql_query(value) {
                         continue;
                     }
@@ -217,21 +217,22 @@ impl Rule for PythonSqlInjectionRule {
                         let location = &call.function_call.location;
 
                         // Extract the cursor/connection variable name
-                        let cursor_var = call.function_call.callee_expr
+                        let cursor_var = call
+                            .function_call
+                            .callee_expr
                             .trim_end_matches(".execute")
                             .trim_end_matches(".executemany");
 
                         // Generate actual fix using ReplaceBytes for f-strings
                         let file_patch = if Self::is_fstring(value) {
                             // Transform f-string to parameterized query
-                            let (sql_template, params) = Self::transform_fstring_to_parameterized(value);
+                            let (sql_template, params) =
+                                Self::transform_fstring_to_parameterized(value);
                             let patched_call = format!(
                                 "{}.execute(\"{}\", ({}))",
-                                cursor_var,
-                                sql_template,
-                                params
+                                cursor_var, sql_template, params
                             );
-                            
+
                             FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
@@ -315,19 +316,19 @@ impl PythonSqlInjectionRule {
     fn extract_sql_template(s: &str) -> String {
         // Simple extraction - replace {var} with %s
         let mut result = s.to_string();
-        
+
         // Remove f-string prefix
         if result.starts_with("f\"") || result.starts_with("F\"") {
             result = result[2..].to_string();
         } else if result.starts_with("f'") || result.starts_with("F'") {
             result = result[2..].to_string();
         }
-        
+
         // Remove trailing quote
         if result.ends_with('"') || result.ends_with('\'') {
             result.pop();
         }
-        
+
         // Replace {var} patterns with %s
         let mut output = String::new();
         let mut in_brace = false;
@@ -341,35 +342,35 @@ impl PythonSqlInjectionRule {
                 output.push(ch);
             }
         }
-        
+
         output
     }
-    
+
     /// Transform an f-string SQL query to a parameterized query.
     /// Returns (sql_template, params_tuple_str)
     /// e.g., f"SELECT * FROM users WHERE id = {user_id} AND name = {name}"
     /// -> ("SELECT * FROM users WHERE id = %s AND name = %s", "user_id, name,")
     fn transform_fstring_to_parameterized(s: &str) -> (String, String) {
         let mut result = s.to_string();
-        
+
         // Remove f-string prefix
         if result.starts_with("f\"") || result.starts_with("F\"") {
             result = result[2..].to_string();
         } else if result.starts_with("f'") || result.starts_with("F'") {
             result = result[2..].to_string();
         }
-        
+
         // Remove trailing quote
         if result.ends_with('"') || result.ends_with('\'') {
             result.pop();
         }
-        
+
         // Extract variable names and build template
         let mut sql_template = String::new();
         let mut params = Vec::new();
         let mut in_brace = false;
         let mut current_var = String::new();
-        
+
         for ch in result.chars() {
             if ch == '{' {
                 in_brace = true;
@@ -388,7 +389,7 @@ impl PythonSqlInjectionRule {
                 sql_template.push(ch);
             }
         }
-        
+
         // Build params tuple string
         // For single param, need trailing comma: (param,)
         // For multiple params: (param1, param2,)
@@ -397,7 +398,7 @@ impl PythonSqlInjectionRule {
         } else {
             format!("{},", params.join(", "))
         };
-        
+
         (sql_template, params_str)
     }
 }
@@ -459,17 +460,23 @@ mod tests {
 
     #[test]
     fn detects_insert_query() {
-        assert!(PythonSqlInjectionRule::is_sql_query("INSERT INTO users VALUES (1, 'name')"));
+        assert!(PythonSqlInjectionRule::is_sql_query(
+            "INSERT INTO users VALUES (1, 'name')"
+        ));
     }
 
     #[test]
     fn detects_update_query() {
-        assert!(PythonSqlInjectionRule::is_sql_query("UPDATE users SET name = 'test'"));
+        assert!(PythonSqlInjectionRule::is_sql_query(
+            "UPDATE users SET name = 'test'"
+        ));
     }
 
     #[test]
     fn detects_delete_query() {
-        assert!(PythonSqlInjectionRule::is_sql_query("DELETE FROM users WHERE id = 1"));
+        assert!(PythonSqlInjectionRule::is_sql_query(
+            "DELETE FROM users WHERE id = 1"
+        ));
     }
 
     #[test]
@@ -481,24 +488,34 @@ mod tests {
 
     #[test]
     fn detects_fstring() {
-        assert!(PythonSqlInjectionRule::is_fstring("f\"SELECT * FROM users\""));
+        assert!(PythonSqlInjectionRule::is_fstring(
+            "f\"SELECT * FROM users\""
+        ));
         assert!(PythonSqlInjectionRule::is_fstring("f'SELECT * FROM users'"));
-        assert!(PythonSqlInjectionRule::is_fstring("F\"SELECT * FROM users\""));
+        assert!(PythonSqlInjectionRule::is_fstring(
+            "F\"SELECT * FROM users\""
+        ));
     }
 
     #[test]
     fn does_not_detect_regular_string_as_fstring() {
-        assert!(!PythonSqlInjectionRule::is_fstring("\"SELECT * FROM users\""));
+        assert!(!PythonSqlInjectionRule::is_fstring(
+            "\"SELECT * FROM users\""
+        ));
     }
 
     #[test]
     fn detects_format_method() {
-        assert!(PythonSqlInjectionRule::uses_format_method("\"SELECT * FROM users WHERE id = {}\".format(user_id)"));
+        assert!(PythonSqlInjectionRule::uses_format_method(
+            "\"SELECT * FROM users WHERE id = {}\".format(user_id)"
+        ));
     }
 
     #[test]
     fn detects_percent_formatting() {
-        assert!(PythonSqlInjectionRule::uses_percent_formatting("\"SELECT * FROM users WHERE id = %s\" % user_id"));
+        assert!(PythonSqlInjectionRule::uses_percent_formatting(
+            "\"SELECT * FROM users WHERE id = %s\" % user_id"
+        ));
     }
 
     // ==================== Finding Tests ====================
@@ -644,7 +661,7 @@ def hello():
     #[test]
     fn extract_sql_template_from_fstring() {
         let template = PythonSqlInjectionRule::extract_sql_template(
-            "f\"SELECT * FROM users WHERE id = {user_id}\""
+            "f\"SELECT * FROM users WHERE id = {user_id}\"",
         );
         assert_eq!(template, "SELECT * FROM users WHERE id = %s");
     }
@@ -652,7 +669,7 @@ def hello():
     #[test]
     fn extract_sql_template_with_multiple_vars() {
         let template = PythonSqlInjectionRule::extract_sql_template(
-            "f\"SELECT * FROM users WHERE id = {id} AND name = {name}\""
+            "f\"SELECT * FROM users WHERE id = {id} AND name = {name}\"",
         );
         assert_eq!(template, "SELECT * FROM users WHERE id = %s AND name = %s");
     }

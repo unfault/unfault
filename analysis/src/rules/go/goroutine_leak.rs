@@ -11,9 +11,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -68,7 +68,7 @@ impl Rule for GoGoroutineLeakRule {
 
             for goroutine in &go.goroutines {
                 // Check for potential leak patterns
-                
+
                 // Pattern 1: Goroutine without context parameter
                 if !goroutine.has_context_param && !goroutine.has_done_channel {
                     let title = "Goroutine without cancellation mechanism".to_string();
@@ -120,9 +120,9 @@ impl Rule for GoGoroutineLeakRule {
                         file_path: go.path.clone(),
                         line: Some(goroutine.line),
                         column: Some(goroutine.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -162,9 +162,9 @@ impl Rule for GoGoroutineLeakRule {
                         file_path: go.path.clone(),
                         line: Some(goroutine.line),
                         column: Some(goroutine.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None, // Complex fix, manual intervention needed
                         fix_preview: Some(
                             "// Use select with done channel:\n\
@@ -173,7 +173,7 @@ impl Rule for GoGoroutineLeakRule {
                              // case <-ctx.Done():\n\
                              //     return\n\
                              // }"
-                            .to_string(),
+                                .to_string(),
                         ),
                         tags: vec![
                             "go".into(),
@@ -193,17 +193,17 @@ impl Rule for GoGoroutineLeakRule {
 use crate::semantics::go::model::GoroutineSpawn;
 
 /// Generate a patch to add context cancellation to a goroutine.
-fn generate_context_cancellation_patch(
-    goroutine: &GoroutineSpawn,
-    file_id: FileId,
-) -> FilePatch {
+fn generate_context_cancellation_patch(goroutine: &GoroutineSpawn, file_id: FileId) -> FilePatch {
     // Suggest adding context.Done() check
     let body_comment = if goroutine.is_anonymous {
         "TODO: Move".to_string()
     } else {
-        goroutine.function_name.clone().unwrap_or_else(|| "original".to_string())
+        goroutine
+            .function_name
+            .clone()
+            .unwrap_or_else(|| "original".to_string())
     };
-    
+
     let replacement = format!(
         "go func(ctx context.Context) {{\n\
          \t\tselect {{\n\
@@ -233,8 +233,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

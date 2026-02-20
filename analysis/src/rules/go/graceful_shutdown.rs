@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::graceful_shutdown;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -54,22 +54,22 @@ impl Rule for GoMissingGracefulShutdownRule {
             };
 
             // Look for http.ListenAndServe without shutdown handling
-            let has_listen_and_serve = go_sem.calls.iter().any(|c| 
-                c.function_call.callee_expr.contains("ListenAndServe") || c.function_call.callee_expr.contains("http.ListenAndServe")
-            );
+            let has_listen_and_serve = go_sem.calls.iter().any(|c| {
+                c.function_call.callee_expr.contains("ListenAndServe")
+                    || c.function_call.callee_expr.contains("http.ListenAndServe")
+            });
 
             if !has_listen_and_serve {
                 continue;
             }
 
             // Check for graceful shutdown patterns
-            let has_shutdown = go_sem.calls.iter().any(|c| 
-                c.function_call.callee_expr.contains("Shutdown") || c.function_call.callee_expr.contains("server.Shutdown")
-            );
+            let has_shutdown = go_sem.calls.iter().any(|c| {
+                c.function_call.callee_expr.contains("Shutdown")
+                    || c.function_call.callee_expr.contains("server.Shutdown")
+            });
 
-            let has_signal_handling = go_sem.imports.iter().any(|i| 
-                i.path.contains("os/signal")
-            );
+            let has_signal_handling = go_sem.imports.iter().any(|i| i.path.contains("os/signal"));
 
             if has_shutdown && has_signal_handling {
                 continue;
@@ -80,10 +80,7 @@ impl Rule for GoMissingGracefulShutdownRule {
                 if call.function_call.callee_expr.contains("ListenAndServe") {
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "HTTP server at line {} lacks graceful shutdown",
-                        line
-                    );
+                    let title = format!("HTTP server at line {} lacks graceful shutdown", line);
 
                     let description = format!(
                         "The HTTP server at line {} does not implement graceful shutdown. \
@@ -107,11 +104,13 @@ impl Rule for GoMissingGracefulShutdownRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
-                        fix_preview: Some("// Add graceful shutdown with signal handling".to_string()),
+                        fix_preview: Some(
+                            "// Add graceful shutdown with signal handling".to_string(),
+                        ),
                         tags: vec![
                             "go".into(),
                             "graceful-shutdown".into(),
@@ -142,7 +141,8 @@ fn generate_shutdown_patch(file_id: FileId, line: u32) -> FilePatch {
 // ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 // defer cancel()
 // srv.Shutdown(ctx)
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -62,7 +62,10 @@ impl Rule for RedisConnectionPoolRule {
             // Look for redis.NewClient calls
             for call in &go_sem.calls {
                 let is_new_client = call.function_call.callee_expr.contains("redis.NewClient")
-                    || call.function_call.callee_expr.contains("redis.NewClusterClient")
+                    || call
+                        .function_call
+                        .callee_expr
+                        .contains("redis.NewClusterClient")
                     || call.function_call.callee_expr == "NewClient"
                     || call.function_call.callee_expr == "NewClusterClient";
 
@@ -106,9 +109,9 @@ impl Rule for RedisConnectionPoolRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("// Configure Redis connection pool".to_string()),
                         tags: vec![
@@ -142,7 +145,8 @@ fn generate_pool_patch(file_id: FileId, line: u32) -> FilePatch {
 //     WriteTimeout: 3 * time.Second,
 //     PoolTimeout:  4 * time.Second,
 // })
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

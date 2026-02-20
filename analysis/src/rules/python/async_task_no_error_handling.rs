@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
@@ -86,7 +86,7 @@ impl Rule for PythonAsyncTaskNoErrorHandlingRule {
             // Look for asyncio.create_task calls that are not assigned to a variable
             // This is detected by checking if the call is a standalone expression
             // (not part of an assignment)
-            
+
             for call in &py.calls {
                 let callee = &call.function_call.callee_expr;
 
@@ -95,7 +95,7 @@ impl Rule for PythonAsyncTaskNoErrorHandlingRule {
                     // Check if this call is likely fire-and-forget
                     // We can't perfectly detect this without more context,
                     // but we flag all create_task calls and suggest adding error handling
-                    
+
                     let fire_and_forget = FireAndForgetTask {
                         function_name: callee.clone(),
                         line: call.function_call.location.line,
@@ -106,12 +106,7 @@ impl Rule for PythonAsyncTaskNoErrorHandlingRule {
                         import_insertion_line: py.import_insertion_line(),
                     };
 
-                    let finding = create_finding(
-                        self.id(),
-                        &fire_and_forget,
-                        *file_id,
-                        &py.path,
-                    );
+                    let finding = create_finding(self.id(), &fire_and_forget, *file_id, &py.path);
                     findings.push(finding);
                 }
             }
@@ -127,10 +122,7 @@ fn create_finding(
     file_id: FileId,
     file_path: &str,
 ) -> RuleFinding {
-    let title = format!(
-        "Fire-and-forget async task: {}",
-        task.function_name
-    );
+    let title = format!("Fire-and-forget async task: {}", task.function_name);
 
     let description = format!(
         "asyncio.create_task() called without error handling. If the task raises \
@@ -159,9 +151,9 @@ fn create_finding(
         file_path: file_path.to_string(),
         line: Some(task.line),
         column: Some(task.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -173,10 +165,7 @@ fn create_finding(
     }
 }
 
-fn generate_error_handling_patch(
-    task: &FireAndForgetTask,
-    file_id: FileId,
-) -> FilePatch {
+fn generate_error_handling_patch(task: &FireAndForgetTask, file_id: FileId) -> FilePatch {
     let mut hunks = Vec::new();
 
     // Add a helper function import/definition at the top
@@ -189,9 +178,11 @@ fn generate_error_handling_patch(
         logging.getLogger(__name__).exception("Background task failed: %s", e)
 
 "#;
-    
+
     hunks.push(PatchHunk {
-        range: PatchRange::InsertBeforeLine { line: task.import_insertion_line },
+        range: PatchRange::InsertBeforeLine {
+            line: task.import_insertion_line,
+        },
         replacement: helper_code.to_string(),
     });
 
@@ -216,10 +207,7 @@ fn generate_error_handling_patch(
         replacement,
     });
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -325,7 +313,7 @@ asyncio.create_task(job())
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             let finding = &findings[0];
             assert_eq!(finding.rule_id, "python.async_task_no_error_handling");

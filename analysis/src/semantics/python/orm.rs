@@ -149,15 +149,15 @@ impl Default for LoopContext {
 pub fn summarize_orm_queries(parsed: &ParsedFile) -> Vec<OrmQueryCall> {
     let mut queries = Vec::new();
     let root = parsed.tree.root_node();
-    
+
     // First pass: collect all ORM queries with their locations
     let mut all_queries: Vec<(u32, String, OrmKind, Option<String>, usize, usize)> = Vec::new();
     collect_all_orm_queries(root, parsed, &mut all_queries);
-    
+
     // Track loop context during traversal
     let ctx = LoopContext::default();
     walk_for_orm_queries(root, parsed, &mut queries, ctx, &all_queries);
-    
+
     queries
 }
 
@@ -173,10 +173,11 @@ fn collect_all_orm_queries(
             if right.kind() == "call" {
                 if let Some(func_node) = right.child_by_field_name("function") {
                     let callee = parsed.text_for_node(&func_node);
-                    let args_text = right.child_by_field_name("arguments")
+                    let args_text = right
+                        .child_by_field_name("arguments")
                         .map(|n| parsed.text_for_node(&n))
                         .unwrap_or_default();
-                    
+
                     if let Some((orm_kind, _)) = detect_orm_pattern(&callee, &args_text) {
                         // Get the variable name
                         if let Some(left) = node.child_by_field_name("left") {
@@ -200,7 +201,7 @@ fn collect_all_orm_queries(
             }
         }
     }
-    
+
     // Recurse into children
     let child_count = node.child_count();
     for i in 0..child_count {
@@ -213,7 +214,7 @@ fn collect_all_orm_queries(
 /// Detect potential N+1 query patterns
 pub fn detect_n_plus_one_patterns(queries: &[OrmQueryCall]) -> Vec<NPlusOnePattern> {
     let mut patterns = Vec::new();
-    
+
     // Look for queries inside loops that don't have eager loading
     for query in queries {
         if (query.in_loop || query.in_comprehension) && !query.has_eager_loading {
@@ -224,13 +225,17 @@ pub fn detect_n_plus_one_patterns(queries: &[OrmQueryCall]) -> Vec<NPlusOnePatte
                 pattern_description: format!(
                     "{} query inside {} without eager loading",
                     query.orm_kind.as_str(),
-                    if query.in_loop { "loop" } else { "comprehension" }
+                    if query.in_loop {
+                        "loop"
+                    } else {
+                        "comprehension"
+                    }
                 ),
                 relationship_field: query.loop_variable.clone(),
             };
             patterns.push(pattern);
         }
-        
+
         // Check for relationship access patterns (lazy loading)
         if query.query_type == QueryType::RelationshipAccess && !query.has_eager_loading {
             let pattern = NPlusOnePattern {
@@ -245,7 +250,7 @@ pub fn detect_n_plus_one_patterns(queries: &[OrmQueryCall]) -> Vec<NPlusOnePatte
             patterns.push(pattern);
         }
     }
-    
+
     patterns
 }
 
@@ -258,23 +263,25 @@ fn walk_for_orm_queries(
 ) {
     // Update context based on current node
     let mut new_ctx = ctx.clone();
-    
+
     // Handle for loops - extract loop variable and try to find outer query
     if node.kind() == "for_statement" {
         new_ctx.in_loop = true;
-        
+
         // Extract loop variable
         if let Some(left) = node.child_by_field_name("left") {
             new_ctx.loop_variable = Some(parsed.text_for_node(&left));
         }
-        
+
         // Try to find the outer query from the iterable
         if let Some(right) = node.child_by_field_name("right") {
             let iterable_text = parsed.text_for_node(&right);
-            
+
             // Check if the iterable is a variable that was assigned an ORM query
             for (line, var_name, orm_kind, model_name, start_byte, end_byte) in all_queries {
-                if iterable_text == *var_name || iterable_text.starts_with(&format!("{}.", var_name)) {
+                if iterable_text == *var_name
+                    || iterable_text.starts_with(&format!("{}.", var_name))
+                {
                     new_ctx.outer_query = Some(OuterQueryInfo {
                         line: *line,
                         column: 1,
@@ -288,15 +295,16 @@ fn walk_for_orm_queries(
                     break;
                 }
             }
-            
+
             // Also check if the iterable is a direct ORM call
             if right.kind() == "call" {
                 if let Some(func_node) = right.child_by_field_name("function") {
                     let callee = parsed.text_for_node(&func_node);
-                    let args_text = right.child_by_field_name("arguments")
+                    let args_text = right
+                        .child_by_field_name("arguments")
                         .map(|n| parsed.text_for_node(&n))
                         .unwrap_or_default();
-                    
+
                     if let Some((orm_kind, _)) = detect_orm_pattern(&callee, &args_text) {
                         let location = parsed.location_for_node(&right);
                         let query_text = parsed.text_for_node(&right);
@@ -315,17 +323,20 @@ fn walk_for_orm_queries(
             }
         }
     }
-    
+
     if node.kind() == "while_statement" {
         new_ctx.in_loop = true;
     }
-    
+
     if matches!(
         node.kind(),
-        "list_comprehension" | "dictionary_comprehension" | "set_comprehension" | "generator_expression"
+        "list_comprehension"
+            | "dictionary_comprehension"
+            | "set_comprehension"
+            | "generator_expression"
     ) {
         new_ctx.in_comprehension = true;
-        
+
         // Try to extract the loop variable from comprehension
         // Comprehensions have a "for_in_clause" child
         let child_count = node.child_count();
@@ -337,9 +348,11 @@ fn walk_for_orm_queries(
                     }
                     if let Some(right) = child.child_by_field_name("right") {
                         let iterable_text = parsed.text_for_node(&right);
-                        
+
                         // Check if the iterable is a variable that was assigned an ORM query
-                        for (line, var_name, orm_kind, model_name, start_byte, end_byte) in all_queries {
+                        for (line, var_name, orm_kind, model_name, start_byte, end_byte) in
+                            all_queries
+                        {
                             if iterable_text == *var_name {
                                 new_ctx.outer_query = Some(OuterQueryInfo {
                                     line: *line,
@@ -359,7 +372,7 @@ fn walk_for_orm_queries(
             }
         }
     }
-    
+
     // Check for ORM query patterns
     if node.kind() == "call" {
         if let Some(mut query) = analyze_orm_call(node, parsed, &new_ctx) {
@@ -368,7 +381,7 @@ fn walk_for_orm_queries(
             queries.push(query);
         }
     }
-    
+
     // Check for attribute access (potential lazy loading)
     if node.kind() == "attribute" {
         if let Some(mut query) = analyze_attribute_access(node, parsed, &new_ctx) {
@@ -377,7 +390,7 @@ fn walk_for_orm_queries(
             queries.push(query);
         }
     }
-    
+
     // Recurse into children
     let child_count = node.child_count();
     for i in 0..child_count {
@@ -394,26 +407,27 @@ fn analyze_orm_call(
 ) -> Option<OrmQueryCall> {
     let func_node = node.child_by_field_name("function")?;
     let callee = parsed.text_for_node(&func_node);
-    
+
     // Get arguments text for eager loading detection
-    let args_text = node.child_by_field_name("arguments")
+    let args_text = node
+        .child_by_field_name("arguments")
         .map(|n| parsed.text_for_node(&n))
         .unwrap_or_default();
-    
+
     // Detect ORM kind and query type
     let (orm_kind, query_type) = detect_orm_pattern(&callee, &args_text)?;
-    
+
     // Check for eager loading patterns
     let has_eager_loading = check_eager_loading(&callee, &args_text);
-    
+
     // Extract model name if possible
     let model_name = extract_model_name(&callee);
-    
+
     // Get the full query text
     let query_text = Some(parsed.text_for_node(&node));
-    
+
     let location = parsed.location_for_node(&node);
-    
+
     Some(OrmQueryCall {
         orm_kind,
         query_type,
@@ -441,20 +455,21 @@ fn analyze_attribute_access(
     if !ctx.in_loop && !ctx.in_comprehension {
         return None;
     }
-    
-    let attr_name = node.child_by_field_name("attribute")
+
+    let attr_name = node
+        .child_by_field_name("attribute")
         .map(|n| parsed.text_for_node(&n))?;
-    
+
     // Common relationship attribute patterns
     // This is heuristic-based - we look for common naming patterns
     let is_potential_relationship = is_relationship_attribute(&attr_name);
-    
+
     if !is_potential_relationship {
         return None;
     }
-    
+
     let location = parsed.location_for_node(&node);
-    
+
     Some(OrmQueryCall {
         orm_kind: OrmKind::Unknown,
         query_type: QueryType::RelationshipAccess,
@@ -502,7 +517,7 @@ fn detect_orm_pattern(callee: &str, _args_text: &str) -> Option<(OrmKind, QueryT
     if callee.ends_with(".filter_by(") || callee.contains(".filter_by(") {
         return Some((OrmKind::SqlAlchemy, QueryType::Select));
     }
-    
+
     // Django ORM patterns
     if callee.contains(".objects.") {
         if callee.contains(".get(") {
@@ -528,7 +543,7 @@ fn detect_orm_pattern(callee: &str, _args_text: &str) -> Option<(OrmKind, QueryT
         }
         return Some((OrmKind::Django, QueryType::Select));
     }
-    
+
     // Tortoise ORM patterns (async)
     if callee.contains(".filter(") && (callee.contains("await") || callee.starts_with("await ")) {
         return Some((OrmKind::Tortoise, QueryType::Select));
@@ -537,12 +552,12 @@ fn detect_orm_pattern(callee: &str, _args_text: &str) -> Option<(OrmKind, QueryT
         // Could be Django or Tortoise
         return Some((OrmKind::Unknown, QueryType::Select));
     }
-    
+
     // SQLModel patterns (similar to SQLAlchemy)
     if callee.contains("select(") {
         return Some((OrmKind::SqlModel, QueryType::Select));
     }
-    
+
     // Peewee patterns
     if callee.contains(".select(") {
         return Some((OrmKind::Peewee, QueryType::Select));
@@ -550,7 +565,7 @@ fn detect_orm_pattern(callee: &str, _args_text: &str) -> Option<(OrmKind, QueryT
     if callee.contains(".create(") {
         return Some((OrmKind::Peewee, QueryType::Insert));
     }
-    
+
     None
 }
 
@@ -568,7 +583,7 @@ fn check_eager_loading(callee: &str, args_text: &str) -> bool {
     if callee.contains("contains_eager") || args_text.contains("contains_eager") {
         return true;
     }
-    
+
     // Django eager loading
     if callee.contains("select_related") || args_text.contains("select_related") {
         return true;
@@ -576,12 +591,12 @@ fn check_eager_loading(callee: &str, args_text: &str) -> bool {
     if callee.contains("prefetch_related") || args_text.contains("prefetch_related") {
         return true;
     }
-    
+
     // Tortoise eager loading
     if callee.contains("prefetch_related") || args_text.contains("prefetch_related") {
         return true;
     }
-    
+
     false
 }
 
@@ -593,7 +608,7 @@ fn extract_model_name(callee: &str) -> Option<String> {
             return Some(parts[0].to_string());
         }
     }
-    
+
     None
 }
 
@@ -604,12 +619,18 @@ fn is_relationship_attribute(attr_name: &str) -> bool {
         // Django-style reverse relation suffix
         "_set",
         // Explicit relationship names commonly used in ORMs
-        "author", "owner", "parent", "creator", "profile",
-        "related", "refs", "references",
+        "author",
+        "owner",
+        "parent",
+        "creator",
+        "profile",
+        "related",
+        "refs",
+        "references",
     ];
-    
+
     let lower = attr_name.to_lowercase();
-    
+
     // Check exact matches or suffix matches
     for pattern in relationship_patterns {
         if pattern.starts_with('_') {
@@ -624,7 +645,7 @@ fn is_relationship_attribute(attr_name: &str) -> bool {
             }
         }
     }
-    
+
     false
 }
 
@@ -712,7 +733,8 @@ for item in items:
 "#;
         let queries = parse_and_get_orm_queries(src);
         // Should not detect ORM queries in simple attribute access
-        let orm_queries: Vec<_> = queries.iter()
+        let orm_queries: Vec<_> = queries
+            .iter()
             .filter(|q| q.query_type != QueryType::RelationshipAccess)
             .collect();
         assert!(orm_queries.is_empty());

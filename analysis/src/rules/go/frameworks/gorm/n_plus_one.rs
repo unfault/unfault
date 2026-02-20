@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::n_plus_one;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -50,9 +50,10 @@ impl Rule for GormNPlusOneRule {
             };
 
             // Check if GORM is imported
-            let has_gorm = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("gorm.io/gorm")
-            });
+            let has_gorm = go_sem
+                .imports
+                .iter()
+                .any(|imp| imp.path.contains("gorm.io/gorm"));
 
             if !has_gorm {
                 continue;
@@ -75,14 +76,12 @@ impl Rule for GormNPlusOneRule {
 
                     // Check if Preload is used
                     let has_preload = go_sem.calls.iter().any(|c| {
-                        c.function_call.callee_expr.contains("Preload") || c.function_call.callee_expr.contains("Joins")
+                        c.function_call.callee_expr.contains("Preload")
+                            || c.function_call.callee_expr.contains("Joins")
                     });
 
                     if !has_preload {
-                        let title = format!(
-                            "Potential N+1 query at line {}",
-                            line
-                        );
+                        let title = format!("Potential N+1 query at line {}", line);
 
                         let description = format!(
                             "Database query at line {} inside a loop without Preload could cause \
@@ -106,11 +105,13 @@ impl Rule for GormNPlusOneRule {
                             file_path: go_sem.path.clone(),
                             line: Some(line),
                             column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
-                            fix_preview: Some("// Use Preload() to eager load related data".to_string()),
+                            fix_preview: Some(
+                                "// Use Preload() to eager load related data".to_string(),
+                            ),
                             tags: vec![
                                 "go".into(),
                                 "gorm".into(),
@@ -137,7 +138,8 @@ fn generate_preload_patch(file_id: FileId, line: u32) -> FilePatch {
 // db.Preload("RelatedModel").Find(&items)
 // Or use Joins for single-table optimization:
 // db.Joins("RelatedModel").Find(&items)
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

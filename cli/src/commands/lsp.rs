@@ -53,16 +53,16 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use log::debug;
 use dashmap::DashMap;
+use log::debug;
 use serde::{Deserialize, Serialize};
 use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::output::{FileCentrality, FunctionInfo, IrFinding};
 use crate::config::Config;
 use crate::exit_codes::*;
+use crate::output::{FileCentrality, FunctionInfo, IrFinding};
 use crate::session::{WorkspaceScanner, build_ir_cached, compute_workspace_id, get_git_remote};
 
 // Import patch types from unfault-core for parsing patch_json
@@ -274,17 +274,15 @@ impl UnfaultLsp {
                 self.log_debug("Using pre-built IR (skipping rebuild)");
                 ir
             }
-            None => {
-                match build_ir_cached(&project_root, None, self.verbose) {
-                    Ok(result) => result.ir,
-                    Err(e) => {
-                        let msg = format!("Failed to build IR: {}", e);
-                        self.log_debug(&msg);
-                        self.client.show_message(MessageType::WARNING, msg).await;
-                        return;
-                    }
+            None => match build_ir_cached(&project_root, None, self.verbose) {
+                Ok(result) => result.ir,
+                Err(e) => {
+                    let msg = format!("Failed to build IR: {}", e);
+                    self.log_debug(&msg);
+                    self.client.show_message(MessageType::WARNING, msg).await;
+                    return;
                 }
-            }
+            },
         };
 
         // Check if IR is too large (warn at 5MB, fail at 10MB)
@@ -299,11 +297,26 @@ impl UnfaultLsp {
         debug!("[LSP] Graph file_count: {}", graph_stats.file_count);
         debug!("[LSP] Graph function_count: {}", graph_stats.function_count);
         debug!("[LSP] Graph class_count: {}", graph_stats.class_count);
-        debug!("[LSP] Graph external_module_count: {}", graph_stats.external_module_count);
-        debug!("[LSP] Graph import_edge_count: {}", graph_stats.import_edge_count);
-        debug!("[LSP] Graph contains_edge_count: {}", graph_stats.contains_edge_count);
-        debug!("[LSP] Graph uses_library_edge_count: {}", graph_stats.uses_library_edge_count);
-        debug!("[LSP] Graph calls_edge_count: {}", graph_stats.calls_edge_count);
+        debug!(
+            "[LSP] Graph external_module_count: {}",
+            graph_stats.external_module_count
+        );
+        debug!(
+            "[LSP] Graph import_edge_count: {}",
+            graph_stats.import_edge_count
+        );
+        debug!(
+            "[LSP] Graph contains_edge_count: {}",
+            graph_stats.contains_edge_count
+        );
+        debug!(
+            "[LSP] Graph uses_library_edge_count: {}",
+            graph_stats.uses_library_edge_count
+        );
+        debug!(
+            "[LSP] Graph calls_edge_count: {}",
+            graph_stats.calls_edge_count
+        );
         debug!("[LSP] Project root: {:?}", project_root);
         debug!("[LSP] File being analyzed: {:?}", file_path);
 
@@ -315,9 +328,12 @@ impl UnfaultLsp {
                 let json_size_mb = json_size as f64 / (1024.0 * 1024.0);
                 let serialize_ms = serialize_start.elapsed().as_millis();
                 debug!("[LSP] Serialization time: {}ms", serialize_ms);
-                debug!("[LSP] IR JSON payload size: {} bytes ({:.2} MB)", json_size, json_size_mb);
+                debug!(
+                    "[LSP] IR JSON payload size: {} bytes ({:.2} MB)",
+                    json_size, json_size_mb
+                );
                 json
-            },
+            }
             Err(e) => {
                 let msg = format!("Failed to serialize IR: {}", e);
                 self.log_debug(&msg);
@@ -328,7 +344,11 @@ impl UnfaultLsp {
 
         // Check payload size and warn if too large
         let payload_size_mb = ir_json.len() as f64 / (1024.0 * 1024.0);
-        debug!("[LSP] IR JSON payload size: {} bytes ({:.2} MB)", ir_json.len(), payload_size_mb);
+        debug!(
+            "[LSP] IR JSON payload size: {} bytes ({:.2} MB)",
+            ir_json.len(),
+            payload_size_mb
+        );
         if payload_size_mb > 5.0 {
             let msg = format!(
                 "Project is large ({:.1}MB). Analysis may be slow or fail. Consider using a smaller workspace.",
@@ -984,7 +1004,7 @@ impl UnfaultLsp {
 
         // Find the file node by path
         let file_idx = graph.find_file_by_path(file_path)?;
-        
+
         // Get the file_id from the node
         let file_id = match &graph.graph[file_idx] {
             GraphNode::File { file_id, .. } => *file_id,
@@ -999,7 +1019,7 @@ impl UnfaultLsp {
         // Get direct importers
         let direct_importer_ids = graph.get_importers(file_id);
         debug!("[LSP] Direct importer IDs: {:?}", direct_importer_ids);
-        
+
         // Convert FileIds to paths
         let direct_dependents: Vec<String> = direct_importer_ids
             .iter()
@@ -1017,7 +1037,10 @@ impl UnfaultLsp {
 
         // Get transitive importers (up to depth 3 for consistency with API)
         let transitive = graph.get_transitive_importers(file_id, 3);
-        debug!("[LSP] Transitive importers (depth 3): {} entries", transitive.len());
+        debug!(
+            "[LSP] Transitive importers (depth 3): {} entries",
+            transitive.len()
+        );
         let all_dependents: Vec<String> = transitive
             .iter()
             .filter_map(|&(fid, _depth)| {
@@ -1030,7 +1053,10 @@ impl UnfaultLsp {
             })
             .collect();
 
-        debug!("[LSP] All dependent files (including transitive): {:?}", all_dependents);
+        debug!(
+            "[LSP] All dependent files (including transitive): {:?}",
+            all_dependents
+        );
 
         let direct_count = direct_dependents.len();
         let total_count = all_dependents.len() as i32;
@@ -1039,10 +1065,7 @@ impl UnfaultLsp {
         let summary = if total_count == 0 {
             "No other files depend on this file".to_string()
         } else if direct_count == 1 && total_count == 1 {
-            format!(
-                "1 file depends on this file: {}",
-                direct_dependents[0]
-            )
+            format!("1 file depends on this file: {}", direct_dependents[0])
         } else if direct_count == total_count as usize {
             format!("{} files depend on this file", total_count)
         } else {
@@ -1053,7 +1076,10 @@ impl UnfaultLsp {
         };
 
         debug!("[LSP] Dependency summary: {}", summary);
-        debug!("[LSP] Direct dependents: {}, Total affected: {}", direct_count, total_count);
+        debug!(
+            "[LSP] Direct dependents: {}, Total affected: {}",
+            direct_count, total_count
+        );
 
         self.log_debug(&format!(
             "Local graph: {} direct dependents, {} total for {}",
@@ -1220,7 +1246,8 @@ impl UnfaultLsp {
                                     character: method.location.range.end_col,
                                 },
                             };
-                            let qualified_name = format!("{}.{}", impl_block.self_type, method.name);
+                            let qualified_name =
+                                format!("{}.{}", impl_block.self_type, method.name);
                             functions.push(FunctionInfo {
                                 name: qualified_name,
                                 range,
@@ -1287,10 +1314,7 @@ impl UnfaultLsp {
             return Some(markdown);
         }
 
-        markdown.push_str(&format!(
-            "Found {} call path(s)\n\n",
-            flow.paths.len()
-        ));
+        markdown.push_str(&format!("Found {} call path(s)\n\n", flow.paths.len()));
 
         // Show call paths
         for (i, path) in flow.paths.iter().enumerate() {
@@ -1597,15 +1621,15 @@ impl LanguageServer for UnfaultLsp {
         // This is critical: paths in the graph are stored relative to project_root, not IDE workspace.
         let (project_root, relative_path) = if let Some(ref abs) = abs_path {
             let ide_ws = workspace_root.as_ref();
-            let proj_root = find_project_root(abs, ide_ws)
-                .unwrap_or_else(|| {
-                    ide_ws
-                        .cloned()
-                        .unwrap_or_else(|| abs.parent().unwrap_or(abs).to_path_buf())
-                });
-            
+            let proj_root = find_project_root(abs, ide_ws).unwrap_or_else(|| {
+                ide_ws
+                    .cloned()
+                    .unwrap_or_else(|| abs.parent().unwrap_or(abs).to_path_buf())
+            });
+
             // Compute relative path from project_root (same as build_ir_cached does)
-            let rel = abs.strip_prefix(&proj_root)
+            let rel = abs
+                .strip_prefix(&proj_root)
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| {
                     abs.file_name()
@@ -1613,7 +1637,7 @@ impl LanguageServer for UnfaultLsp {
                         .unwrap_or("")
                         .to_string()
                 });
-            
+
             (Some(proj_root), rel)
         } else {
             (None, String::new())
@@ -1669,7 +1693,8 @@ impl LanguageServer for UnfaultLsp {
                         functions.len(),
                         relative_path
                     ));
-                    self.function_cache.insert(params.text_document.uri.clone(), functions);
+                    self.function_cache
+                        .insert(params.text_document.uri.clone(), functions);
                 }
             }
         }
@@ -1824,7 +1849,10 @@ impl LanguageServer for UnfaultLsp {
             self.log_debug(&format!("Using relative path: {}", relative_path));
 
             // Get function impact analysis
-            if let Some(markdown) = self.get_function_impact(&relative_path, &function_name).await {
+            if let Some(markdown) = self
+                .get_function_impact(&relative_path, &function_name)
+                .await
+            {
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
@@ -1870,7 +1898,10 @@ impl LanguageServer for UnfaultLsp {
                             },
                             end: Position {
                                 line: finding_end_line,
-                                character: finding.end_column.unwrap_or(finding.column + 10).saturating_sub(1),
+                                character: finding
+                                    .end_column
+                                    .unwrap_or(finding.column + 10)
+                                    .saturating_sub(1),
                             },
                         }),
                     }));
@@ -1881,14 +1912,21 @@ impl LanguageServer for UnfaultLsp {
         Ok(None)
     }
 
-    async fn execute_command(&self, params: ExecuteCommandParams) -> RpcResult<Option<serde_json::Value>> {
+    async fn execute_command(
+        &self,
+        params: ExecuteCommandParams,
+    ) -> RpcResult<Option<serde_json::Value>> {
         if params.command != "unfault/getFunctionImpact" {
             return Err(tower_lsp::jsonrpc::Error::method_not_found());
         }
         if params.arguments.is_empty() {
             return Ok(None);
         }
-        let args_value = params.arguments.first().cloned().unwrap_or(serde_json::Value::Null);
+        let args_value = params
+            .arguments
+            .first()
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let req: GetFunctionImpactRequest = serde_json::from_value(args_value)
             .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
@@ -1896,7 +1934,10 @@ impl LanguageServer for UnfaultLsp {
         let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
         let workspace_root = { self.workspace_root.read().await.clone() };
         let _relative_path = match (&file_path, &workspace_root) {
-            (Some(fp), Some(ws)) => fp.strip_prefix(ws).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| fp.to_string_lossy().to_string()),
+            (Some(fp), Some(ws)) => fp
+                .strip_prefix(ws)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| fp.to_string_lossy().to_string()),
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),
         };
@@ -1924,12 +1965,15 @@ impl LanguageServer for UnfaultLsp {
             })
             .collect();
 
-        Ok(Some(serde_json::to_value(GetFunctionImpactResponse {
-            name: req.function_name.clone(),
-            callers,
-            routes: vec![],
-            findings: vec![],
-        }).unwrap()))
+        Ok(Some(
+            serde_json::to_value(GetFunctionImpactResponse {
+                name: req.function_name.clone(),
+                callers,
+                routes: vec![],
+                findings: vec![],
+            })
+            .unwrap(),
+        ))
     }
 }
 
@@ -1950,7 +1994,10 @@ impl tower_lsp::lsp_types::notification::Notification for FileDependenciesNotifi
 }
 
 impl UnfaultLsp {
-    async fn handle_get_function_impact(&self, params: serde_json::Value) -> RpcResult<Option<GetFunctionImpactResponse>> {
+    async fn handle_get_function_impact(
+        &self,
+        params: serde_json::Value,
+    ) -> RpcResult<Option<GetFunctionImpactResponse>> {
         let req: GetFunctionImpactRequest = serde_json::from_value(params)
             .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
@@ -1958,7 +2005,10 @@ impl UnfaultLsp {
         let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
         let workspace_root = { self.workspace_root.read().await.clone() };
         let _relative_path = match (&file_path, &workspace_root) {
-            (Some(fp), Some(ws)) => fp.strip_prefix(ws).map(|p| p.to_string_lossy().to_string()).unwrap_or_else(|_| fp.to_string_lossy().to_string()),
+            (Some(fp), Some(ws)) => fp
+                .strip_prefix(ws)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| fp.to_string_lossy().to_string()),
             (Some(fp), None) => fp.to_string_lossy().to_string(),
             _ => return Ok(None),
         };
@@ -2016,7 +2066,10 @@ pub async fn execute(args: LspArgs) -> anyhow::Result<i32> {
     let stdout = tokio::io::stdout();
 
     let (service, socket) = LspService::build(|client| UnfaultLsp::new(client, args.verbose))
-        .custom_method("unfault/getFunctionImpact", UnfaultLsp::handle_get_function_impact)
+        .custom_method(
+            "unfault/getFunctionImpact",
+            UnfaultLsp::handle_get_function_impact,
+        )
         .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
@@ -2316,7 +2369,10 @@ mod tests {
         let req = GetFunctionImpactRequest {
             uri: "file:///path/to/file.py".to_string(),
             function_name: "my_func".to_string(),
-            position: Position { line: 10, character: 0 },
+            position: Position {
+                line: 10,
+                character: 0,
+            },
         };
         let json = serde_json::to_string(&req).unwrap();
         assert!(json.contains("\"functionName\":\"my_func\""));

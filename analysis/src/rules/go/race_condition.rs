@@ -2,14 +2,14 @@
 //!
 //! Detects goroutines that capture variables that may cause race conditions.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -59,7 +59,7 @@ impl Rule for GoRaceConditionRule {
                     // Check if it looks like it's using loop variables
                     // (common pattern: go func() { use_i }() inside for loop)
                     let _text = &goroutine.text;
-                    
+
                     // Simple heuristic: anonymous goroutine in a loop-like context
                     // warning about variable capture
                     let title = "Anonymous goroutine may have race condition".to_string();
@@ -79,7 +79,9 @@ impl Rule for GoRaceConditionRule {
                     let patch = FilePatch {
                         file_id: *file_id,
                         hunks: vec![PatchHunk {
-                            range: PatchRange::InsertBeforeLine { line: goroutine.line },
+                            range: PatchRange::InsertBeforeLine {
+                                line: goroutine.line,
+                            },
                             replacement,
                         }],
                     };
@@ -96,16 +98,12 @@ impl Rule for GoRaceConditionRule {
                         file_path: go.path.clone(),
                         line: Some(goroutine.line),
                         column: Some(goroutine.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("Pass variables as parameters to goroutine".to_string()),
-                        tags: vec![
-                            "go".into(),
-                            "race-condition".into(),
-                            "concurrency".into(),
-                        ],
+                        tags: vec!["go".into(), "race-condition".into(), "concurrency".into()],
                     });
                 }
             }

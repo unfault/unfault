@@ -55,7 +55,10 @@ impl Rule for PydanticArbitraryTypesRule {
             // Check for Pydantic imports
             let has_pydantic = py.imports.iter().any(|imp| {
                 imp.module.contains("pydantic")
-                    || imp.names.iter().any(|n| n == "BaseModel" || n == "BaseSettings")
+                    || imp
+                        .names
+                        .iter()
+                        .any(|n| n == "BaseModel" || n == "BaseSettings")
             });
 
             if !has_pydantic {
@@ -64,16 +67,16 @@ impl Rule for PydanticArbitraryTypesRule {
 
             // Look for arbitrary_types_allowed in class Config or model_config
             for assign in &py.assignments {
-                if assign.target == "arbitrary_types_allowed" 
-                    && assign.value_repr.trim() == "True" 
+                if assign.target == "arbitrary_types_allowed" && assign.value_repr.trim() == "True"
                 {
                     let title = "Pydantic model allows arbitrary types".to_string();
 
-                    let description = 
+                    let description =
                         "arbitrary_types_allowed=True allows any Python object as a field type \
                          without validation. This bypasses Pydantic's type checking and can lead \
                          to runtime errors, serialization issues, and potential security \
-                         vulnerabilities. Use custom validators or proper type annotations instead.".to_string();
+                         vulnerabilities. Use custom validators or proper type annotations instead."
+                            .to_string();
 
                     let fix_preview = generate_arbitrary_types_fix_preview();
 
@@ -89,9 +92,9 @@ impl Rule for PydanticArbitraryTypesRule {
                         file_path: py.path.clone(),
                         line: Some(assign.location.range.start_line + 1),
                         column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -111,10 +114,11 @@ impl Rule for PydanticArbitraryTypesRule {
                     if args.contains("arbitrary_types_allowed") && args.contains("True") {
                         let title = "Pydantic model allows arbitrary types (v2 config)".to_string();
 
-                        let description = 
+                        let description =
                             "ConfigDict with arbitrary_types_allowed=True allows any Python \
                              object as a field type without validation. Consider using proper \
-                             type annotations with custom validators instead.".to_string();
+                             type annotations with custom validators instead."
+                                .to_string();
 
                         let fix_preview = generate_arbitrary_types_fix_preview();
 
@@ -130,9 +134,9 @@ impl Rule for PydanticArbitraryTypesRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -224,7 +228,8 @@ class SaferModel(BaseModel):
             raise ValueError("Expected numpy array")
         if v.dtype not in [np.float32, np.float64]:
             raise ValueError("Expected float array")
-        return v"#.to_string()
+        return v"#
+        .to_string()
 }
 
 #[cfg(test)]

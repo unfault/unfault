@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::parse::ast::{AstLocation, FileId, ParsedFile};
-use crate::semantics::common::{calls::FunctionCall, CommonLocation};
+use crate::semantics::common::{CommonLocation, calls::FunctionCall};
 use crate::types::context::Language;
 
 use super::frameworks::GoFrameworkSummary;
@@ -1486,10 +1486,11 @@ package main
 const MaxSize = 100
 "#;
         let sem = parse_and_build_semantics(src);
-        assert!(sem
-            .declarations
-            .iter()
-            .any(|d| d.name == "MaxSize" && d.is_const));
+        assert!(
+            sem.declarations
+                .iter()
+                .any(|d| d.name == "MaxSize" && d.is_const)
+        );
     }
 
     #[test]
@@ -1600,9 +1601,10 @@ package main
 var count int = 0
 "#;
         let sem = parse_and_build_semantics(src);
-        assert!(sem
-            .declarations
-            .iter()
-            .any(|d| d.name == "count" && !d.is_const));
+        assert!(
+            sem.declarations
+                .iter()
+                .any(|d| d.name == "count" && !d.is_const)
+        );
     }
 }

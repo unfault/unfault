@@ -6,8 +6,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{
@@ -82,9 +82,10 @@ impl Rule for TypescriptMissingCorrelationIdRule {
             }
 
             // Check for correlation ID handling
-            let has_correlation = ts.imports.iter().any(|imp| {
-                imp.module.contains("correlation") || imp.module.contains("cls-hooked")
-            });
+            let has_correlation = ts
+                .imports
+                .iter()
+                .any(|imp| imp.module.contains("correlation") || imp.module.contains("cls-hooked"));
 
             if has_correlation {
                 continue;
@@ -120,7 +121,7 @@ impl Rule for TypescriptMissingCorrelationIdRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Add correlation ID header".to_string()),
                     tags: vec!["observability".into(), "correlation-id".into()],

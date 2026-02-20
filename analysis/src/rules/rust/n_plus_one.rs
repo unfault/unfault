@@ -25,8 +25,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -64,7 +64,7 @@ const QUERY_PATTERNS: &[&str] = &[
     "diesel::delete",
     ".load(",
     ".get_result(",
-    ".first(&",  // Diesel's first takes a connection: .first(&conn) - not slice .first()
+    ".first(&", // Diesel's first takes a connection: .first(&conn) - not slice .first()
     // SeaORM
     "Entity::find",
     ".find_by_id(",
@@ -138,7 +138,9 @@ impl Rule for RustNPlusOneRule {
                         let pattern = p.trim_start_matches('.');
                         let pattern = pattern.trim_end_matches('(');
                         method == pattern
-                    }) || QUERY_PATTERNS.iter().any(|p| callee.contains(p) && !is_string_literal)
+                    }) || QUERY_PATTERNS
+                        .iter()
+                        .any(|p| callee.contains(p) && !is_string_literal)
                 } else {
                     // Function call: check the callee text, but skip if it starts with a string literal
                     !is_string_literal && QUERY_PATTERNS.iter().any(|p| callee.contains(p))
@@ -149,14 +151,19 @@ impl Rule for RustNPlusOneRule {
                 }
 
                 // Check if it might be a batch query
-                let is_batch = BATCH_PATTERNS.iter().any(|p| callee.contains(p) && !is_string_literal);
+                let is_batch = BATCH_PATTERNS
+                    .iter()
+                    .any(|p| callee.contains(p) && !is_string_literal);
 
                 if is_batch {
                     continue;
                 }
 
                 let line = call.function_call.location.line;
-                let func_name = call.function_name.clone().unwrap_or_else(|| "function".to_string());
+                let func_name = call
+                    .function_name
+                    .clone()
+                    .unwrap_or_else(|| "function".to_string());
 
                 let title = format!(
                     "N+1 query pattern: database call in loop in '{}'",
@@ -193,13 +200,16 @@ let orders = sqlx::query!(
 // Group by user_id in application code:
 let orders_by_user: HashMap<_, Vec<_>> = orders
     .into_iter()
-    .into_group_map_by(|o| o.user_id);"#.to_string();
+    .into_group_map_by(|o| o.user_id);"#
+                    .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: N+1 query - refactor to batch query with WHERE id IN (...)\n".to_string(),
+                        replacement:
+                            "// TODO: N+1 query - refactor to batch query with WHERE id IN (...)\n"
+                                .to_string(),
                     }],
                 };
 
@@ -217,7 +227,7 @@ let orders_by_user: HashMap<_, Vec<_>> = orders
                     column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -236,7 +246,10 @@ let orders_by_user: HashMap<_, Vec<_>> = orders
 
                 // Skip calls on string literals (false positives from documentation/examples)
                 // This includes regular strings ("...") and raw strings (r#"..."#, r"...")
-                if callee.starts_with('"') || callee.starts_with("r#\"") || callee.starts_with("r\"") {
+                if callee.starts_with('"')
+                    || callee.starts_with("r#\"")
+                    || callee.starts_with("r\"")
+                {
                     continue;
                 }
 
@@ -262,9 +275,9 @@ let orders_by_user: HashMap<_, Vec<_>> = orders
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: None,
                         tags: vec![
@@ -287,8 +300,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -350,13 +363,16 @@ async fn get_user(pool: &Pool, id: i64) {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // No loop = no N+1
         let n_plus_one_findings: Vec<_> = findings
             .iter()
             .filter(|f| f.rule_id == "rust.n_plus_one")
             .collect();
-        assert!(n_plus_one_findings.is_empty() || n_plus_one_findings.iter().all(|f| f.confidence < 0.8));
+        assert!(
+            n_plus_one_findings.is_empty()
+                || n_plus_one_findings.iter().all(|f| f.confidence < 0.8)
+        );
     }
 
     #[tokio::test]
@@ -382,16 +398,19 @@ fn generate_error_message(line: u32) {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         let n_plus_one_findings: Vec<_> = findings
             .iter()
             .filter(|f| f.rule_id == "rust.n_plus_one")
             .collect();
-        
+
         assert!(
             n_plus_one_findings.is_empty(),
             "String literals containing query patterns should NOT trigger N+1 findings. Found: {:?}",
-            n_plus_one_findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+            n_plus_one_findings
+                .iter()
+                .map(|f| &f.title)
+                .collect::<Vec<_>>()
         );
     }
 
@@ -433,7 +452,10 @@ fn process_routes(fastapi: &FastApi) {
         assert!(
             n_plus_one_findings.is_empty(),
             "Slice/Vec .first() should NOT trigger N+1 findings. Found: {:?}",
-            n_plus_one_findings.iter().map(|f| &f.title).collect::<Vec<_>>()
+            n_plus_one_findings
+                .iter()
+                .map(|f| &f.title)
+                .collect::<Vec<_>>()
         );
     }
 }

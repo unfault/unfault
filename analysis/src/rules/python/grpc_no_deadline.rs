@@ -9,10 +9,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::python::model::PyCallSite;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::python::model::PyCallSite;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -69,7 +69,9 @@ impl Rule for PythonGrpcNoDeadlineRule {
                 let call_lower = call_text.to_lowercase();
 
                 // Check for gRPC channel creation without options
-                if callee.contains("grpc.insecure_channel") || callee.contains("grpc.secure_channel") {
+                if callee.contains("grpc.insecure_channel")
+                    || callee.contains("grpc.secure_channel")
+                {
                     // Check if options are specified
                     if !args.contains("options=") && !args.contains("options =") {
                         findings.push(RuleFinding {
@@ -147,12 +149,16 @@ impl Rule for PythonGrpcNoDeadlineRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column as u32),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(generate_stub_call_patch(call, *file_id)),
                             fix_preview: Some(generate_call_fix(&method_name, is_streaming)),
-                            tags: vec!["grpc".to_string(), "timeout".to_string(), "deadline".to_string()],
+                            tags: vec![
+                                "grpc".to_string(),
+                                "timeout".to_string(),
+                                "deadline".to_string(),
+                            ],
                         });
                     }
                 }
@@ -208,8 +214,12 @@ fn extract_grpc_method_name(callee: &str) -> String {
 
 fn generate_channel_fix(callee: &str) -> String {
     let is_secure = callee.contains("secure_channel");
-    let channel_type = if is_secure { "secure_channel" } else { "insecure_channel" };
-    
+    let channel_type = if is_secure {
+        "secure_channel"
+    } else {
+        "insecure_channel"
+    };
+
     format!(
         r#"Add timeout options to the channel:
 
@@ -273,13 +283,16 @@ response = stub.{}(
 /// Transforms: `stub.Method(request)` → `stub.Method(request, timeout=30.0)`
 fn generate_stub_call_patch(call: &PyCallSite, file_id: FileId) -> FilePatch {
     let args_trimmed = call.args_repr.trim_matches(|c| c == '(' || c == ')');
-    
+
     let replacement = if args_trimmed.is_empty() || args_trimmed.trim().is_empty() {
         // No existing arguments: stub.Method() → stub.Method(timeout=30.0)
         format!("{}(timeout=30.0)", call.function_call.callee_expr)
     } else {
         // Has arguments: stub.Method(request) → stub.Method(request, timeout=30.0)
-        format!("{}({}, timeout=30.0)", call.function_call.callee_expr, args_trimmed)
+        format!(
+            "{}({}, timeout=30.0)",
+            call.function_call.callee_expr, args_trimmed
+        )
     };
 
     FilePatch {
@@ -299,7 +312,7 @@ fn generate_stub_call_patch(call: &PyCallSite, file_id: FileId) -> FilePatch {
 /// This is more complex as we need to add the options= parameter.
 fn generate_channel_patch(call: &PyCallSite, file_id: FileId) -> FilePatch {
     let args_trimmed = call.args_repr.trim_matches(|c| c == '(' || c == ')');
-    
+
     // Add options parameter after the target
     let replacement = if args_trimmed.is_empty() {
         format!(
@@ -334,13 +347,13 @@ fn generate_channel_patch(call: &PyCallSite, file_id: FileId) -> FilePatch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::python::model::PyFileSemantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::python::model::PyFileSemantics;
     use crate::types::context::{Language, SourceFile};
     use crate::types::patch::apply_file_patch;
+    use std::sync::Arc;
 
     /// Helper to parse Python source and build semantics tuple
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -352,7 +365,8 @@ mod tests {
         let file_id = FileId(1);
         let parsed = parse_python_file(file_id, &sf).expect("parsing should succeed");
         let mut sem = PyFileSemantics::from_parsed(&parsed);
-        sem.analyze_frameworks(&parsed).expect("framework analysis should succeed");
+        sem.analyze_frameworks(&parsed)
+            .expect("framework analysis should succeed");
         (file_id, Arc::new(SourceSemantics::Python(sem)))
     }
 
@@ -391,7 +405,10 @@ response = stub.GetUser(request)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect stub call without timeout");
+        assert!(
+            !findings.is_empty(),
+            "Should detect stub call without timeout"
+        );
     }
 
     #[tokio::test]
@@ -408,10 +425,14 @@ response = stub.GetUser(request, timeout=30.0)
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should not flag stub calls that already have timeout
-        let stub_findings: Vec<_> = findings.iter()
+        let stub_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("GetUser"))
             .collect();
-        assert!(stub_findings.is_empty(), "Should not flag stub call with timeout");
+        assert!(
+            stub_findings.is_empty(),
+            "Should not flag stub call with timeout"
+        );
     }
 
     #[tokio::test]
@@ -426,7 +447,10 @@ channel = grpc.insecure_channel('localhost:50051')
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(!findings.is_empty(), "Should detect channel without options");
+        assert!(
+            !findings.is_empty(),
+            "Should detect channel without options"
+        );
     }
 
     // ==================== Patch Application Tests ====================
@@ -439,19 +463,29 @@ channel = grpc.insecure_channel('localhost:50051')
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Find the stub call finding (title contains "GetUser" or "unary call")
-        let stub_finding = findings.iter()
+        let stub_finding = findings
+            .iter()
             .find(|f| f.title.contains("GetUser") || f.title.contains("unary call"))
             .expect("Should have a stub call finding");
-        
-        let patch = stub_finding.patch.as_ref().expect("Finding should have a patch");
+
+        let patch = stub_finding
+            .patch
+            .as_ref()
+            .expect("Finding should have a patch");
         let patched = apply_file_patch(src, patch);
-        
+
         // Verify the patch adds timeout
-        assert!(patched.contains("timeout=30.0"), "Patched code should contain timeout");
-        assert!(!patched.contains("stub.GetUser(request)") || patched.contains("stub.GetUser(request, timeout=30.0)"),
-            "Stub call should have timeout added");
+        assert!(
+            patched.contains("timeout=30.0"),
+            "Patched code should contain timeout"
+        );
+        assert!(
+            !patched.contains("stub.GetUser(request)")
+                || patched.contains("stub.GetUser(request, timeout=30.0)"),
+            "Stub call should have timeout added"
+        );
     }
 
     #[tokio::test]
@@ -462,18 +496,28 @@ channel = grpc.insecure_channel('localhost:50051')
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Find the channel finding
-        let channel_finding = findings.iter()
+        let channel_finding = findings
+            .iter()
             .find(|f| f.title.contains("channel"))
             .expect("Should have a channel finding");
-        
-        let patch = channel_finding.patch.as_ref().expect("Finding should have a patch");
+
+        let patch = channel_finding
+            .patch
+            .as_ref()
+            .expect("Finding should have a patch");
         let patched = apply_file_patch(src, patch);
-        
+
         // Verify the patch adds options
-        assert!(patched.contains("options="), "Patched code should contain options");
-        assert!(patched.contains("keepalive_time_ms"), "Options should include keepalive settings");
+        assert!(
+            patched.contains("options="),
+            "Patched code should contain options"
+        );
+        assert!(
+            patched.contains("keepalive_time_ms"),
+            "Options should include keepalive settings"
+        );
     }
 
     #[tokio::test]
@@ -484,14 +528,18 @@ channel = grpc.insecure_channel('localhost:50051')
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Any finding with a patch should use ReplaceBytes
         for finding in &findings {
             if let Some(patch) = &finding.patch {
-                let has_replace_bytes = patch.hunks.iter().any(|h| {
-                    matches!(h.range, PatchRange::ReplaceBytes { .. })
-                });
-                assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+                let has_replace_bytes = patch
+                    .hunks
+                    .iter()
+                    .any(|h| matches!(h.range, PatchRange::ReplaceBytes { .. }));
+                assert!(
+                    has_replace_bytes,
+                    "Patch should use ReplaceBytes for actual code replacement"
+                );
             }
         }
     }

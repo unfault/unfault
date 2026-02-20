@@ -15,8 +15,8 @@ pub mod analysis;
 pub mod commands;
 pub mod config;
 pub mod exit_codes;
-pub mod local_graph;
 pub mod llm;
+pub mod local_graph;
 pub mod output;
 pub mod session;
 

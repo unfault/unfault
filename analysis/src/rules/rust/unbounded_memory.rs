@@ -27,8 +27,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -181,7 +181,9 @@ impl Rule for RustUnboundedMemoryRule {
                     let func_name = call.function_name.clone().unwrap_or_default();
                     let has_bounding = rust.calls.iter().any(|c| {
                         c.function_name.as_deref() == Some(&func_name)
-                            && BOUNDED_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
+                            && BOUNDED_PATTERNS
+                                .iter()
+                                .any(|p| c.function_call.callee_expr.contains(p))
                     });
 
                     // Also check the callee itself for bounding
@@ -195,7 +197,9 @@ impl Rule for RustUnboundedMemoryRule {
                     // Check all calls in the same function for external source patterns
                     let has_external_source = rust.calls.iter().any(|c| {
                         c.function_name.as_deref() == Some(&func_name)
-                            && EXTERNAL_SOURCE_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
+                            && EXTERNAL_SOURCE_PATTERNS
+                                .iter()
+                                .any(|p| c.function_call.callee_expr.contains(p))
                     });
 
                     // Adjust severity and confidence based on source
@@ -218,10 +222,7 @@ impl Rule for RustUnboundedMemoryRule {
 
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "Unbounded memory: {}",
-                        description
-                    );
+                    let title = format!("Unbounded memory: {}", description);
 
                     let description_text = format!(
                         "The operation '{}' at line {} can consume unbounded memory.\n\n\
@@ -250,10 +251,7 @@ impl Rule for RustUnboundedMemoryRule {
                         file_id: *file_id,
                         hunks: vec![PatchHunk {
                             range: PatchRange::InsertBeforeLine { line },
-                            replacement: format!(
-                                "// TODO: Add bounds check - {}\n",
-                                suggestion
-                            ),
+                            replacement: format!("// TODO: Add bounds check - {}\n", suggestion),
                         }],
                     };
 
@@ -269,9 +267,9 @@ impl Rule for RustUnboundedMemoryRule {
                         file_path: rust.path.clone(),
                         line: Some(line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -303,7 +301,8 @@ impl Rule for RustUnboundedMemoryRule {
                             title: "Vec growing in loop without capacity hint".to_string(),
                             description: Some(
                                 "Creating Vec::new() and pushing in a loop causes repeated \
-                                reallocations. Use Vec::with_capacity() if size is known.".to_string()
+                                reallocations. Use Vec::with_capacity() if size is known."
+                                    .to_string(),
                             ),
                             kind: FindingKind::PerformanceSmell,
                             severity: Severity::Low,
@@ -313,19 +312,16 @@ impl Rule for RustUnboundedMemoryRule {
                             file_path: rust.path.clone(),
                             line: Some(line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(
                                 "// Use with_capacity when size is known:\n\
-                                let mut vec = Vec::with_capacity(expected_size);".to_string()
+                                let mut vec = Vec::with_capacity(expected_size);"
+                                    .to_string(),
                             ),
-                            tags: vec![
-                                "rust".into(),
-                                "memory".into(),
-                                "allocation".into(),
-                            ],
+                            tags: vec!["rust".into(), "memory".into(), "allocation".into()],
                         });
                     }
                 }
@@ -341,8 +337,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -408,10 +404,14 @@ mod tests {
             "self.data.iter().map(|x| x * 2).collect()",
             "list.iter().filter_map(|x| x.ok()).collect()",
         ];
-        
+
         for pattern in internal_patterns {
             let is_bounded = BOUNDED_PATTERNS.iter().any(|p| pattern.contains(p));
-            assert!(is_bounded, "Pattern '{}' should be recognized as bounded", pattern);
+            assert!(
+                is_bounded,
+                "Pattern '{}' should be recognized as bounded",
+                pattern
+            );
         }
     }
 
@@ -424,10 +424,14 @@ mod tests {
             "response.bytes().collect()",
             "stdin().read_line()",
         ];
-        
+
         for pattern in external_patterns {
             let is_external = EXTERNAL_SOURCE_PATTERNS.iter().any(|p| pattern.contains(p));
-            assert!(is_external, "Pattern '{}' should be identified as external source", pattern);
+            assert!(
+                is_external,
+                "Pattern '{}' should be identified as external source",
+                pattern
+            );
         }
     }
 }

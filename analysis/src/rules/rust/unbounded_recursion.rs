@@ -52,10 +52,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::rust::model::{RustCallSite, RustFileSemantics, RustFunction, RustImpl};
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::rust::model::{RustCallSite, RustFileSemantics, RustFunction, RustImpl};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -316,12 +316,14 @@ impl RustUnboundedRecursionRule {
         // Check for base case patterns in called methods
         let has_base_case = rust.calls.iter().any(|c| {
             c.function_name.as_deref() == Some(&func.name)
-                && BASE_CASE_PATTERNS.iter().any(|p| c.function_call.callee_expr.contains(p))
+                && BASE_CASE_PATTERNS
+                    .iter()
+                    .any(|p| c.function_call.callee_expr.contains(p))
         });
 
         // Check if all calls are in tail position
-        let is_tail_recursive = !direct_self_calls.is_empty()
-            && direct_self_calls.iter().all(|c| c.is_tail_position);
+        let is_tail_recursive =
+            !direct_self_calls.is_empty() && direct_self_calls.iter().all(|c| c.is_tail_position);
 
         RecursionInfo {
             direct_self_calls,
@@ -356,14 +358,18 @@ impl RustUnboundedRecursionRule {
             if call.function_call.callee_expr == func.name {
                 return true;
             }
-            
+
             // For path-qualified calls, only match Self:: calls (not OtherType::method)
             // e.g., `Self::new()` is recursive, but `HashMap::new()` is NOT
             if call.function_call.callee_expr.starts_with("Self::") {
-                let method_part = call.function_call.callee_expr.strip_prefix("Self::").unwrap_or("");
+                let method_part = call
+                    .function_call
+                    .callee_expr
+                    .strip_prefix("Self::")
+                    .unwrap_or("");
                 return method_part == func.name;
             }
-            
+
             // For impl methods, check if it's the same type calling itself
             // e.g., in `impl Foo`, a call to `Foo::bar()` from `fn bar()` is recursive
             if let Some(impl_ctx) = impl_context {
@@ -372,7 +378,7 @@ impl RustUnboundedRecursionRule {
                     return true;
                 }
             }
-            
+
             // Any other path-qualified call (like `HashMap::new()`) is NOT recursive
             return false;
         }
@@ -396,7 +402,7 @@ impl RustUnboundedRecursionRule {
             let expected_self_callee = format!("self.{}", func.name);
             let expected_self_ref_callee = format!("(&self).{}", func.name);
             let expected_self_mut_callee = format!("(&mut self).{}", func.name);
-            
+
             let is_direct_self_call = call.function_call.callee_expr == expected_self_callee
                 || call.function_call.callee_expr == expected_self_ref_callee
                 || call.function_call.callee_expr == expected_self_mut_callee
@@ -571,10 +577,10 @@ fn {name}(/* ... */) -> T {{
     /// Build a patch to add depth limiting with visited set for cycle detection
     fn build_patch(&self, func: &RustFunction, info: &RecursionInfo, line: u32) -> FilePatch {
         let const_name = format!("MAX_{}_DEPTH", func.name.to_uppercase());
-        
+
         // Build hunks for a more complete fix
         let mut hunks = Vec::new();
-        
+
         // If this is a method that walks a graph/tree structure, suggest visited set pattern
         if info.is_impl_method {
             // For methods, suggest adding a visited set pattern
@@ -620,7 +626,7 @@ fn {name}(/* ... */) -> T {{
                 ),
             });
         }
-        
+
         FilePatch {
             file_id: FileId(0), // Will be replaced by caller
             hunks,
@@ -633,8 +639,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -708,7 +714,7 @@ fn recursive_fn() {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag test functions themselves
         let test_findings: Vec<_> = findings
             .iter()
@@ -752,7 +758,7 @@ impl ContextResult {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should NOT flag this as recursion
         let to_dict_findings: Vec<_> = findings
             .iter()
@@ -785,7 +791,7 @@ impl Tree {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should flag self.process() as recursion
         let process_findings: Vec<_> = findings
             .iter()
@@ -813,7 +819,7 @@ fn factorial(n: u64) -> u64 {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should flag this because there's no depth limit
         // (even though there's a base case, we want to encourage depth limits for safety)
         // Note: This might be a false positive we want to accept or tune
@@ -838,7 +844,7 @@ fn process_tree(node: &Node, depth: usize) -> Result<(), Error> {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag because it has a depth parameter
         assert!(
             findings.is_empty(),
@@ -874,7 +880,7 @@ impl TypeResolutionContext {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag because it has a visited parameter (cycle detection)
         let visited_findings: Vec<_> = findings
             .iter()
@@ -902,7 +908,7 @@ fn traverse(node: &Node, level: u32) {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag because it has a level parameter
         assert!(
             findings.is_empty(),
@@ -923,7 +929,7 @@ fn tree_traverse(node: &Node) {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect and might have higher severity for multiple calls
         if !findings.is_empty() {
             let finding = &findings[0];
@@ -954,7 +960,7 @@ impl Container {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag this
         let iter_findings: Vec<_> = findings
             .iter()
@@ -986,7 +992,7 @@ impl Data {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(findings.is_empty());
     }
 
@@ -1017,7 +1023,7 @@ impl InternalSessionState {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should NOT flag HashMap::new() as recursive call to InternalSessionState::new()
         let new_findings: Vec<_> = findings
             .iter()
@@ -1050,7 +1056,7 @@ impl Builder {
         );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should flag Self::new() as recursive
         let new_findings: Vec<_> = findings
             .iter()

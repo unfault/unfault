@@ -246,11 +246,7 @@ impl InternalSessionState {
         // Filter findings to only include those matching requested dimensions
         findings
             .into_iter()
-            .filter(|finding| {
-                self.meta
-                    .requested_dimensions
-                    .contains(&finding.dimension)
-            })
+            .filter(|finding| self.meta.requested_dimensions.contains(&finding.dimension))
             .collect()
     }
 
@@ -681,12 +677,17 @@ mod tests {
 
         // Should have findings (FastAPI CORS rule is in Correctness dimension)
         // Counting findings in all contexts
-        let total_findings: usize = session_result.contexts.iter()
+        let total_findings: usize = session_result
+            .contexts
+            .iter()
             .map(|ctx| ctx.findings.len())
             .sum();
-        
+
         // We expect at least some findings from the CORS rule when no dimension filter is applied
-        assert!(total_findings > 0, "Expected findings when no dimension filter is applied");
+        assert!(
+            total_findings > 0,
+            "Expected findings when no dimension filter is applied"
+        );
     }
 
     #[tokio::test]
@@ -699,12 +700,15 @@ mod tests {
         let contexts = vec![context];
 
         let rules = Arc::new(RuleRegistry::with_builtin_rules());
-        
+
         // First, run with no dimension filter to get baseline
         let meta_no_filter = ReviewSessionMeta::default();
-        let mut state_no_filter = InternalSessionState::new(meta_no_filter, contexts.clone(), Arc::clone(&rules));
+        let mut state_no_filter =
+            InternalSessionState::new(meta_no_filter, contexts.clone(), Arc::clone(&rules));
         let result_no_filter = state_no_filter.run().await.unwrap();
-        let total_unfiltered: usize = result_no_filter.contexts.iter()
+        let total_unfiltered: usize = result_no_filter
+            .contexts
+            .iter()
             .map(|ctx| ctx.findings.len())
             .sum();
 
@@ -714,9 +718,12 @@ mod tests {
             requested_dimensions: vec![Dimension::Maintainability],
             ..ReviewSessionMeta::default()
         };
-        let mut state_filtered = InternalSessionState::new(meta_maintainability, contexts, Arc::clone(&rules));
+        let mut state_filtered =
+            InternalSessionState::new(meta_maintainability, contexts, Arc::clone(&rules));
         let result_filtered = state_filtered.run().await.unwrap();
-        let total_filtered: usize = result_filtered.contexts.iter()
+        let total_filtered: usize = result_filtered
+            .contexts
+            .iter()
             .map(|ctx| ctx.findings.len())
             .sum();
 
@@ -741,7 +748,7 @@ mod tests {
         let contexts = vec![context];
 
         let rules = Arc::new(RuleRegistry::with_builtin_rules());
-        
+
         let meta = ReviewSessionMeta {
             requested_dimensions: vec![Dimension::Correctness],
             ..ReviewSessionMeta::default()
@@ -756,7 +763,8 @@ mod tests {
         for ctx in &session_result.contexts {
             for finding in &ctx.findings {
                 assert_eq!(
-                    finding.dimension, Dimension::Correctness,
+                    finding.dimension,
+                    Dimension::Correctness,
                     "Finding with dimension {:?} should not be present when filtering for Correctness",
                     finding.dimension
                 );

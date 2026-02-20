@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -113,15 +113,16 @@ impl Rule for RustUnboundedCacheRule {
                          .time_to_live(Duration::from_secs(300))\n    \
                          .build();\n\
                      ```",
-                    stat.name,
-                    line
+                    stat.name, line
                 );
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Replace with bounded cache (moka, lru, or cached crate)".to_string(),
+                        replacement:
+                            "// TODO: Replace with bounded cache (moka, lru, or cached crate)"
+                                .to_string(),
                     }],
                 };
 

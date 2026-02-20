@@ -4,8 +4,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::timeout;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::PyCallSite;
@@ -60,9 +60,10 @@ impl Rule for PythonAsyncioTimeoutRule {
             };
 
             // Check for asyncio imports
-            let has_asyncio = py.imports.iter().any(|imp| {
-                imp.module == "asyncio" || imp.module.starts_with("asyncio.")
-            });
+            let has_asyncio = py
+                .imports
+                .iter()
+                .any(|imp| imp.module == "asyncio" || imp.module.starts_with("asyncio."));
 
             if !has_asyncio {
                 continue;
@@ -83,7 +84,8 @@ impl Rule for PythonAsyncioTimeoutRule {
                         description: Some(
                             "asyncio.wait is called without a timeout parameter. This can cause \
                              the operation to wait indefinitely if tasks don't complete. Add a \
-                             timeout parameter to prevent hanging.".to_string()
+                             timeout parameter to prevent hanging."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -93,16 +95,12 @@ impl Rule for PythonAsyncioTimeoutRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(generate_wait_timeout_patch(*file_id, call)),
                         fix_preview: Some(generate_wait_timeout_fix_preview()),
-                        tags: vec![
-                            "python".into(),
-                            "asyncio".into(),
-                            "timeout".into(),
-                        ],
+                        tags: vec!["python".into(), "asyncio".into(), "timeout".into()],
                     });
                 }
 
@@ -117,7 +115,8 @@ impl Rule for PythonAsyncioTimeoutRule {
                         description: Some(
                             "asyncio.gather is called without timeout protection. If any task \
                              hangs, the entire gather will hang. Wrap with asyncio.wait_for or \
-                             asyncio.timeout for protection.".to_string()
+                             asyncio.timeout for protection."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Low,
@@ -127,9 +126,9 @@ impl Rule for PythonAsyncioTimeoutRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_gather_timeout_fix_preview()),
                         tags: vec![
@@ -151,7 +150,8 @@ impl Rule for PythonAsyncioTimeoutRule {
                             description: Some(
                                 "asyncio.sleep with a very long duration detected. Consider \
                                  using a cancellable approach or breaking into smaller intervals \
-                                 to allow for graceful shutdown.".to_string()
+                                 to allow for graceful shutdown."
+                                    .to_string(),
                             ),
                             kind: FindingKind::AntiPattern,
                             severity: Severity::Low,
@@ -161,31 +161,29 @@ impl Rule for PythonAsyncioTimeoutRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(generate_sleep_fix_preview()),
-                            tags: vec![
-                                "python".into(),
-                                "asyncio".into(),
-                                "sleep".into(),
-                            ],
+                            tags: vec!["python".into(), "asyncio".into(), "sleep".into()],
                         });
                     }
                 }
 
                 // Check for Queue.get without timeout
-                if callee.ends_with(".get") && (
-                    callee.contains("queue") || callee.contains("Queue")
-                ) && !args.contains("timeout") {
+                if callee.ends_with(".get")
+                    && (callee.contains("queue") || callee.contains("Queue"))
+                    && !args.contains("timeout")
+                {
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "Async queue get without timeout".to_string(),
                         description: Some(
                             "Queue.get() is called without a timeout. This can block \
                              indefinitely if no items are available. Use get() with timeout \
-                             or get_nowait() with exception handling.".to_string()
+                             or get_nowait() with exception handling."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -195,9 +193,9 @@ impl Rule for PythonAsyncioTimeoutRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_queue_timeout_fix_preview()),
                         tags: vec![
@@ -210,17 +208,21 @@ impl Rule for PythonAsyncioTimeoutRule {
                 }
 
                 // Check for Lock.acquire without timeout
-                if callee.ends_with(".acquire") && (
-                    callee.contains("lock") || callee.contains("Lock") ||
-                    callee.contains("semaphore") || callee.contains("Semaphore")
-                ) && !args.contains("timeout") {
+                if callee.ends_with(".acquire")
+                    && (callee.contains("lock")
+                        || callee.contains("Lock")
+                        || callee.contains("semaphore")
+                        || callee.contains("Semaphore"))
+                    && !args.contains("timeout")
+                {
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "Lock acquire without timeout".to_string(),
                         description: Some(
                             "Lock/Semaphore acquire() is called without a timeout. This can \
                              cause deadlocks if the lock is never released. Consider using \
-                             acquire with timeout or async with statement.".to_string()
+                             acquire with timeout or async with statement."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -230,9 +232,9 @@ impl Rule for PythonAsyncioTimeoutRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_lock_timeout_fix_preview()),
                         tags: vec![
@@ -254,12 +256,15 @@ impl Rule for PythonAsyncioTimeoutRule {
 /// Transforms: `asyncio.wait(tasks)` → `asyncio.wait(tasks, timeout=30.0)`
 fn generate_wait_timeout_patch(file_id: FileId, call: &PyCallSite) -> FilePatch {
     let args_trimmed = call.args_repr.trim_matches(|c| c == '(' || c == ')');
-    
+
     // Add timeout=30.0 to the wait call
     let replacement = if args_trimmed.is_empty() || args_trimmed.trim().is_empty() {
         format!("{}(timeout=30.0)", call.function_call.callee_expr)
     } else {
-        format!("{}({}, timeout=30.0)", call.function_call.callee_expr, args_trimmed)
+        format!(
+            "{}({}, timeout=30.0)",
+            call.function_call.callee_expr, args_trimmed
+        )
     };
 
     let hunks = vec![PatchHunk {
@@ -297,7 +302,8 @@ async with asyncio.timeout(30.0):
     done, pending = await asyncio.wait(tasks)
 
 # Using asyncio.wait_for for single task
-result = await asyncio.wait_for(single_task, timeout=30.0)"#.to_string()
+result = await asyncio.wait_for(single_task, timeout=30.0)"#
+        .to_string()
 }
 
 /// Generate fix preview for asyncio.gather timeout.
@@ -333,7 +339,8 @@ except asyncio.TimeoutError:
 # Alternative: Use asyncio.TaskGroup (Python 3.11+)
 async with asyncio.TaskGroup() as tg:
     task1 = tg.create_task(coro1())
-    task2 = tg.create_task(coro2())"#.to_string()
+    task2 = tg.create_task(coro2())"#
+        .to_string()
 }
 
 /// Generate fix preview for long sleep.
@@ -366,7 +373,8 @@ async def wait_with_cancel():
 
 # Good: Use asyncio.timeout for bounded wait
 async with asyncio.timeout(3600):
-    await some_long_operation()"#.to_string()
+    await some_long_operation()"#
+        .to_string()
 }
 
 /// Generate fix preview for queue timeout.
@@ -399,7 +407,8 @@ async def get_with_timeout(queue, timeout):
     try:
         return await asyncio.wait_for(queue.get(), timeout=timeout)
     except asyncio.TimeoutError:
-        return None"#.to_string()
+        return None"#
+        .to_string()
 }
 
 /// Generate fix preview for lock timeout.
@@ -446,7 +455,8 @@ if acquired:
 semaphore = asyncio.Semaphore(10)
 async with semaphore:
     # limited concurrency section
-    pass"#.to_string()
+    pass"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -518,10 +528,14 @@ async def main():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let wait_findings: Vec<_> = findings.iter()
+        let wait_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("asyncio.wait"))
             .collect();
-        assert!(!wait_findings.is_empty(), "Should detect asyncio.wait without timeout");
+        assert!(
+            !wait_findings.is_empty(),
+            "Should detect asyncio.wait without timeout"
+        );
     }
 
     #[tokio::test]
@@ -537,10 +551,14 @@ async def main():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let wait_findings: Vec<_> = findings.iter()
+        let wait_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("asyncio.wait"))
             .collect();
-        assert!(wait_findings.is_empty(), "Should not flag asyncio.wait with timeout");
+        assert!(
+            wait_findings.is_empty(),
+            "Should not flag asyncio.wait with timeout"
+        );
     }
 
     // ==================== Patch Application Tests ====================
@@ -548,42 +566,59 @@ async def main():
     #[tokio::test]
     async fn patch_adds_timeout_to_asyncio_wait() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = PythonAsyncioTimeoutRule::new();
-        let src = "import asyncio\nasync def main():\n    done, pending = await asyncio.wait(tasks)\n";
+        let src =
+            "import asyncio\nasync def main():\n    done, pending = await asyncio.wait(tasks)\n";
         let (file_id, sem) = parse_and_build_semantics(src);
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        let wait_finding = findings.iter()
+
+        let wait_finding = findings
+            .iter()
             .find(|f| f.title.contains("asyncio.wait"))
             .expect("Should have an asyncio.wait finding");
-        
-        let patch = wait_finding.patch.as_ref().expect("Finding should have a patch");
+
+        let patch = wait_finding
+            .patch
+            .as_ref()
+            .expect("Finding should have a patch");
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("timeout=30.0"), "Patched code should contain timeout=30.0");
+
+        assert!(
+            patched.contains("timeout=30.0"),
+            "Patched code should contain timeout=30.0"
+        );
     }
 
     #[tokio::test]
     async fn patch_uses_replace_bytes() {
         let rule = PythonAsyncioTimeoutRule::new();
-        let src = "import asyncio\nasync def main():\n    done, pending = await asyncio.wait(tasks)\n";
+        let src =
+            "import asyncio\nasync def main():\n    done, pending = await asyncio.wait(tasks)\n";
         let (file_id, sem) = parse_and_build_semantics(src);
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        let wait_finding = findings.iter()
+
+        let wait_finding = findings
+            .iter()
             .find(|f| f.title.contains("asyncio.wait"))
             .expect("Should have an asyncio.wait finding");
-        
-        let patch = wait_finding.patch.as_ref().expect("Finding should have a patch");
-        
-        let has_replace_bytes = patch.hunks.iter().any(|h| {
-            matches!(h.range, PatchRange::ReplaceBytes { .. })
-        });
-        assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+
+        let patch = wait_finding
+            .patch
+            .as_ref()
+            .expect("Finding should have a patch");
+
+        let has_replace_bytes = patch
+            .hunks
+            .iter()
+            .any(|h| matches!(h.range, PatchRange::ReplaceBytes { .. }));
+        assert!(
+            has_replace_bytes,
+            "Patch should use ReplaceBytes for actual code replacement"
+        );
     }
 }

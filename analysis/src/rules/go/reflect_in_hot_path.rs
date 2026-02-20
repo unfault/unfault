@@ -3,14 +3,14 @@
 //! Detects use of the reflect package in performance-critical code paths
 //! like loops, which can significantly impact performance.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -59,7 +59,7 @@ impl Rule for GoReflectInHotPathRule {
 
             // Check if reflect package is imported
             let has_reflect_import = go.imports.iter().any(|i| i.path == "reflect");
-            
+
             if !has_reflect_import {
                 continue;
             }
@@ -68,7 +68,7 @@ impl Rule for GoReflectInHotPathRule {
             for call in &go.calls {
                 if call.in_loop && call.function_call.callee_expr.starts_with("reflect.") {
                     let line = call.function_call.location.line;
-                    
+
                     let title = format!(
                         "Reflection call '{}' in loop",
                         call.function_call.callee_expr
@@ -84,7 +84,10 @@ impl Rule for GoReflectInHotPathRule {
                          3. Use code generation (go generate) for compile-time type handling\n\
                          4. Cache reflect.Type and reflect.Value if reflection is necessary\n\
                          5. Move reflection outside the loop if possible",
-                        call.function_call.callee_expr.strip_prefix("reflect.").unwrap_or(&call.function_call.callee_expr),
+                        call.function_call
+                            .callee_expr
+                            .strip_prefix("reflect.")
+                            .unwrap_or(&call.function_call.callee_expr),
                         line
                     );
 
@@ -108,16 +111,12 @@ impl Rule for GoReflectInHotPathRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("Use generics or type switch".to_string()),
-                        tags: vec![
-                            "go".into(),
-                            "performance".into(),
-                            "reflection".into(),
-                        ],
+                        tags: vec!["go".into(), "performance".into(), "reflection".into()],
                     });
                 }
             }
@@ -126,7 +125,7 @@ impl Rule for GoReflectInHotPathRule {
             // as these are expensive operations
             let expensive_reflect_calls = [
                 "reflect.ValueOf",
-                "reflect.TypeOf", 
+                "reflect.TypeOf",
                 "reflect.New",
                 "reflect.MakeSlice",
                 "reflect.MakeMap",
@@ -138,11 +137,8 @@ impl Rule for GoReflectInHotPathRule {
                     for expensive in &expensive_reflect_calls {
                         if call.function_call.callee_expr == *expensive {
                             let line = call.function_call.location.line;
-                            
-                            let title = format!(
-                                "Expensive reflection '{}' in loop",
-                                expensive
-                            );
+
+                            let title = format!("Expensive reflection '{}' in loop", expensive);
 
                             let description = format!(
                                 "{} is called inside a loop at line {}. This is one of the \
@@ -181,9 +177,9 @@ impl Rule for GoReflectInHotPathRule {
                                 file_path: go.path.clone(),
                                 line: Some(line),
                                 column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
                                 patch: Some(patch),
                                 fix_preview: Some("Cache reflect result outside loop".to_string()),
                                 tags: vec![
@@ -208,8 +204,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -234,7 +230,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_reflect_in_loop() {
         let rule = GoReflectInHotPathRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 import "reflect"
@@ -246,17 +243,23 @@ func process(items []interface{}) {
         _ = v
     }
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.iter().any(|f| f.rule_id == "go.reflect_in_hot_path"));
+
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == "go.reflect_in_hot_path")
+        );
     }
 
     #[tokio::test]
     async fn test_no_finding_when_no_reflect() {
         let rule = GoReflectInHotPathRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func process(items []string) {
@@ -264,11 +267,13 @@ func process(items []string) {
         println(item)
     }
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
-        let reflect_findings: Vec<_> = findings.iter()
+
+        let reflect_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.reflect_in_hot_path")
             .collect();
         assert!(reflect_findings.is_empty());

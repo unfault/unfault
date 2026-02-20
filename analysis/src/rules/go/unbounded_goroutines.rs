@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -76,10 +76,8 @@ impl Rule for GoUnboundedGoroutinesRule {
                 if calls_in_loops > 0 || goroutine.is_anonymous {
                     let line = goroutine.line;
 
-                    let title = format!(
-                        "Potentially unbounded goroutine spawning at line {}",
-                        line
-                    );
+                    let title =
+                        format!("Potentially unbounded goroutine spawning at line {}", line);
 
                     let description = format!(
                         "Goroutine at line {} may be spawned without rate limiting or \
@@ -103,11 +101,13 @@ impl Rule for GoUnboundedGoroutinesRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
-                        fix_preview: Some("// Use worker pool or semaphore for bounded concurrency".to_string()),
+                        fix_preview: Some(
+                            "// Use worker pool or semaphore for bounded concurrency".to_string(),
+                        ),
                         tags: vec![
                             "go".into(),
                             "concurrency".into(),
@@ -135,7 +135,8 @@ fn generate_worker_pool_patch(file_id: FileId, line: u32) -> FilePatch {
 //     })
 // }
 // wp.StopWait()
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

@@ -31,11 +31,14 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
-use crate::types::finding::{Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage, Severity};
+use crate::types::finding::{
+    Benefit, DecisionLevel, FindingApplicability, FindingKind, InvestmentLevel, LifecycleStage,
+    Severity,
+};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 
 /// Rule that detects select! without timeout branch.
@@ -71,7 +74,8 @@ impl Rule for RustMissingSelectTimeoutRule {
             benefits: vec![Benefit::Reliability, Benefit::Latency],
             prerequisites: vec!["Pick sensible time budgets for operations".to_string()],
             notes: Some(
-                "Timeouts are almost always appropriate; tune values as the service matures.".to_string(),
+                "Timeouts are almost always appropriate; tune values as the service matures."
+                    .to_string(),
             ),
         })
     }
@@ -182,7 +186,7 @@ impl Rule for RustMissingSelectTimeoutRule {
                     column: Some(select.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -204,8 +208,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

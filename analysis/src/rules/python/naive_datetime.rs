@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::{ImportInsertionType, PyImport};
@@ -44,7 +44,10 @@ impl PythonNaiveDatetimeRule {
     }
 
     /// Check if a call is a naive datetime constructor
-    fn is_naive_datetime_call(callee: &str, args: &[crate::semantics::python::model::PyCallArg]) -> Option<NaiveDatetimePattern> {
+    fn is_naive_datetime_call(
+        callee: &str,
+        args: &[crate::semantics::python::model::PyCallArg],
+    ) -> Option<NaiveDatetimePattern> {
         match callee {
             // datetime.now() without timezone
             "datetime.now" | "datetime.datetime.now" => {
@@ -171,11 +174,14 @@ impl Rule for PythonNaiveDatetimeRule {
             };
 
             // Use stdlib_from_import line for `from datetime import timezone`
-            let import_line = py.import_insertion_line_for(ImportInsertionType::stdlib_from_import());
-            
+            let import_line =
+                py.import_insertion_line_for(ImportInsertionType::stdlib_from_import());
+
             // Check call sites for naive datetime patterns
             for call in &py.calls {
-                if let Some(pattern) = Self::is_naive_datetime_call(&call.function_call.callee_expr, &call.args) {
+                if let Some(pattern) =
+                    Self::is_naive_datetime_call(&call.function_call.callee_expr, &call.args)
+                {
                     let location = &call.function_call.location;
 
                     // Generate the actual replacement code
@@ -185,15 +191,16 @@ impl Rule for PythonNaiveDatetimeRule {
                     // 1. Import at the top of the file (only if not already imported)
                     // 2. Actual code replacement using byte positions
                     let mut hunks = Vec::new();
-                    
+
                     // Only add import if timezone is not already imported
                     if !has_timezone_import(&py.imports) {
                         hunks.push(PatchHunk {
                             range: PatchRange::InsertBeforeLine { line: import_line },
-                            replacement: "from datetime import timezone  # Added by unfault\n".to_string(),
+                            replacement: "from datetime import timezone  # Added by unfault\n"
+                                .to_string(),
                         });
                     }
-                    
+
                     // Always add the replacement hunk
                     hunks.push(PatchHunk {
                         range: PatchRange::ReplaceBytes {
@@ -202,7 +209,7 @@ impl Rule for PythonNaiveDatetimeRule {
                         },
                         replacement: replacement.clone(),
                     });
-                    
+
                     let file_patch = FilePatch {
                         file_id: *file_id,
                         hunks,
@@ -400,7 +407,10 @@ expires_at = datetime.now(UTC) + timedelta(seconds=600)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "datetime.now(UTC) should not trigger naive datetime warning");
+        assert!(
+            findings.is_empty(),
+            "datetime.now(UTC) should not trigger naive datetime warning"
+        );
     }
 
     #[tokio::test]
@@ -547,7 +557,7 @@ def hello():
     #[tokio::test]
     async fn patch_actually_replaces_datetime_now() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = PythonNaiveDatetimeRule::new();
         let src = "from datetime import datetime\nnow = datetime.now()\n";
         let (file_id, sem) = parse_and_build_semantics(src);
@@ -555,10 +565,10 @@ def hello():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
+
         // The patch should add import and replace the call
         assert!(patched.contains("from datetime import timezone"));
         assert!(patched.contains("datetime.now(timezone.utc)"));
@@ -568,7 +578,7 @@ def hello():
     #[tokio::test]
     async fn patch_actually_replaces_datetime_utcnow() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = PythonNaiveDatetimeRule::new();
         let src = "from datetime import datetime\nutc = datetime.utcnow()\n";
         let (file_id, sem) = parse_and_build_semantics(src);
@@ -576,10 +586,10 @@ def hello():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
+
         // The patch should add import and replace the deprecated call
         assert!(patched.contains("from datetime import timezone"));
         assert!(patched.contains("datetime.now(timezone.utc)"));
@@ -589,7 +599,7 @@ def hello():
     #[tokio::test]
     async fn patch_actually_replaces_datetime_today() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = PythonNaiveDatetimeRule::new();
         let src = "from datetime import datetime\ntd = datetime.today()\n";
         let (file_id, sem) = parse_and_build_semantics(src);
@@ -597,10 +607,10 @@ def hello():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
+
         // The patch should add import and replace the call
         assert!(patched.contains("from datetime import timezone"));
         assert!(patched.contains("datetime.now(timezone.utc)"));
@@ -616,13 +626,19 @@ def hello():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
-        
+
         // Verify that one hunk is ReplaceBytes (the actual fix)
         let has_replace_bytes = patch.hunks.iter().any(|h| {
-            matches!(h.range, crate::types::patch::PatchRange::ReplaceBytes { .. })
+            matches!(
+                h.range,
+                crate::types::patch::PatchRange::ReplaceBytes { .. }
+            )
         });
-        assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+        assert!(
+            has_replace_bytes,
+            "Patch should use ReplaceBytes for actual code replacement"
+        );
     }
 }

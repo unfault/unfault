@@ -9,9 +9,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -135,18 +135,22 @@ impl Rule for PythonDbTimeoutRule {
             };
 
             // Check for database-related imports
-            let has_sqlalchemy = py.imports.iter().any(|i| {
-                i.module.starts_with("sqlalchemy")
-            });
-            let has_psycopg2 = py.imports.iter().any(|i| {
-                i.module == "psycopg2" || i.module.starts_with("psycopg2.")
-            });
-            let has_psycopg = py.imports.iter().any(|i| {
-                i.module == "psycopg" || i.module.starts_with("psycopg.")
-            });
-            let has_asyncpg = py.imports.iter().any(|i| {
-                i.module == "asyncpg" || i.module.starts_with("asyncpg.")
-            });
+            let has_sqlalchemy = py
+                .imports
+                .iter()
+                .any(|i| i.module.starts_with("sqlalchemy"));
+            let has_psycopg2 = py
+                .imports
+                .iter()
+                .any(|i| i.module == "psycopg2" || i.module.starts_with("psycopg2."));
+            let has_psycopg = py
+                .imports
+                .iter()
+                .any(|i| i.module == "psycopg" || i.module.starts_with("psycopg."));
+            let has_asyncpg = py
+                .imports
+                .iter()
+                .any(|i| i.module == "asyncpg" || i.module.starts_with("asyncpg."));
 
             if !has_sqlalchemy && !has_psycopg2 && !has_psycopg && !has_asyncpg {
                 continue;
@@ -196,26 +200,17 @@ impl Rule for PythonDbTimeoutRule {
                     let line = call.function_call.location.line;
                     let col = call.function_call.location.column;
 
-                    let patch = generate_timeout_patch(
-                        *file_id,
-                        pattern,
-                        call,
-                    );
+                    let patch = generate_timeout_patch(*file_id, pattern, call);
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
-                        title: format!(
-                            "Database {} call without timeout",
-                            pattern.call_name
-                        ),
+                        title: format!("Database {} call without timeout", pattern.call_name),
                         description: Some(format!(
                             "The {} call from {} does not specify a timeout parameter ({}). \
                             Without a timeout, database connections can hang indefinitely \
                             on network issues, leading to connection pool exhaustion and \
                             cascading failures.",
-                            pattern.call_name,
-                            pattern.module,
-                            pattern.timeout_param
+                            pattern.call_name, pattern.module, pattern.timeout_param
                         )),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::High,
@@ -225,9 +220,9 @@ impl Rule for PythonDbTimeoutRule {
                         file_path: py.path.clone(),
                         line: Some(line),
                         column: Some(col),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(generate_fix_preview(pattern)),
                         tags: vec![
@@ -251,7 +246,7 @@ fn generate_timeout_patch(
     call: &PyCallSite,
 ) -> FilePatch {
     let args_trimmed = call.args_repr.trim_matches(|c| c == '(' || c == ')');
-    
+
     // For async engines (asyncpg), use "timeout" instead of "connect_timeout"
     let timeout_param = match pattern.module {
         "sqlalchemy" => {
@@ -262,12 +257,8 @@ fn generate_timeout_patch(
             // Async SQLAlchemy typically uses asyncpg which wants "timeout"
             "connect_args={\"timeout\": 10}"
         }
-        "psycopg2" | "psycopg" => {
-            "connect_timeout=10"
-        }
-        "asyncpg" => {
-            "timeout=10"
-        }
+        "psycopg2" | "psycopg" => "connect_timeout=10",
+        "asyncpg" => "timeout=10",
         _ => "timeout=10",
     };
 
@@ -277,12 +268,12 @@ fn generate_timeout_patch(
     } else {
         // Check if this is a multi-line call (contains newlines)
         let is_multiline = args_trimmed.contains('\n');
-        
+
         if is_multiline {
             // For multi-line arguments, detect indentation and add properly formatted parameter
             // Strip trailing comma and whitespace from args
             let args_clean = args_trimmed.trim_end().trim_end_matches(',');
-            
+
             // Detect indentation from the arguments
             // Find the first line with content to determine indent
             let indent = args_trimmed
@@ -292,20 +283,20 @@ fn generate_timeout_patch(
                     let content_start = line.len() - line.trim_start().len();
                     &line[..content_start]
                 })
-                .unwrap_or("    ");  // Default to 4 spaces
-            
+                .unwrap_or("    "); // Default to 4 spaces
+
             format!(
                 "{}({},\n{}{},\n)",
-                call.function_call.callee_expr,
-                args_clean,
-                indent,
-                timeout_param
+                call.function_call.callee_expr, args_clean, indent, timeout_param
             )
         } else {
             // Single line - simple append
             // Strip trailing comma if present
             let args_clean = args_trimmed.trim_end().trim_end_matches(',');
-            format!("{}({}, {})", call.function_call.callee_expr, args_clean, timeout_param)
+            format!(
+                "{}({}, {})",
+                call.function_call.callee_expr, args_clean, timeout_param
+            )
         }
     };
 
@@ -324,52 +315,42 @@ fn generate_timeout_patch(
 /// Generate a fix preview for the finding.
 fn generate_fix_preview(pattern: &DbCallPattern) -> String {
     match pattern.module {
-        "sqlalchemy" => {
-            "# SQLAlchemy with timeout:\n\
+        "sqlalchemy" => "# SQLAlchemy with timeout:\n\
              from sqlalchemy import create_engine\n\n\
              engine = create_engine(\n    \
                  DATABASE_URL,\n    \
                  connect_args={\"connect_timeout\": 10},\n    \
                  pool_pre_ping=True,  # Also recommended\n\
              )"
-            .to_string()
-        }
-        "sqlalchemy.ext.asyncio" => {
-            "# SQLAlchemy async with timeout (asyncpg):\n\
+        .to_string(),
+        "sqlalchemy.ext.asyncio" => "# SQLAlchemy async with timeout (asyncpg):\n\
              from sqlalchemy.ext.asyncio import create_async_engine\n\n\
              engine = create_async_engine(\n    \
                  DATABASE_URL,\n    \
                  connect_args={\"timeout\": 10},  # asyncpg uses 'timeout'\n\
              )"
-            .to_string()
-        }
-        "psycopg2" => {
-            "# psycopg2 with timeout:\n\
+        .to_string(),
+        "psycopg2" => "# psycopg2 with timeout:\n\
              import psycopg2\n\n\
              conn = psycopg2.connect(\n    \
                  dsn,\n    \
                  connect_timeout=10,\n\
              )"
-            .to_string()
-        }
-        "psycopg" => {
-            "# psycopg with timeout:\n\
+        .to_string(),
+        "psycopg" => "# psycopg with timeout:\n\
              import psycopg\n\n\
              conn = psycopg.connect(\n    \
                  dsn,\n    \
                  connect_timeout=10,\n\
              )"
-            .to_string()
-        }
-        "asyncpg" => {
-            "# asyncpg with timeout:\n\
+        .to_string(),
+        "asyncpg" => "# asyncpg with timeout:\n\
              import asyncpg\n\n\
              conn = await asyncpg.connect(\n    \
                  dsn,\n    \
                  timeout=10,\n\
              )"
-            .to_string()
-        }
+        .to_string(),
         _ => format!("Add {} parameter to the call", pattern.timeout_param),
     }
 }
@@ -409,7 +390,10 @@ def get_engine():
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect create_engine without timeout");
+        assert!(
+            !findings.is_empty(),
+            "Should detect create_engine without timeout"
+        );
         assert!(findings[0].title.contains("create_engine"));
     }
 
@@ -426,7 +410,10 @@ async def get_engine():
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect create_async_engine without timeout");
+        assert!(
+            !findings.is_empty(),
+            "Should detect create_async_engine without timeout"
+        );
     }
 
     #[tokio::test]
@@ -442,7 +429,10 @@ def get_connection():
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect psycopg2.connect without timeout");
+        assert!(
+            !findings.is_empty(),
+            "Should detect psycopg2.connect without timeout"
+        );
     }
 
     #[tokio::test]
@@ -458,7 +448,10 @@ async def get_connection():
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect asyncpg.connect without timeout");
+        assert!(
+            !findings.is_empty(),
+            "Should detect asyncpg.connect without timeout"
+        );
     }
 
     #[tokio::test]
@@ -472,7 +465,10 @@ engine = create_engine("postgresql://localhost/db")
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect module-level create_engine");
+        assert!(
+            !findings.is_empty(),
+            "Should detect module-level create_engine"
+        );
     }
 
     // ==================== Negative Tests (Should Not Detect) ====================
@@ -493,7 +489,10 @@ def get_engine():
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(findings.is_empty(), "Should not flag create_engine with connect_args");
+        assert!(
+            findings.is_empty(),
+            "Should not flag create_engine with connect_args"
+        );
     }
 
     #[tokio::test]
@@ -509,7 +508,10 @@ def get_connection():
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(findings.is_empty(), "Should not flag psycopg2.connect with timeout");
+        assert!(
+            findings.is_empty(),
+            "Should not flag psycopg2.connect with timeout"
+        );
     }
 
     #[tokio::test]
@@ -525,7 +527,10 @@ async def get_connection():
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(findings.is_empty(), "Should not flag asyncpg.connect with timeout");
+        assert!(
+            findings.is_empty(),
+            "Should not flag asyncpg.connect with timeout"
+        );
     }
 
     #[tokio::test]
@@ -571,7 +576,7 @@ def get_engine():
 
         assert!(!findings.is_empty());
         assert!(findings[0].patch.is_some());
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         assert!(!patch.hunks.is_empty());
         assert!(patch.hunks[0].replacement.contains("connect_args"));
@@ -592,7 +597,7 @@ engine = create_async_engine("postgresql+asyncpg://localhost/db")
 
         assert!(!findings.is_empty());
         assert!(findings[0].patch.is_some());
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         assert!(!patch.hunks.is_empty());
         // Async SQLAlchemy (asyncpg) uses timeout, not connect_timeout
@@ -606,7 +611,7 @@ engine = create_async_engine("postgresql+asyncpg://localhost/db")
     #[tokio::test]
     async fn patch_adds_connect_args_to_sqlalchemy() {
         use crate::types::patch::apply_file_patch;
-        
+
         let src = "from sqlalchemy import create_engine\nengine = create_engine(\"postgresql://localhost/db\")\n";
         let (file_id, sem) = parse_and_analyze(src);
         let rule = PythonDbTimeoutRule::new();
@@ -615,15 +620,21 @@ engine = create_async_engine("postgresql+asyncpg://localhost/db")
         assert!(!findings.is_empty());
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("connect_args="), "Patched code should contain connect_args");
-        assert!(patched.contains("connect_timeout"), "Patched code should contain connect_timeout");
+
+        assert!(
+            patched.contains("connect_args="),
+            "Patched code should contain connect_args"
+        );
+        assert!(
+            patched.contains("connect_timeout"),
+            "Patched code should contain connect_timeout"
+        );
     }
 
     #[tokio::test]
     async fn patch_adds_connect_timeout_to_psycopg2() {
         use crate::types::patch::apply_file_patch;
-        
+
         let src = "import psycopg2\nconn = psycopg2.connect(\"dbname=test\")\n";
         let (file_id, sem) = parse_and_analyze(src);
         let rule = PythonDbTimeoutRule::new();
@@ -632,14 +643,17 @@ engine = create_async_engine("postgresql+asyncpg://localhost/db")
         assert!(!findings.is_empty());
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("connect_timeout=10"), "Patched code should contain connect_timeout=10");
+
+        assert!(
+            patched.contains("connect_timeout=10"),
+            "Patched code should contain connect_timeout=10"
+        );
     }
 
     #[tokio::test]
     async fn patch_adds_timeout_to_asyncpg() {
         use crate::types::patch::apply_file_patch;
-        
+
         let src = "import asyncpg\nconn = asyncpg.connect(\"postgresql://localhost/db\")\n";
         let (file_id, sem) = parse_and_analyze(src);
         let rule = PythonDbTimeoutRule::new();
@@ -648,8 +662,11 @@ engine = create_async_engine("postgresql+asyncpg://localhost/db")
         assert!(!findings.is_empty());
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("timeout=10"), "Patched code should contain timeout=10");
+
+        assert!(
+            patched.contains("timeout=10"),
+            "Patched code should contain timeout=10"
+        );
     }
 
     #[tokio::test]
@@ -661,11 +678,15 @@ engine = create_async_engine("postgresql+asyncpg://localhost/db")
 
         assert!(!findings.is_empty());
         let patch = findings[0].patch.as_ref().unwrap();
-        
-        let has_replace_bytes = patch.hunks.iter().any(|h| {
-            matches!(h.range, PatchRange::ReplaceBytes { .. })
-        });
-        assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+
+        let has_replace_bytes = patch
+            .hunks
+            .iter()
+            .any(|h| matches!(h.range, PatchRange::ReplaceBytes { .. }));
+        assert!(
+            has_replace_bytes,
+            "Patch should use ReplaceBytes for actual code replacement"
+        );
     }
 
     #[tokio::test]
@@ -683,7 +704,7 @@ def get_engine():
 
         assert!(!findings.is_empty());
         assert!(findings[0].fix_preview.is_some());
-        
+
         let preview = findings[0].fix_preview.as_ref().unwrap();
         assert!(preview.contains("connect_timeout"));
     }
@@ -761,7 +782,7 @@ def get_engine():
     #[tokio::test]
     async fn patch_handles_multiline_args_with_trailing_comma() {
         use crate::types::patch::apply_file_patch;
-        
+
         let src = r#"from sqlalchemy.ext.asyncio import create_async_engine
 
 engine = create_async_engine(
@@ -774,31 +795,46 @@ engine = create_async_engine(
         let rule = PythonDbTimeoutRule::new();
         let findings = rule.evaluate(&[(file_id, sem)], None).await;
 
-        assert!(!findings.is_empty(), "Should detect create_async_engine without timeout");
+        assert!(
+            !findings.is_empty(),
+            "Should detect create_async_engine without timeout"
+        );
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
+
         // Verify the patch is correctly formatted
-        assert!(patched.contains("connect_args="), "Patched code should contain connect_args");
-        
+        assert!(
+            patched.contains("connect_args="),
+            "Patched code should contain connect_args"
+        );
+
         // Verify no double commas
-        assert!(!patched.contains(",,"), "Patched code should not have double commas");
-        
+        assert!(
+            !patched.contains(",,"),
+            "Patched code should not have double commas"
+        );
+
         // Verify proper indentation (the new parameter should be on its own line)
         let lines: Vec<&str> = patched.lines().collect();
         let connect_args_line = lines.iter().find(|l| l.contains("connect_args="));
-        assert!(connect_args_line.is_some(), "connect_args should be on its own line");
-        
+        assert!(
+            connect_args_line.is_some(),
+            "connect_args should be on its own line"
+        );
+
         // The connect_args line should have proper indentation (starts with spaces)
         let line = connect_args_line.unwrap();
-        assert!(line.starts_with("    ") || line.starts_with("\t"),
-            "connect_args line should be properly indented, got: {:?}", line);
+        assert!(
+            line.starts_with("    ") || line.starts_with("\t"),
+            "connect_args line should be properly indented, got: {:?}",
+            line
+        );
     }
 
     #[tokio::test]
     async fn patch_handles_single_line_args() {
         use crate::types::patch::apply_file_patch;
-        
+
         let src = r#"from sqlalchemy import create_engine
 engine = create_engine("postgresql://localhost/db", echo=True)
 "#;
@@ -809,8 +845,11 @@ engine = create_engine("postgresql://localhost/db", echo=True)
         assert!(!findings.is_empty());
         let patch = findings[0].patch.as_ref().unwrap();
         let patched = apply_file_patch(src, patch);
-        
+
         // Single line should stay single line
-        assert!(patched.contains("create_engine(\"postgresql://localhost/db\", echo=True, connect_args="));
+        assert!(
+            patched
+                .contains("create_engine(\"postgresql://localhost/db\", echo=True, connect_args=")
+        );
     }
 }

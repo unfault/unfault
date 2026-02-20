@@ -54,9 +54,10 @@ impl Rule for FlaskInsecureCookieSettingsRule {
             };
 
             // Check for Flask imports
-            let has_flask = py.imports.iter().any(|imp| {
-                imp.module == "flask" || imp.names.iter().any(|n| n == "Flask")
-            });
+            let has_flask = py
+                .imports
+                .iter()
+                .any(|imp| imp.module == "flask" || imp.names.iter().any(|n| n == "Flask"));
 
             let is_config_file = py.path.contains("config")
                 || py.path.contains("settings")
@@ -82,7 +83,8 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                                 description: Some(
                                     "SESSION_COOKIE_SECURE=False allows session cookies to be \
                                      sent over unencrypted HTTP connections. In production, \
-                                     set this to True to ensure cookies are only sent over HTTPS.".to_string()
+                                     set this to True to ensure cookies are only sent over HTTPS."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::High,
@@ -92,10 +94,14 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "SESSION_COOKIE_SECURE = True")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "SESSION_COOKIE_SECURE = True",
+                                )),
                                 fix_preview: Some(generate_secure_cookie_fix_preview()),
                                 tags: vec![
                                     "python".into(),
@@ -115,7 +121,8 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                                 description: Some(
                                     "SESSION_COOKIE_HTTPONLY=False allows JavaScript to access \
                                      session cookies, making them vulnerable to XSS attacks. \
-                                     Set this to True (the default) to prevent JavaScript access.".to_string()
+                                     Set this to True (the default) to prevent JavaScript access."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::High,
@@ -125,10 +132,14 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "SESSION_COOKIE_HTTPONLY = True")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "SESSION_COOKIE_HTTPONLY = True",
+                                )),
                                 fix_preview: Some(generate_httponly_fix_preview()),
                                 tags: vec![
                                     "python".into(),
@@ -143,14 +154,19 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                     "SESSION_COOKIE_SAMESITE" => {
                         has_session_cookie_samesite = true;
                         let value = assign.value_repr.trim().to_lowercase();
-                        if value == "none" || value == "'none'" || value == "\"none\"" || value == "false" {
+                        if value == "none"
+                            || value == "'none'"
+                            || value == "\"none\""
+                            || value == "false"
+                        {
                             findings.push(RuleFinding {
                                 rule_id: self.id().to_string(),
                                 title: "Flask SESSION_COOKIE_SAMESITE is set to None".to_string(),
                                 description: Some(
                                     "SESSION_COOKIE_SAMESITE=None allows the session cookie to be \
                                      sent with cross-site requests, making it vulnerable to CSRF \
-                                     attacks. Use 'Lax' or 'Strict'.".to_string()
+                                     attacks. Use 'Lax' or 'Strict'."
+                                        .to_string(),
                                 ),
                                 kind: FindingKind::StabilityRisk,
                                 severity: Severity::Medium,
@@ -160,10 +176,14 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                                 file_path: py.path.clone(),
                                 line: Some(assign.location.range.start_line + 1),
                                 column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
-                                patch: Some(generate_setting_patch(*file_id, assign.location.range.start_line + 1, "SESSION_COOKIE_SAMESITE = 'Lax'")),
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: Some(generate_setting_patch(
+                                    *file_id,
+                                    assign.location.range.start_line + 1,
+                                    "SESSION_COOKIE_SAMESITE = 'Lax'",
+                                )),
                                 fix_preview: Some(generate_samesite_fix_preview()),
                                 tags: vec![
                                     "python".into(),
@@ -179,15 +199,19 @@ impl Rule for FlaskInsecureCookieSettingsRule {
             }
 
             // Check for Flask app creation without secure cookie settings
-            let has_flask_app = py.calls.iter().any(|c| c.function_call.callee_expr == "Flask");
+            let has_flask_app = py
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "Flask");
 
             if has_flask_app {
                 // Check if this looks like a production config
                 let is_prod_config = py.path.contains("prod")
                     || py.path.contains("production")
-                    || py.assignments.iter().any(|a| {
-                        a.target == "DEBUG" && a.value_repr.trim() == "False"
-                    });
+                    || py
+                        .assignments
+                        .iter()
+                        .any(|a| a.target == "DEBUG" && a.value_repr.trim() == "False");
 
                 if is_prod_config {
                     let mut missing_settings = Vec::new();
@@ -206,10 +230,14 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                     if !missing_settings.is_empty() {
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
-                            title: format!("Flask missing cookie security settings: {}", missing_settings.join(", ")),
+                            title: format!(
+                                "Flask missing cookie security settings: {}",
+                                missing_settings.join(", ")
+                            ),
                             description: Some(
                                 "Production Flask configuration is missing important cookie \
-                                 security settings. Add these settings to protect session cookies.".to_string()
+                                 security settings. Add these settings to protect session cookies."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::Medium,
@@ -219,9 +247,9 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                             file_path: py.path.clone(),
                             line: Some(1),
                             column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(generate_all_cookie_settings_fix_preview()),
                             tags: vec![
@@ -271,7 +299,8 @@ class ProductionConfig:
     SESSION_COOKIE_SECURE = True
 
 class DevelopmentConfig:
-    SESSION_COOKIE_SECURE = False"#.to_string()
+    SESSION_COOKIE_SECURE = False"#
+        .to_string()
 }
 
 /// Generate fix preview for SESSION_COOKIE_HTTPONLY.
@@ -282,7 +311,8 @@ fn generate_httponly_fix_preview() -> String {
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 
 # This prevents XSS attacks from stealing session cookies
-# Never set this to False unless you have a very specific need"#.to_string()
+# Never set this to False unless you have a very specific need"#
+        .to_string()
 }
 
 /// Generate fix preview for SESSION_COOKIE_SAMESITE.
@@ -296,7 +326,8 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 # app.config['SESSION_COOKIE_SAMESITE'] = 'Strict'
 
 # Never use None unless you need cross-site cookies
-# If you must use None, SESSION_COOKIE_SECURE must be True"#.to_string()
+# If you must use None, SESSION_COOKIE_SECURE must be True"#
+        .to_string()
 }
 
 /// Generate fix preview for all cookie settings.
@@ -335,7 +366,8 @@ class DevelopmentConfig(Config):
 
 # Or use environment variables:
 import os
-app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'"#.to_string()
+app.config['SESSION_COOKIE_SECURE'] = os.environ.get('FLASK_ENV') == 'production'"#
+        .to_string()
 }
 
 #[cfg(test)]

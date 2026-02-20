@@ -2,14 +2,14 @@
 //!
 //! Detects patterns that can lead to memory exhaustion like unbounded slice growth.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -53,14 +53,20 @@ impl Rule for GoUnboundedMemoryRule {
             };
 
             // Check for dangerous patterns via calls
-            
+
             // Check for ReadAll without LimitReader
-            let has_limit_reader = go.calls.iter().any(|c| c.function_call.callee_expr.contains("LimitReader"));
-            
+            let has_limit_reader = go
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr.contains("LimitReader"));
+
             for call in &go.calls {
                 // ioutil.ReadAll / io.ReadAll without bounds
-                if (call.function_call.callee_expr.contains("ReadAll") || call.function_call.callee_expr == "io.ReadAll" || call.function_call.callee_expr == "ioutil.ReadAll") 
-                    && !has_limit_reader {
+                if (call.function_call.callee_expr.contains("ReadAll")
+                    || call.function_call.callee_expr == "io.ReadAll"
+                    || call.function_call.callee_expr == "ioutil.ReadAll")
+                    && !has_limit_reader
+                {
                     let line = call.function_call.location.line;
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
@@ -102,7 +108,8 @@ impl Rule for GoUnboundedMemoryRule {
                         description: Some(
                             "Appending to a slice in a loop without bounds checking \
                              can lead to memory exhaustion. Add a maximum size check \
-                             before appending.".to_string()
+                             before appending."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -112,14 +119,16 @@ impl Rule for GoUnboundedMemoryRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: "// Add bounds check: if len(slice) >= maxSize { break }".to_string(),
+                                replacement:
+                                    "// Add bounds check: if len(slice) >= maxSize { break }"
+                                        .to_string(),
                             }],
                         }),
                         fix_preview: Some("Add maximum size check".to_string()),
@@ -129,20 +138,23 @@ impl Rule for GoUnboundedMemoryRule {
             }
 
             // Check HTTP handlers for JSON decode without size limit
-            let has_max_bytes_reader = go.calls.iter().any(|c| c.function_call.callee_expr.contains("MaxBytesReader"));
-            
+            let has_max_bytes_reader = go
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr.contains("MaxBytesReader"));
+
             for func in &go.functions {
                 let is_http_handler = func.params.iter().any(|p| {
-                    p.param_type.contains("http.ResponseWriter") ||
-                    p.param_type.contains("*gin.Context") ||
-                    p.param_type.contains("echo.Context")
+                    p.param_type.contains("http.ResponseWriter")
+                        || p.param_type.contains("*gin.Context")
+                        || p.param_type.contains("echo.Context")
                 });
 
                 if is_http_handler && !has_max_bytes_reader {
                     // Check if JSON decode is used in this file
                     let has_json_decode = go.calls.iter().any(|c| {
-                        c.function_call.callee_expr.contains("json.Decode") || 
-                        c.function_call.callee_expr.contains("json.NewDecoder")
+                        c.function_call.callee_expr.contains("json.Decode")
+                            || c.function_call.callee_expr.contains("json.NewDecoder")
                     });
 
                     if has_json_decode {

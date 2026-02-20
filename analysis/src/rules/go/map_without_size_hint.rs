@@ -3,14 +3,14 @@
 //! Detects map creation without initial capacity hint in hot paths,
 //! which causes multiple rehashing operations as the map grows.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -64,10 +64,10 @@ impl Rule for GoMapWithoutSizeHintRule {
                     // Maps created in loops without size hints are particularly bad
                     if call.in_loop {
                         let line = call.function_call.location.line;
-                        
+
                         // Check if size hint is provided (make(map[K]V, size))
                         let has_size_hint = call.args_repr.matches(',').count() >= 1;
-                        
+
                         if !has_size_hint {
                             let title = "Map created in loop without size hint".to_string();
 
@@ -98,7 +98,9 @@ impl Rule for GoMapWithoutSizeHintRule {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
                                     range: PatchRange::InsertBeforeLine { line },
-                                    replacement: "// PERF: Add size hint: make(map[K]V, expectedSize)".to_string(),
+                                    replacement:
+                                        "// PERF: Add size hint: make(map[K]V, expectedSize)"
+                                            .to_string(),
                                 }],
                             };
 
@@ -114,9 +116,9 @@ impl Rule for GoMapWithoutSizeHintRule {
                                 file_path: go.path.clone(),
                                 line: Some(line),
                                 column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
                                 patch: Some(patch),
                                 fix_preview: Some("Add size hint to make()".to_string()),
                                 tags: vec![
@@ -128,15 +130,17 @@ impl Rule for GoMapWithoutSizeHintRule {
                             });
                         }
                     }
-                    
+
                     // Also flag function-level maps without hints if they're likely to grow large
                     // based on function name heuristics
                     if !call.in_loop {
                         let has_size_hint = call.args_repr.matches(',').count() >= 1;
-                        
+
                         if !has_size_hint {
                             // Check if function name suggests bulk processing
-                            let func_name_lower = go.functions.iter()
+                            let func_name_lower = go
+                                .functions
+                                .iter()
                                 .find(|f| {
                                     let line = f.location.range.start_line + 1;
                                     let call_line = call.function_call.location.line;
@@ -145,19 +149,19 @@ impl Rule for GoMapWithoutSizeHintRule {
                                 .map(|f| f.name.to_lowercase());
 
                             let is_bulk_func = func_name_lower.as_ref().is_some_and(|name| {
-                                name.contains("batch") ||
-                                name.contains("bulk") ||
-                                name.contains("all") ||
-                                name.contains("many") ||
-                                name.contains("collect") ||
-                                name.contains("aggregate") ||
-                                name.contains("index") ||
-                                name.contains("cache")
+                                name.contains("batch")
+                                    || name.contains("bulk")
+                                    || name.contains("all")
+                                    || name.contains("many")
+                                    || name.contains("collect")
+                                    || name.contains("aggregate")
+                                    || name.contains("index")
+                                    || name.contains("cache")
                             });
 
                             if is_bulk_func {
                                 let line = call.function_call.location.line;
-                                
+
                                 let title = "Map in bulk operation without size hint".to_string();
 
                                 let description = format!(
@@ -173,7 +177,9 @@ impl Rule for GoMapWithoutSizeHintRule {
                                     file_id: *file_id,
                                     hunks: vec![PatchHunk {
                                         range: PatchRange::InsertBeforeLine { line },
-                                        replacement: "// PERF: Consider adding size hint for bulk operation".to_string(),
+                                        replacement:
+                                            "// PERF: Consider adding size hint for bulk operation"
+                                                .to_string(),
                                     }],
                                 };
 
@@ -189,16 +195,12 @@ impl Rule for GoMapWithoutSizeHintRule {
                                     file_path: go.path.clone(),
                                     line: Some(line),
                                     column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                    end_line: None,
+                                    end_column: None,
+                                    byte_range: None,
                                     patch: Some(patch),
                                     fix_preview: Some("Add size hint".to_string()),
-                                    tags: vec![
-                                        "go".into(),
-                                        "performance".into(),
-                                        "map".into(),
-                                    ],
+                                    tags: vec!["go".into(), "performance".into(), "map".into()],
                                 });
                             }
                         }
@@ -216,8 +218,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -242,7 +244,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_map_in_loop_without_hint() {
         let rule = GoMapWithoutSizeHintRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func process(batches [][]Item) []map[string]int {
@@ -256,17 +259,23 @@ func process(batches [][]Item) []map[string]int {
     }
     return results
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.iter().any(|f| f.rule_id == "go.map_without_size_hint"));
+
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.rule_id == "go.map_without_size_hint")
+        );
     }
 
     #[tokio::test]
     async fn test_no_finding_with_size_hint() {
         let rule = GoMapWithoutSizeHintRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 func process(items []Item) map[string]int {
@@ -276,11 +285,13 @@ func process(items []Item) map[string]int {
     }
     return m
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
-        let map_findings: Vec<_> = findings.iter()
+
+        let map_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.map_without_size_hint")
             .collect();
         assert!(map_findings.is_empty());

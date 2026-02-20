@@ -10,8 +10,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::structured_logging;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::structured_logging;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::{ImportInsertionType, PyImport};
@@ -151,7 +151,8 @@ impl Rule for PythonMissingStructuredLoggingRule {
             // This pattern (from .logging import get_logger) suggests the project
             // has its own logging module that likely wraps structured logging
             let imports_custom_get_logger = py.imports.iter().any(|imp| {
-                (imp.module.ends_with(".logging") || (imp.module.ends_with("logging") && imp.module.contains('.')))
+                (imp.module.ends_with(".logging")
+                    || (imp.module.ends_with("logging") && imp.module.contains('.')))
                     && imp.names.iter().any(|n| n == "get_logger")
             });
 
@@ -246,10 +247,7 @@ fn create_finding(
     import_line: u32,
     logger_setup_line: u32,
 ) -> RuleFinding {
-    let title = format!(
-        "Unstructured logging: {}",
-        unstructured.function_name
-    );
+    let title = format!("Unstructured logging: {}", unstructured.function_name);
 
     let description = format!(
         "{}. Structured logging enables better log aggregation, searching, \
@@ -258,15 +256,15 @@ fn create_finding(
         unstructured.issue_type.description()
     );
 
-    let patch = generate_structured_logging_patch(unstructured, file_id, import_line, logger_setup_line);
+    let patch =
+        generate_structured_logging_patch(unstructured, file_id, import_line, logger_setup_line);
 
     let fix_preview = match unstructured.issue_type {
-        LoggingIssueType::PrintStatement => {
-            "# Replace print() with structured logging:\n\
+        LoggingIssueType::PrintStatement => "# Replace print() with structured logging:\n\
              # import structlog\n\
              # logger = structlog.get_logger()\n\
-             # logger.info(\"message\", key=\"value\")".to_string()
-        }
+             # logger.info(\"message\", key=\"value\")"
+            .to_string(),
         LoggingIssueType::BasicLogging => {
             // Show a concrete example of the transformation
             let level = unstructured.log_level.as_deref().unwrap_or("info");
@@ -291,9 +289,9 @@ fn create_finding(
         file_path: file_path.to_string(),
         line: Some(unstructured.line),
         column: Some(unstructured.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -307,9 +305,9 @@ fn create_finding(
 
 /// Check if logging is already imported
 fn has_logging_import(imports: &[PyImport]) -> bool {
-    imports.iter().any(|imp| {
-        imp.module == "logging" || imp.names.iter().any(|n| n == "logging")
-    })
+    imports
+        .iter()
+        .any(|imp| imp.module == "logging" || imp.names.iter().any(|n| n == "logging"))
 }
 
 /// Extract f-string interpolation expressions from a string.
@@ -319,7 +317,7 @@ fn extract_fstring_expressions(args_repr: &str) -> Vec<(String, String)> {
     let mut depth = 0;
     let mut current_expr = String::new();
     let mut in_expr = false;
-    
+
     for c in args_repr.chars() {
         match c {
             '{' if !in_expr => {
@@ -357,7 +355,7 @@ fn extract_fstring_expressions(args_repr: &str) -> Vec<(String, String)> {
             _ => {}
         }
     }
-    
+
     expressions
 }
 
@@ -366,7 +364,7 @@ fn expression_to_key(expr: &str) -> String {
     // Handle format specifiers like {value:.2f}
     let expr = expr.split(':').next().unwrap_or(expr);
     let expr = expr.split('!').next().unwrap_or(expr); // Handle !r, !s, !a
-    
+
     // If it's a simple attribute access like `r.status_code`, use the last part
     if let Some(dot_pos) = expr.rfind('.') {
         let last_part = &expr[dot_pos + 1..];
@@ -374,7 +372,7 @@ fn expression_to_key(expr: &str) -> String {
         let key = last_part.split('(').next().unwrap_or(last_part);
         return snake_case(key);
     }
-    
+
     // If it's a method call like `get_id()`, use the method name
     if let Some(paren_pos) = expr.find('(') {
         let method = &expr[..paren_pos];
@@ -384,7 +382,7 @@ fn expression_to_key(expr: &str) -> String {
         }
         return snake_case(method);
     }
-    
+
     // If it's a subscript like `data["key"]` or `data['key']`, extract the key
     if expr.contains('[') {
         if let Some(start) = expr.find('[') {
@@ -396,7 +394,7 @@ fn expression_to_key(expr: &str) -> String {
             return snake_case(prefix);
         }
     }
-    
+
     // Simple variable name
     snake_case(expr)
 }
@@ -423,10 +421,10 @@ fn extract_static_message(args_repr: &str) -> String {
     let args_content = args_repr.trim();
     let args_content = args_content.strip_prefix('(').unwrap_or(args_content);
     let args_content = args_content.strip_suffix(')').unwrap_or(args_content);
-    
+
     // Find the message part (before any commas that aren't in strings)
     let message_part = extract_first_string_arg(args_content);
-    
+
     // Remove f-string prefix if present
     let message = message_part.trim();
     let message = message.strip_prefix("f\"").unwrap_or(message);
@@ -435,12 +433,12 @@ fn extract_static_message(args_repr: &str) -> String {
     let message = message.strip_prefix('\'').unwrap_or(message);
     let message = message.strip_suffix('"').unwrap_or(message);
     let message = message.strip_suffix('\'').unwrap_or(message);
-    
+
     // Remove all {expression} parts and clean up the message
     let mut result = String::new();
     let mut in_expr = false;
     let mut depth = 0;
-    
+
     for c in message.chars() {
         match c {
             '{' => {
@@ -461,10 +459,10 @@ fn extract_static_message(args_repr: &str) -> String {
             _ => {}
         }
     }
-    
+
     // Clean up multiple spaces (from removed interpolations) to single space
     let result = result.split_whitespace().collect::<Vec<_>>().join(" ");
-    
+
     // Remove space before punctuation (e.g., " ." -> ".")
     let result = result
         .replace(" .", ".")
@@ -473,33 +471,35 @@ fn extract_static_message(args_repr: &str) -> String {
         .replace(" ;", ";")
         .replace(" !", "!")
         .replace(" ?", "?");
-    
+
     // Clean up the message
     let result = result.trim();
     // Remove trailing punctuation and whitespace that was before the interpolation
-    let result = result.trim_end_matches(|c: char| c == ':' || c == '=' || c == '>' || c == '-' || c.is_whitespace());
+    let result = result.trim_end_matches(|c: char| {
+        c == ':' || c == '=' || c == '>' || c == '-' || c.is_whitespace()
+    });
     let result = result.trim();
-    
+
     result.to_string()
 }
 
 /// Extract the first string argument from a function call arguments
 fn extract_first_string_arg(args: &str) -> String {
     let args = args.trim();
-    
+
     // Handle concatenated strings: "part1" "part2" or "part1" f"part2"
     let mut result = String::new();
     let mut in_string = false;
     let mut string_char = '"';
     let mut escape_next = false;
-    
+
     for c in args.chars() {
         if escape_next {
             result.push(c);
             escape_next = false;
             continue;
         }
-        
+
         match c {
             '\\' if in_string => {
                 result.push(c);
@@ -527,7 +527,7 @@ fn extract_first_string_arg(args: &str) -> String {
             }
         }
     }
-    
+
     result.trim().to_string()
 }
 
@@ -550,8 +550,11 @@ fn generate_structured_logging_patch(
                 });
                 // Add the logger setup AFTER all imports (with a blank line for separation)
                 hunks.push(PatchHunk {
-                    range: PatchRange::InsertBeforeLine { line: logger_setup_line },
-                    replacement: "\nlogger = logging.getLogger(__name__)  # Added by unfault\n".to_string(),
+                    range: PatchRange::InsertBeforeLine {
+                        line: logger_setup_line,
+                    },
+                    replacement: "\nlogger = logging.getLogger(__name__)  # Added by unfault\n"
+                        .to_string(),
                 });
             }
 
@@ -569,7 +572,7 @@ fn generate_structured_logging_patch(
             // Extract f-string expressions and generate structlog-style call
             let expressions = extract_fstring_expressions(&unstructured.args_repr);
             let level = unstructured.log_level.as_deref().unwrap_or("info");
-            
+
             if expressions.is_empty() {
                 // No f-string interpolations found - check for % or .format() style
                 // For now, just add a helpful comment showing the pattern
@@ -588,19 +591,19 @@ fn generate_structured_logging_patch(
             } else {
                 // Generate structlog-style call with keyword arguments
                 let static_msg = extract_static_message(&unstructured.args_repr);
-                
+
                 let kwargs: Vec<String> = expressions
                     .iter()
                     .map(|(expr, key)| format!("{}={}", key, expr))
                     .collect();
-                
+
                 let replacement = format!(
                     "logger.{}(\"{}\", {})",
                     level,
                     static_msg,
                     kwargs.join(", ")
                 );
-                
+
                 hunks.push(PatchHunk {
                     range: PatchRange::ReplaceBytes {
                         start: unstructured.start_byte,
@@ -612,10 +615,7 @@ fn generate_structured_logging_patch(
         }
     }
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -672,14 +672,28 @@ mod tests {
 
     #[test]
     fn issue_type_descriptions_are_meaningful() {
-        assert!(LoggingIssueType::PrintStatement.description().contains("print"));
-        assert!(LoggingIssueType::BasicLogging.description().contains("structured"));
+        assert!(
+            LoggingIssueType::PrintStatement
+                .description()
+                .contains("print")
+        );
+        assert!(
+            LoggingIssueType::BasicLogging
+                .description()
+                .contains("structured")
+        );
     }
 
     #[test]
     fn issue_type_severities_are_correct() {
-        assert!(matches!(LoggingIssueType::PrintStatement.severity(), Severity::Medium));
-        assert!(matches!(LoggingIssueType::BasicLogging.severity(), Severity::Low));
+        assert!(matches!(
+            LoggingIssueType::PrintStatement.severity(),
+            Severity::Medium
+        ));
+        assert!(matches!(
+            LoggingIssueType::BasicLogging.severity(),
+            Severity::Low
+        ));
     }
 
     // ==================== evaluate Tests - Detects Issues ====================
@@ -754,7 +768,10 @@ def handler():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag logger.info when get_logger is imported from custom .logging module");
+        assert!(
+            findings.is_empty(),
+            "Should not flag logger.info when get_logger is imported from custom .logging module"
+        );
     }
 
     #[tokio::test]
@@ -773,7 +790,10 @@ def handler():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag logger.info when get_logger is imported from app.logging module");
+        assert!(
+            findings.is_empty(),
+            "Should not flag logger.info when get_logger is imported from app.logging module"
+        );
     }
 
     // ==================== Cross-File Analysis Tests ====================
@@ -904,7 +924,7 @@ def handler():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let finding = &findings[0];
         assert_eq!(finding.rule_id, "python.missing_structured_logging");
         assert_eq!(finding.dimension, Dimension::Observability);
@@ -934,7 +954,7 @@ def handler():
     #[test]
     fn extract_fstring_expressions_multiple() {
         let result = extract_fstring_expressions(
-            r#"(f"Failed from env {e.id}: {r.status_code} => {r.text}")"#
+            r#"(f"Failed from env {e.id}: {r.status_code} => {r.text}")"#,
         );
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].0, "e.id");
@@ -1053,7 +1073,9 @@ def handler():
 
     #[test]
     fn extract_static_message_preserves_punctuation() {
-        let result = extract_static_message(r#"(f"Failed to join organization {org_name}. It does not exist.")"#);
+        let result = extract_static_message(
+            r#"(f"Failed to join organization {org_name}. It does not exist.")"#,
+        );
         assert_eq!(result, "Failed to join organization. It does not exist.");
     }
 
@@ -1074,14 +1096,14 @@ def handler():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let finding = &findings[0];
         let patch = finding.patch.as_ref().expect("Should have a patch");
-        
+
         // The patch should generate a structlog-style call with kwargs
         assert!(!patch.hunks.is_empty());
         let replacement = &patch.hunks[0].replacement;
-        
+
         // Should contain keyword argument style
         assert!(replacement.contains("logger.warning"));
         assert!(replacement.contains("status_code="));
@@ -1102,10 +1124,10 @@ def handler():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let finding = &findings[0];
         let patch = finding.patch.as_ref().expect("Should have a patch");
-        
+
         // The patch should preserve the error level
         let replacement = &patch.hunks[0].replacement;
         assert!(replacement.contains("logger.error"));
@@ -1126,10 +1148,10 @@ def handler():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let finding = &findings[0];
         let patch = finding.patch.as_ref().expect("Should have a patch");
-        
+
         // The patch should add a helpful comment since no f-string was detected
         let replacement = &patch.hunks[0].replacement;
         assert!(replacement.contains("logger.info"));
@@ -1151,11 +1173,11 @@ def handler():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let finding = &findings[0];
         let patch = finding.patch.as_ref().expect("Should have a patch");
         let replacement = &patch.hunks[0].replacement;
-        
+
         // Should extract all three variables as kwargs
         assert!(replacement.contains("id=env.id") || replacement.contains("id="));
         assert!(replacement.contains("status_code="));
@@ -1179,10 +1201,13 @@ def handler():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert!(!findings.is_empty());
-        
+
         let finding = &findings[0];
-        let fix_preview = finding.fix_preview.as_ref().expect("Should have fix_preview");
-        
+        let fix_preview = finding
+            .fix_preview
+            .as_ref()
+            .expect("Should have fix_preview");
+
         // Fix preview should show the pattern for the detected log level
         assert!(fix_preview.contains("error"));
         assert!(fix_preview.contains("structlog"));
@@ -1219,34 +1244,51 @@ def handler():
         let patch = finding.patch.as_ref().expect("Should have a patch");
 
         // Should have 3 hunks: import logging, logger setup, and print replacement
-        assert_eq!(patch.hunks.len(), 3, "Expected 3 hunks for print replacement with logging import");
-        
+        assert_eq!(
+            patch.hunks.len(),
+            3,
+            "Expected 3 hunks for print replacement with logging import"
+        );
+
         // First hunk should be the import statement (at stdlib position, near datetime)
         let import_hunk = &patch.hunks[0];
-        assert!(import_hunk.replacement.contains("import logging"),
-            "First hunk should be import logging");
-        
+        assert!(
+            import_hunk.replacement.contains("import logging"),
+            "First hunk should be import logging"
+        );
+
         // Second hunk should be the logger setup (AFTER all imports on line 10)
         let logger_setup_hunk = &patch.hunks[1];
-        assert!(logger_setup_hunk.replacement.contains("logger = logging.getLogger"),
-            "Second hunk should be logger setup: {:?}", logger_setup_hunk.replacement);
-        
+        assert!(
+            logger_setup_hunk
+                .replacement
+                .contains("logger = logging.getLogger"),
+            "Second hunk should be logger setup: {:?}",
+            logger_setup_hunk.replacement
+        );
+
         // Verify the logger setup is inserted at a line AFTER the imports
         // The last import (datetime) is on line 9 (0-based: 8), so logger setup should be on line 10 or later
         match &logger_setup_hunk.range {
             PatchRange::InsertBeforeLine { line } => {
                 // import_insertion_line() returns after last import, which is line 10 (1-based)
                 // datetime is on 0-based line 8, so end_line + 2 = 10
-                assert!(*line >= 10,
-                    "Logger setup should be after all imports (line >= 10), but got line {}", line);
+                assert!(
+                    *line >= 10,
+                    "Logger setup should be after all imports (line >= 10), but got line {}",
+                    line
+                );
             }
             _ => panic!("Expected InsertBeforeLine for logger setup hunk"),
         }
 
         // Third hunk should be the print replacement
         let print_hunk = &patch.hunks[2];
-        assert!(print_hunk.replacement.contains("logger.info"),
-            "Third hunk should replace print: {:?}", print_hunk.replacement);
+        assert!(
+            print_hunk.replacement.contains("logger.info"),
+            "Third hunk should replace print: {:?}",
+            print_hunk.replacement
+        );
     }
 
     #[tokio::test]
@@ -1272,26 +1314,32 @@ def handler():
 
         // Should have 3 hunks
         assert_eq!(patch.hunks.len(), 3);
-        
+
         // Get the lines from the two insert hunks
         let import_line = match &patch.hunks[0].range {
             PatchRange::InsertBeforeLine { line } => *line,
             _ => panic!("Expected InsertBeforeLine for import hunk"),
         };
-        
+
         let logger_setup_line = match &patch.hunks[1].range {
             PatchRange::InsertBeforeLine { line } => *line,
             _ => panic!("Expected InsertBeforeLine for logger setup hunk"),
         };
-        
+
         // The import should be at line 1 (before fastapi, among stdlib)
         // The logger setup should be at line 4 or 5 (after all imports)
-        assert!(import_line < logger_setup_line,
+        assert!(
+            import_line < logger_setup_line,
             "Import line ({}) should be before logger setup line ({})",
-            import_line, logger_setup_line);
-        
+            import_line,
+            logger_setup_line
+        );
+
         // Logger setup should be AFTER all imports - the last import is datetime on line 3
-        assert!(logger_setup_line >= 4,
-            "Logger setup should be at line 4 or later, got {}", logger_setup_line);
+        assert!(
+            logger_setup_line >= 4,
+            "Logger setup should be at line 4 or later, got {}",
+            logger_setup_line
+        );
     }
 }

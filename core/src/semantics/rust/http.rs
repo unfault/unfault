@@ -492,8 +492,7 @@ mod tests {
 
     #[test]
     fn detects_reqwest_blocking() {
-        let calls =
-            parse_and_summarize_http("reqwest::blocking::get(\"https://example.com\")");
+        let calls = parse_and_summarize_http("reqwest::blocking::get(\"https://example.com\")");
         assert_eq!(calls.len(), 1);
         assert!(matches!(
             calls[0].client_kind,

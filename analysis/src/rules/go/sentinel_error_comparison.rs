@@ -3,14 +3,14 @@
 //! Detects direct error comparisons (err == SomeError) instead of using errors.Is(),
 //! which doesn't work correctly with wrapped errors.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -85,28 +85,29 @@ impl Rule for GoSentinelErrorComparisonRule {
             };
 
             // Check for errors package import (if they use errors.Is, they're already aware)
-            let uses_errors_is = go.calls.iter().any(|c| c.function_call.callee_expr == "errors.Is");
-            
+            let uses_errors_is = go
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "errors.Is");
+
             // Check declarations and calls for patterns like: err == X or err != X
             // where X is a sentinel error
             for call in &go.calls {
                 let args = &call.args_repr;
-                
+
                 // Look for comparisons with sentinel errors
                 for sentinel in SENTINEL_ERRORS {
                     // Check for err == sentinel or sentinel == err
-                    let has_eq_comparison = args.contains(&format!("== {}", sentinel)) || 
-                                           args.contains(&format!("{} ==", sentinel)) ||
-                                           args.contains(&format!("!= {}", sentinel)) ||
-                                           args.contains(&format!("{} !=", sentinel));
-                    
+                    let has_eq_comparison = args.contains(&format!("== {}", sentinel))
+                        || args.contains(&format!("{} ==", sentinel))
+                        || args.contains(&format!("!= {}", sentinel))
+                        || args.contains(&format!("{} !=", sentinel));
+
                     if has_eq_comparison && !uses_errors_is {
                         let line = call.function_call.location.line;
-                        
-                        let title = format!(
-                            "Direct comparison with {} instead of errors.Is()",
-                            sentinel
-                        );
+
+                        let title =
+                            format!("Direct comparison with {} instead of errors.Is()", sentinel);
 
                         let description = format!(
                             "Direct error comparison at line {} will not work if the error \
@@ -150,16 +151,12 @@ impl Rule for GoSentinelErrorComparisonRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(format!("Use errors.Is(err, {})", sentinel)),
-                            tags: vec![
-                                "go".into(),
-                                "error-handling".into(),
-                                "errors.Is".into(),
-                            ],
+                            tags: vec!["go".into(), "error-handling".into(), "errors.Is".into()],
                         });
                     }
                 }
@@ -170,15 +167,14 @@ impl Rule for GoSentinelErrorComparisonRule {
             for decl in &go.declarations {
                 if let Some(ref value) = decl.value_repr {
                     for sentinel in SENTINEL_ERRORS {
-                        if value.contains(&format!("== {}", sentinel)) || 
-                           value.contains(&format!("{} ==", sentinel)) {
+                        if value.contains(&format!("== {}", sentinel))
+                            || value.contains(&format!("{} ==", sentinel))
+                        {
                             if !uses_errors_is {
                                 let line = decl.location.range.start_line + 1;
-                                
-                                let title = format!(
-                                    "Direct comparison with {} in assignment",
-                                    sentinel
-                                );
+
+                                let title =
+                                    format!("Direct comparison with {} in assignment", sentinel);
 
                                 let description = format!(
                                     "Assignment at line {} uses direct error comparison which \
@@ -198,15 +194,12 @@ impl Rule for GoSentinelErrorComparisonRule {
                                     file_path: go.path.clone(),
                                     line: Some(line),
                                     column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                    end_line: None,
+                                    end_column: None,
+                                    byte_range: None,
                                     patch: None,
                                     fix_preview: Some("Use errors.Is()".to_string()),
-                                    tags: vec![
-                                        "go".into(),
-                                        "error-handling".into(),
-                                    ],
+                                    tags: vec!["go".into(), "error-handling".into()],
                                 });
                             }
                         }
@@ -224,8 +217,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -250,7 +243,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_direct_comparison() {
         let rule = GoSentinelErrorComparisonRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 import "database/sql"
@@ -262,10 +256,11 @@ func getUser(id int) (*User, error) {
     }
     return user, err
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect the direct comparison
         // Note: depends on semantics capturing the comparison pattern
         let _ = findings;
@@ -274,7 +269,8 @@ func getUser(id int) (*User, error) {
     #[tokio::test]
     async fn test_no_finding_with_errors_is() {
         let rule = GoSentinelErrorComparisonRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 import (
@@ -289,10 +285,11 @@ func getUser(id int) (*User, error) {
     }
     return user, err
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag when errors.Is is used
         let _ = findings;
     }

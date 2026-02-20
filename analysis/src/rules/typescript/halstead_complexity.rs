@@ -22,10 +22,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::typescript::model::TsFileSemantics;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::typescript::model::TsFileSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 
@@ -159,8 +159,12 @@ impl Rule for TypescriptHalsteadComplexityRule {
             }
 
             for func in &ts.functions {
-                let line_count = func.location.range.end_line
-                    .saturating_sub(func.location.range.start_line) + 1;
+                let line_count = func
+                    .location
+                    .range
+                    .end_line
+                    .saturating_sub(func.location.range.start_line)
+                    + 1;
                 if line_count < 5 {
                     continue;
                 }
@@ -185,8 +189,12 @@ impl Rule for TypescriptHalsteadComplexityRule {
             // Analyze class methods
             for class in &ts.classes {
                 for method in &class.methods {
-                    let line_count = method.location.range.end_line
-                        .saturating_sub(method.location.range.start_line) + 1;
+                    let line_count = method
+                        .location
+                        .range
+                        .end_line
+                        .saturating_sub(method.location.range.start_line)
+                        + 1;
                     if line_count < 5 {
                         continue;
                     }
@@ -222,7 +230,7 @@ impl Rule for TypescriptHalsteadComplexityRule {
 fn is_test_file(path: &str) -> bool {
     let filename = path.rsplit('/').next().unwrap_or(path);
     let filename_lower = filename.to_lowercase();
-    
+
     filename_lower.ends_with(".test.ts")
         || filename_lower.ends_with(".test.tsx")
         || filename_lower.ends_with(".spec.ts")
@@ -238,23 +246,27 @@ fn estimate_halstead_from_function(
     func: &crate::semantics::typescript::model::TsFunction,
     _ts: &TsFileSemantics,
 ) -> HalsteadMetrics {
-    let line_count = func.location.range.end_line
-        .saturating_sub(func.location.range.start_line) + 1;
-    
+    let line_count = func
+        .location
+        .range
+        .end_line
+        .saturating_sub(func.location.range.start_line)
+        + 1;
+
     // TypeScript/JavaScript tends to be verbose
     let estimated_operators_per_line = 2.5;
     let estimated_operands_per_line = 3.5;
-    
+
     let total_operators = (line_count as f64 * estimated_operators_per_line) as usize;
     let total_operands = (line_count as f64 * estimated_operands_per_line) as usize;
-    
+
     let distinct_operators = ((total_operators as f64).sqrt() * 1.5) as usize;
     let distinct_operands = ((total_operands as f64).sqrt() * 2.0) as usize;
-    
+
     let param_operands = func.params.len();
     let total_operands = total_operands + param_operands;
     let distinct_operands = distinct_operands + param_operands;
-    
+
     HalsteadMetrics::compute(
         distinct_operators.max(1),
         distinct_operands.max(1),
@@ -267,22 +279,26 @@ fn estimate_halstead_from_method(
     method: &crate::semantics::typescript::model::TsMethod,
     _ts: &TsFileSemantics,
 ) -> HalsteadMetrics {
-    let line_count = method.location.range.end_line
-        .saturating_sub(method.location.range.start_line) + 1;
-    
+    let line_count = method
+        .location
+        .range
+        .end_line
+        .saturating_sub(method.location.range.start_line)
+        + 1;
+
     let estimated_operators_per_line = 2.5;
     let estimated_operands_per_line = 3.5;
-    
+
     let total_operators = (line_count as f64 * estimated_operators_per_line) as usize;
     let total_operands = (line_count as f64 * estimated_operands_per_line) as usize;
-    
+
     let distinct_operators = ((total_operators as f64).sqrt() * 1.5) as usize;
     let distinct_operands = ((total_operands as f64).sqrt() * 2.0) as usize;
-    
+
     let param_operands = method.params.len();
     let total_operands = total_operands + param_operands;
     let distinct_operands = distinct_operands + param_operands + 1; // +1 for this
-    
+
     HalsteadMetrics::compute(
         distinct_operators.max(1),
         distinct_operands.max(1),
@@ -292,16 +308,20 @@ fn estimate_halstead_from_method(
 }
 
 /// Compute Halstead metrics by walking an AST node.
-pub fn compute_halstead_from_ast(
-    node: &tree_sitter::Node,
-    source: &str,
-) -> HalsteadMetrics {
+pub fn compute_halstead_from_ast(node: &tree_sitter::Node, source: &str) -> HalsteadMetrics {
     let mut operators: HashSet<String> = HashSet::new();
     let mut operands: HashSet<String> = HashSet::new();
     let mut total_operators = 0usize;
     let mut total_operands = 0usize;
 
-    walk_ast_for_halstead(node, source, &mut operators, &mut operands, &mut total_operators, &mut total_operands);
+    walk_ast_for_halstead(
+        node,
+        source,
+        &mut operators,
+        &mut operands,
+        &mut total_operators,
+        &mut total_operands,
+    );
 
     HalsteadMetrics::compute(
         operators.len().max(1),
@@ -325,36 +345,67 @@ fn walk_ast_for_halstead(
     #[allow(unreachable_patterns)]
     match kind {
         // Control flow operators
-        "if_statement" | "switch_statement" | "for_statement" | "for_in_statement"
-        | "for_of_statement" | "while_statement" | "do_statement" | "try_statement"
-        | "throw_statement" | "return_statement" | "break_statement" | "continue_statement"
-        | "function_declaration" | "function_expression" | "arrow_function"
-        | "class_declaration" | "method_definition" | "async" | "await_expression" => {
+        "if_statement"
+        | "switch_statement"
+        | "for_statement"
+        | "for_in_statement"
+        | "for_of_statement"
+        | "while_statement"
+        | "do_statement"
+        | "try_statement"
+        | "throw_statement"
+        | "return_statement"
+        | "break_statement"
+        | "continue_statement"
+        | "function_declaration"
+        | "function_expression"
+        | "arrow_function"
+        | "class_declaration"
+        | "method_definition"
+        | "async"
+        | "await_expression" => {
             operators.insert(kind.to_string());
             *total_operators += 1;
         }
 
         // Binary operators
-        "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | ">>>"
-        | "==" | "!=" | "===" | "!==" | "<" | ">" | "<=" | ">="
-        | "&&" | "||" | "??" | "in" | "instanceof"
+        "+" | "-" | "*" | "/" | "%" | "&" | "|" | "^" | "<<" | ">>" | ">>>" | "==" | "!="
+        | "===" | "!==" | "<" | ">" | "<=" | ">=" | "&&" | "||" | "??" | "in" | "instanceof"
         | "binary_expression" => {
-            let op_text = if text.len() < 5 { text.clone() } else { kind.to_string() };
+            let op_text = if text.len() < 5 {
+                text.clone()
+            } else {
+                kind.to_string()
+            };
             operators.insert(op_text);
             *total_operators += 1;
         }
 
         // Unary operators
-        "!" | "-" | "~" | "typeof" | "void" | "delete"
-        | "unary_expression" | "update_expression" => {
+        "!" | "-" | "~" | "typeof" | "void" | "delete" | "unary_expression"
+        | "update_expression" => {
             operators.insert(kind.to_string());
             *total_operators += 1;
         }
 
         // Assignment operators
-        "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | ">>>="
-        | "??=" | "&&=" | "||="
-        | "assignment_expression" | "augmented_assignment_expression" => {
+        "="
+        | "+="
+        | "-="
+        | "*="
+        | "/="
+        | "%="
+        | "&="
+        | "|="
+        | "^="
+        | "<<="
+        | ">>="
+        | ">>>="
+        | "??="
+        | "&&="
+        | "||="
+        | "assignment_expression"
+        | "augmented_assignment_expression" => {
             operators.insert(kind.to_string());
             *total_operators += 1;
         }
@@ -434,7 +485,14 @@ fn walk_ast_for_halstead(
     let child_count = node.child_count();
     for i in 0..child_count {
         if let Some(child) = node.child(i) {
-            walk_ast_for_halstead(&child, source, operators, operands, total_operators, total_operands);
+            walk_ast_for_halstead(
+                &child,
+                source,
+                operators,
+                operands,
+                total_operators,
+                total_operands,
+            );
         }
     }
 }
@@ -514,7 +572,7 @@ fn create_finding(
         column: Some(1),
         end_line: None,
         end_column: None,
-            byte_range: None,
+        byte_range: None,
         patch: None,
         fix_preview: None,
         tags: vec![
@@ -607,12 +665,14 @@ mod tests {
     #[test]
     fn compute_halstead_from_ast_counts_operators() {
         let mut parser = tree_sitter::Parser::new();
-        parser.set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()).unwrap();
-        
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .unwrap();
+
         let source = "const x = 1 + 2;";
         let tree = parser.parse(source, None).unwrap();
         let root = tree.root_node();
-        
+
         let metrics = compute_halstead_from_ast(&root, source);
         assert!(metrics.distinct_operators >= 1);
         assert!(metrics.distinct_operands >= 2);

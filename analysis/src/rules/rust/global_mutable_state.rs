@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -86,22 +86,26 @@ impl Rule for RustGlobalMutableStateRule {
                          CONFIG.get_or_init(|| load_config())\n\
                      }}\n\
                      ```",
-                    stat.name,
-                    line
+                    stat.name, line
                 );
 
                 let fix_preview = format!(
                     "use std::sync::OnceLock;\n\n\
                      static {}: OnceLock<{}> = OnceLock::new();",
                     stat.name.to_uppercase(),
-                    if stat.decl_type.is_empty() { "T" } else { &stat.decl_type }
+                    if stat.decl_type.is_empty() {
+                        "T"
+                    } else {
+                        &stat.decl_type
+                    }
                 );
 
                 let patch = FilePatch {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Replace static mut with OnceLock or Mutex".to_string(),
+                        replacement: "// TODO: Replace static mut with OnceLock or Mutex"
+                            .to_string(),
                     }],
                 };
 
@@ -119,7 +123,7 @@ impl Rule for RustGlobalMutableStateRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -222,8 +226,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -263,7 +267,9 @@ fn increment() {
         let findings = rule.evaluate(&semantics, None).await;
 
         assert!(
-            findings.iter().any(|f| f.rule_id == "rust.global_mutable_state"),
+            findings
+                .iter()
+                .any(|f| f.rule_id == "rust.global_mutable_state"),
             "Should detect static mut"
         );
     }
@@ -284,6 +290,9 @@ static VERSION: &str = "1.0.0";
             .iter()
             .filter(|f| f.rule_id == "rust.global_mutable_state")
             .collect();
-        assert!(global_state_findings.is_empty(), "Should skip immutable static");
+        assert!(
+            global_state_findings.is_empty(),
+            "Should skip immutable static"
+        );
     }
 }

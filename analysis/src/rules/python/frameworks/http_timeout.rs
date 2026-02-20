@@ -41,7 +41,9 @@ impl Rule for PythonHttpMissingTimeoutRule {
             decision_level: DecisionLevel::Code,
             benefits: vec![Benefit::Reliability, Benefit::Latency],
             prerequisites: vec![],
-            notes: Some("Time bounds are helpful even in demos; pick a sensible default.".to_string()),
+            notes: Some(
+                "Time bounds are helpful even in demos; pick a sensible default.".to_string(),
+            ),
         })
     }
 

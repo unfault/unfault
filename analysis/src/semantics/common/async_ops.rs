@@ -127,10 +127,7 @@ impl AsyncOperationType {
     pub fn can_hang(&self) -> bool {
         matches!(
             self,
-            Self::TaskAwait
-                | Self::ChannelReceive
-                | Self::LockAcquire
-                | Self::SemaphoreAcquire
+            Self::TaskAwait | Self::ChannelReceive | Self::LockAcquire | Self::SemaphoreAcquire
         )
     }
 
@@ -295,11 +292,7 @@ pub struct ConcurrencyPattern {
 impl ConcurrencyPattern {
     /// Check if this pattern could overwhelm resources
     pub fn is_potentially_dangerous(&self) -> bool {
-        !self.is_bounded
-            && self
-                .concurrency_count
-                .map(|c| c > 100)
-                .unwrap_or(true)
+        !self.is_bounded && self.concurrency_count.map(|c| c > 100).unwrap_or(true)
     }
 
     /// Get the bounded version recommendation
@@ -415,14 +408,20 @@ mod tests {
 
     #[test]
     fn async_runtime_timeout_function() {
-        assert!(AsyncRuntime::Asyncio
-            .timeout_function()
-            .contains("asyncio.timeout"));
-        assert!(AsyncRuntime::Tokio
-            .timeout_function()
-            .contains("tokio::time::timeout"));
-        assert!(AsyncRuntime::Goroutine
-            .timeout_function()
-            .contains("context.WithTimeout"));
+        assert!(
+            AsyncRuntime::Asyncio
+                .timeout_function()
+                .contains("asyncio.timeout")
+        );
+        assert!(
+            AsyncRuntime::Tokio
+                .timeout_function()
+                .contains("tokio::time::timeout")
+        );
+        assert!(
+            AsyncRuntime::Goroutine
+                .timeout_function()
+                .contains("context.WithTimeout")
+        );
     }
 }

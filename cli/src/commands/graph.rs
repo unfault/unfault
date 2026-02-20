@@ -152,13 +152,21 @@ pub async fn execute_impact(args: ImpactArgs) -> Result<i32> {
     let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
             return Ok(EXIT_ERROR);
         }
     };
 
     // Query impact using rag retrieval
-    let impact = unfault_analysis::graph::traversal::get_impact(&graph, &args.file_path, args.max_depth as usize);
+    let impact = unfault_analysis::graph::traversal::get_impact(
+        &graph,
+        &args.file_path,
+        args.max_depth as usize,
+    );
 
     if impact.affected_files.is_empty() {
         eprintln!(
@@ -207,7 +215,11 @@ pub async fn execute_library(args: LibraryArgs) -> Result<i32> {
     let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
             return Ok(EXIT_ERROR);
         }
     };
@@ -255,7 +267,11 @@ pub async fn execute_deps(args: DepsArgs) -> Result<i32> {
     let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
             return Ok(EXIT_ERROR);
         }
     };
@@ -312,17 +328,25 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
     let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
             return Ok(EXIT_ERROR);
         }
     };
 
-    let centrality = unfault_analysis::graph::traversal::get_centrality(&graph, args.limit as usize);
+    let centrality =
+        unfault_analysis::graph::traversal::get_centrality(&graph, args.limit as usize);
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&centrality)?);
     } else {
-        println!("\n{} Most critical files (by import count):\n", "📊".bright_blue());
+        println!(
+            "\n{} Most critical files (by import count):\n",
+            "📊".bright_blue()
+        );
         if centrality.central_files.is_empty() {
             println!("  No import relationships found.");
         } else {
@@ -357,7 +381,11 @@ pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
     let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
             return Ok(EXIT_ERROR);
         }
     };
@@ -369,13 +397,22 @@ pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
     } else {
         println!("\n{} Graph Statistics\n", "📊".bright_blue());
         println!("  Files:      {}", overview.file_count.to_string().yellow());
-        println!("  Functions:  {}", overview.function_count.to_string().yellow());
+        println!(
+            "  Functions:  {}",
+            overview.function_count.to_string().yellow()
+        );
         println!("  Languages:  {}", overview.languages.join(", ").cyan());
         if !overview.frameworks.is_empty() {
             println!("  Frameworks: {}", overview.frameworks.join(", ").cyan());
         }
-        println!("  Nodes:      {}", graph.graph.node_count().to_string().yellow());
-        println!("  Edges:      {}", graph.graph.edge_count().to_string().yellow());
+        println!(
+            "  Nodes:      {}",
+            graph.graph.node_count().to_string().yellow()
+        );
+        println!(
+            "  Edges:      {}",
+            graph.graph.edge_count().to_string().yellow()
+        );
         if !overview.entrypoints.is_empty() {
             println!("\n  Entrypoints:");
             for ep in &overview.entrypoints {
@@ -416,13 +453,21 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
     let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
             return Ok(EXIT_ERROR);
         }
     };
 
     // Use flow extraction (BFS from function through call edges)
-    let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &function_name, args.max_depth as usize);
+    let flow = unfault_analysis::graph::traversal::extract_flow(
+        &graph,
+        &function_name,
+        args.max_depth as usize,
+    );
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&flow)?);
@@ -437,10 +482,7 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
         println!();
 
         if flow.paths.is_empty() {
-            println!(
-                "  {} No call paths found from this function.",
-                "ℹ".blue()
-            );
+            println!("  {} No call paths found from this function.", "ℹ".blue());
             println!();
             return Ok(EXIT_SUCCESS);
         }
@@ -472,7 +514,6 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
             }
             println!();
         }
-
     }
 
     Ok(EXIT_SUCCESS)
@@ -552,7 +593,11 @@ pub fn execute_dump(args: DumpArgs) -> Result<i32> {
         }
 
         let file_graph = FileGraph {
-            file: graph.files.iter().find(|f| f.path.contains(file_filter)).cloned(),
+            file: graph
+                .files
+                .iter()
+                .find(|f| f.path.contains(file_filter))
+                .cloned(),
             functions: graph
                 .functions
                 .iter()
@@ -570,9 +615,10 @@ pub fn execute_dump(args: DumpArgs) -> Result<i32> {
                 .iter()
                 .filter(|c| {
                     // Find the callee's file
-                    graph.functions.iter().any(|f| {
-                        f.qualified_name == c.callee && f.file_path.contains(file_filter)
-                    })
+                    graph
+                        .functions
+                        .iter()
+                        .any(|f| f.qualified_name == c.callee && f.file_path.contains(file_filter))
                 })
                 .cloned()
                 .collect(),
@@ -592,4 +638,3 @@ pub fn execute_dump(args: DumpArgs) -> Result<i32> {
 
     Ok(EXIT_SUCCESS)
 }
-

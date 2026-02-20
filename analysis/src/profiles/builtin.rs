@@ -870,13 +870,7 @@ fn rust_actix_service() -> Profile {
                 .with_max_files(16)
                 .include(FilePredicate::language("rust"))
                 .include(FilePredicate::text_contains_any([
-                    "circuit",
-                    "Circuit",
-                    "breaker",
-                    "Breaker",
-                    "failsafe",
-                    "retry",
-                    "Retry",
+                    "circuit", "Circuit", "breaker", "Breaker", "failsafe", "retry", "Retry",
                 ])),
         )
 }
@@ -1182,19 +1176,19 @@ fn python_lsp() -> Profile {
             // Observability (local - checks if logging is used in handlers)
             "python.missing_structured_logging",
         ])
-        // LSP profiles don't need file hints - the client provides the file
-        // ===== EXCLUDED: Cross-file rules =====
-        // NOT included:
-        // - fastapi.missing_cors (CORS might be in app factory)
-        // - fastapi.missing_health_check (might be in separate router)
-        // - fastapi.missing_exception_handler (might be in main)
-        // - fastapi.missing_rate_limiting (might be middleware)
-        // - python.graceful_shutdown (might be in main.py)
-        // - python.resilience.missing_circuit_breaker (might be configured globally)
-        // - python.missing_correlation_id (might be middleware)
-        // - python.missing_tracing (might be configured at app level)
-        // - python.async_resource_cleanup (resource cleanup might span multiple files)
-        // - python.idempotency_key (might be handled at middleware level)
+    // LSP profiles don't need file hints - the client provides the file
+    // ===== EXCLUDED: Cross-file rules =====
+    // NOT included:
+    // - fastapi.missing_cors (CORS might be in app factory)
+    // - fastapi.missing_health_check (might be in separate router)
+    // - fastapi.missing_exception_handler (might be in main)
+    // - fastapi.missing_rate_limiting (might be middleware)
+    // - python.graceful_shutdown (might be in main.py)
+    // - python.resilience.missing_circuit_breaker (might be configured globally)
+    // - python.missing_correlation_id (might be middleware)
+    // - python.missing_tracing (might be configured at app level)
+    // - python.async_resource_cleanup (resource cleanup might span multiple files)
+    // - python.idempotency_key (might be handled at middleware level)
 }
 
 /// Go LSP profile - excludes cross-file rules for single-file analysis.
@@ -1266,13 +1260,13 @@ fn go_lsp() -> Profile {
             // Resilience (local)
             "go.unbounded_retry",
         ])
-        // ===== EXCLUDED: Cross-file rules =====
-        // NOT included:
-        // - go.graceful_shutdown (signal handling in main.go)
-        // - go.missing_circuit_breaker (might be configured globally)
-        // - go.missing_correlation_id (might be middleware)
-        // - go.missing_tracing (might be configured at app level)
-        // - go.rate_limiting (might be middleware)
+    // ===== EXCLUDED: Cross-file rules =====
+    // NOT included:
+    // - go.graceful_shutdown (signal handling in main.go)
+    // - go.missing_circuit_breaker (might be configured globally)
+    // - go.missing_correlation_id (might be middleware)
+    // - go.missing_tracing (might be configured at app level)
+    // - go.rate_limiting (might be middleware)
 }
 
 /// Rust LSP profile - excludes cross-file rules for single-file analysis.
@@ -1332,13 +1326,13 @@ fn rust_lsp() -> Profile {
             "rust.sqlx.query_without_timeout",
             "rust.tokio.missing_runtime_config",
         ])
-        // ===== EXCLUDED: Cross-file rules =====
-        // NOT included:
-        // - rust.axum.missing_cors (CORS layer in router setup)
-        // - rust.tokio.missing_graceful_shutdown (in main)
-        // - rust.missing_circuit_breaker (might be configured globally)
-        // - rust.missing_correlation_id (might be middleware)
-        // - rust.missing_tracing (might be configured at app level)
+    // ===== EXCLUDED: Cross-file rules =====
+    // NOT included:
+    // - rust.axum.missing_cors (CORS layer in router setup)
+    // - rust.tokio.missing_graceful_shutdown (in main)
+    // - rust.missing_circuit_breaker (might be configured globally)
+    // - rust.missing_correlation_id (might be middleware)
+    // - rust.missing_tracing (might be configured at app level)
 }
 
 /// TypeScript LSP profile - excludes cross-file rules for single-file analysis.
@@ -1386,14 +1380,14 @@ fn typescript_lsp() -> Profile {
             // Observability (local)
             "typescript.missing_structured_logging",
         ])
-        // ===== EXCLUDED: Cross-file rules =====
-        // NOT included:
-        // - typescript.graceful_shutdown (in server setup)
-        // - typescript.missing_circuit_breaker (might be configured globally)
-        // - typescript.missing_correlation_id (might be middleware)
-        // - typescript.missing_tracing (might be configured at app level)
-        // - typescript.missing_rate_limiting (might be middleware)
-        // - typescript.express.missing_error_middleware (in app setup)
+    // ===== EXCLUDED: Cross-file rules =====
+    // NOT included:
+    // - typescript.graceful_shutdown (in server setup)
+    // - typescript.missing_circuit_breaker (might be configured globally)
+    // - typescript.missing_correlation_id (might be middleware)
+    // - typescript.missing_tracing (might be configured at app level)
+    // - typescript.missing_rate_limiting (might be middleware)
+    // - typescript.express.missing_error_middleware (in app setup)
 }
 
 // ==================== Maintainability Profiles ====================
@@ -1535,47 +1529,50 @@ fn rust_maintainability() -> Profile {
 ///
 /// This profile is opt-in and focuses on code maintainability analysis.
 fn typescript_maintainability() -> Profile {
-    Profile::new("typescript_maintainability", "TypeScript Maintainability Analysis")
-        .with_language(Language::Typescript)
-        .with_dimension(Dimension::Maintainability)
-        .with_rules([
-            // Halstead complexity
-            "typescript.halstead_complexity",
-        ])
-        // File hints limit the amount of code sent for complexity analysis
-        .with_file_hint(
-            FileQueryHint::new("typescript_src_modules")
-                .with_label("Source modules for complexity analysis")
-                .with_max_files(30)
-                .with_max_total_bytes(500_000) // 500KB max
-                .include(FilePredicate::language("typescript"))
-                .include(FilePredicate::under_directory("src"))
-                .exclude(FilePredicate::path_glob("**/*.test.ts"))
-                .exclude(FilePredicate::path_glob("**/*.spec.ts"))
-                .exclude(FilePredicate::path_glob("**/test/**"))
-                .exclude(FilePredicate::path_glob("**/tests/**"))
-                .exclude(FilePredicate::path_glob("**/__tests__/**")),
-        )
-        .with_file_hint(
-            FileQueryHint::new("typescript_lib_modules")
-                .with_label("Library modules for complexity analysis")
-                .with_max_files(20)
-                .with_max_total_bytes(300_000) // 300KB max
-                .include(FilePredicate::language("typescript"))
-                .include(FilePredicate::under_directory("lib"))
-                .exclude(FilePredicate::path_glob("**/*.test.ts"))
-                .exclude(FilePredicate::path_glob("**/*.spec.ts")),
-        )
-        .with_file_hint(
-            FileQueryHint::new("typescript_app_modules")
-                .with_label("Application modules for complexity analysis")
-                .with_max_files(30)
-                .with_max_total_bytes(500_000) // 500KB max
-                .include(FilePredicate::language("typescript"))
-                .include(FilePredicate::under_directory("app"))
-                .exclude(FilePredicate::path_glob("**/*.test.ts"))
-                .exclude(FilePredicate::path_glob("**/*.spec.ts")),
-        )
+    Profile::new(
+        "typescript_maintainability",
+        "TypeScript Maintainability Analysis",
+    )
+    .with_language(Language::Typescript)
+    .with_dimension(Dimension::Maintainability)
+    .with_rules([
+        // Halstead complexity
+        "typescript.halstead_complexity",
+    ])
+    // File hints limit the amount of code sent for complexity analysis
+    .with_file_hint(
+        FileQueryHint::new("typescript_src_modules")
+            .with_label("Source modules for complexity analysis")
+            .with_max_files(30)
+            .with_max_total_bytes(500_000) // 500KB max
+            .include(FilePredicate::language("typescript"))
+            .include(FilePredicate::under_directory("src"))
+            .exclude(FilePredicate::path_glob("**/*.test.ts"))
+            .exclude(FilePredicate::path_glob("**/*.spec.ts"))
+            .exclude(FilePredicate::path_glob("**/test/**"))
+            .exclude(FilePredicate::path_glob("**/tests/**"))
+            .exclude(FilePredicate::path_glob("**/__tests__/**")),
+    )
+    .with_file_hint(
+        FileQueryHint::new("typescript_lib_modules")
+            .with_label("Library modules for complexity analysis")
+            .with_max_files(20)
+            .with_max_total_bytes(300_000) // 300KB max
+            .include(FilePredicate::language("typescript"))
+            .include(FilePredicate::under_directory("lib"))
+            .exclude(FilePredicate::path_glob("**/*.test.ts"))
+            .exclude(FilePredicate::path_glob("**/*.spec.ts")),
+    )
+    .with_file_hint(
+        FileQueryHint::new("typescript_app_modules")
+            .with_label("Application modules for complexity analysis")
+            .with_max_files(30)
+            .with_max_total_bytes(500_000) // 500KB max
+            .include(FilePredicate::language("typescript"))
+            .include(FilePredicate::under_directory("app"))
+            .exclude(FilePredicate::path_glob("**/*.test.ts"))
+            .exclude(FilePredicate::path_glob("**/*.spec.ts")),
+    )
 }
 
 #[cfg(test)]
@@ -1700,7 +1697,9 @@ mod tests {
         let profile = python_lsp();
         // These rules require cross-file context and should NOT be in LSP profile
         assert!(
-            !profile.rule_ids.contains(&"fastapi.missing_cors".to_string()),
+            !profile
+                .rule_ids
+                .contains(&"fastapi.missing_cors".to_string()),
             "LSP profile should not contain fastapi.missing_cors"
         );
         assert!(
@@ -1790,9 +1789,7 @@ mod tests {
             "LSP profile should contain go.http_missing_timeout"
         );
         assert!(
-            profile
-                .rule_ids
-                .contains(&"go.unchecked_error".to_string()),
+            profile.rule_ids.contains(&"go.unchecked_error".to_string()),
             "LSP profile should contain go.unchecked_error"
         );
         assert!(
@@ -1834,9 +1831,7 @@ mod tests {
     fn rust_lsp_includes_local_rules() {
         let profile = rust_lsp();
         assert!(
-            profile
-                .rule_ids
-                .contains(&"rust.unsafe_unwrap".to_string()),
+            profile.rule_ids.contains(&"rust.unsafe_unwrap".to_string()),
             "LSP profile should contain rust.unsafe_unwrap"
         );
         assert!(
@@ -1846,9 +1841,7 @@ mod tests {
             "LSP profile should contain rust.blocking_in_async"
         );
         assert!(
-            profile
-                .rule_ids
-                .contains(&"rust.sql_injection".to_string()),
+            profile.rule_ids.contains(&"rust.sql_injection".to_string()),
             "LSP profile should contain rust.sql_injection"
         );
     }
@@ -1965,7 +1958,9 @@ mod tests {
     fn python_maintainability_has_halstead_rule() {
         let profile = python_maintainability();
         assert!(
-            profile.rule_ids.contains(&"python.halstead_complexity".to_string()),
+            profile
+                .rule_ids
+                .contains(&"python.halstead_complexity".to_string()),
             "Maintainability profile should contain python.halstead_complexity"
         );
     }
@@ -1974,7 +1969,9 @@ mod tests {
     fn python_maintainability_has_code_duplication_rule() {
         let profile = python_maintainability();
         assert!(
-            profile.rule_ids.contains(&"python.code_duplication".to_string()),
+            profile
+                .rule_ids
+                .contains(&"python.code_duplication".to_string()),
             "Maintainability profile should contain python.code_duplication"
         );
     }
@@ -2005,13 +2002,11 @@ mod tests {
         let profile = python_maintainability();
         // At least one hint should exclude test files
         let has_test_exclusion = profile.file_hints.iter().any(|hint| {
-            hint.exclude.iter().any(|pred| {
-                match pred {
-                    FilePredicate::PathGlob { pattern } => {
-                        pattern.contains("test_") || pattern.contains("_test")
-                    }
-                    _ => false,
+            hint.exclude.iter().any(|pred| match pred {
+                FilePredicate::PathGlob { pattern } => {
+                    pattern.contains("test_") || pattern.contains("_test")
                 }
+                _ => false,
             })
         });
         assert!(
@@ -2040,7 +2035,9 @@ mod tests {
 
         for profile in default_profiles {
             assert!(
-                !profile.rule_ids.contains(&"python.halstead_complexity".to_string()),
+                !profile
+                    .rule_ids
+                    .contains(&"python.halstead_complexity".to_string()),
                 "Profile {} should NOT contain halstead_complexity by default",
                 profile.id
             );

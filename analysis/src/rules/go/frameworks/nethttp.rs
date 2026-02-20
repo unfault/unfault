@@ -11,11 +11,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
-use crate::semantics::go::model::GoCallSite;
 use crate::semantics::SourceSemantics;
+use crate::semantics::go::model::GoCallSite;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -74,8 +74,11 @@ impl Rule for NetHttpServerTimeoutRule {
                 let column = call.function_call.location.column;
 
                 // Check for http.ListenAndServe (which uses DefaultServeMux with no timeouts)
-                if call.function_call.callee_expr.contains("ListenAndServe") && !call.function_call.callee_expr.contains("TLS") {
-                    let title = "http.ListenAndServe used without timeout configuration".to_string();
+                if call.function_call.callee_expr.contains("ListenAndServe")
+                    && !call.function_call.callee_expr.contains("TLS")
+                {
+                    let title =
+                        "http.ListenAndServe used without timeout configuration".to_string();
 
                     let description = format!(
                         "The call to `{}` at line {} uses the default server configuration \
@@ -110,9 +113,9 @@ impl Rule for NetHttpServerTimeoutRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(
                             "// Replace http.ListenAndServe with explicit Server:\n\
@@ -166,9 +169,9 @@ impl Rule for NetHttpServerTimeoutRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None, // Complex struct modification
                             fix_preview: Some(
                                 "// Add timeout fields:\n\
@@ -287,8 +290,7 @@ impl Rule for NetHttpHandlerTimeoutRule {
                 // Check if this function has HTTP handler signature
                 // (w http.ResponseWriter, r *http.Request, ...)
                 let is_http_handler = func.params.iter().any(|p| {
-                    p.param_type.contains("ResponseWriter")
-                        || p.param_type.contains("http.Request")
+                    p.param_type.contains("ResponseWriter") || p.param_type.contains("http.Request")
                 });
 
                 if !is_http_handler {
@@ -366,8 +368,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -78,7 +78,8 @@ impl Rule for TypescriptMissingNullCheckRule {
                                     param.name, func.name
                                 );
 
-                                let patch = generate_patch(*file_id, func.location.range.start_line + 1);
+                                let patch =
+                                    generate_patch(*file_id, func.location.range.start_line + 1);
 
                                 findings.push(RuleFinding {
                                     rule_id: self.id().to_string(),
@@ -92,9 +93,9 @@ impl Rule for TypescriptMissingNullCheckRule {
                                     file_path: ts.path.clone(),
                                     line: Some(func.location.range.start_line + 1),
                                     column: Some(func.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                    end_line: None,
+                                    end_column: None,
+                                    byte_range: None,
                                     patch: Some(patch),
                                     fix_preview: Some(format!(
                                         "// Use optional chaining: {}?.property or add a guard",

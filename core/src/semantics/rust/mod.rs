@@ -16,9 +16,9 @@ pub use model::RustFileSemantics;
 use anyhow::Result;
 
 use crate::parse::ast::ParsedFile;
-use crate::semantics::common::calls::FunctionCall;
-use crate::semantics::common::db::{DbOperation, DbLibrary, DbOperationType};
 use crate::semantics::common::CommonLocation;
+use crate::semantics::common::calls::FunctionCall;
+use crate::semantics::common::db::{DbLibrary, DbOperation, DbOperationType};
 
 /// Build the semantic model for a single Rust file.
 ///
@@ -52,16 +52,29 @@ fn analyze_http_calls(parsed: &ParsedFile, sem: &mut RustFileSemantics) {
 }
 
 /// Convert Rust-specific HttpCallSite to common HttpCall.
-fn convert_http_call_site(site: http::HttpCallSite, _parsed: &ParsedFile) -> crate::semantics::common::http::HttpCall {
+fn convert_http_call_site(
+    site: http::HttpCallSite,
+    _parsed: &ParsedFile,
+) -> crate::semantics::common::http::HttpCall {
     let library = match site.client_kind {
         http::HttpClientKind::Reqwest => crate::semantics::common::http::HttpClientLibrary::Reqwest,
-        http::HttpClientKind::ReqwestBlocking => crate::semantics::common::http::HttpClientLibrary::Reqwest,
+        http::HttpClientKind::ReqwestBlocking => {
+            crate::semantics::common::http::HttpClientLibrary::Reqwest
+        }
         http::HttpClientKind::Ureq => crate::semantics::common::http::HttpClientLibrary::Ureq,
         http::HttpClientKind::Hyper => crate::semantics::common::http::HttpClientLibrary::Hyper,
-        http::HttpClientKind::Surf => crate::semantics::common::http::HttpClientLibrary::Other("surf".to_string()),
-        http::HttpClientKind::Awc => crate::semantics::common::http::HttpClientLibrary::Other("awc".to_string()),
-        http::HttpClientKind::Isahc => crate::semantics::common::http::HttpClientLibrary::Other("isahc".to_string()),
-        http::HttpClientKind::Other(name) => crate::semantics::common::http::HttpClientLibrary::Other(name),
+        http::HttpClientKind::Surf => {
+            crate::semantics::common::http::HttpClientLibrary::Other("surf".to_string())
+        }
+        http::HttpClientKind::Awc => {
+            crate::semantics::common::http::HttpClientLibrary::Other("awc".to_string())
+        }
+        http::HttpClientKind::Isahc => {
+            crate::semantics::common::http::HttpClientLibrary::Other("isahc".to_string())
+        }
+        http::HttpClientKind::Other(name) => {
+            crate::semantics::common::http::HttpClientLibrary::Other(name)
+        }
     };
 
     let method = match site.method_name.to_lowercase().as_str() {
@@ -242,26 +255,50 @@ fn detect_db_operation_from_call(
 
     let (library, operation_type) = match callee_expr.as_str() {
         // Diesel ORM patterns
-        s if s.contains("schema::") && s.contains(".execute") => (DbLibrary::Diesel, DbOperationType::Update),
-        s if s.contains("schema::") && s.contains(".load") => (DbLibrary::Diesel, DbOperationType::Select),
-        s if s.contains("schema::") && s.contains(".delete") => (DbLibrary::Diesel, DbOperationType::Delete),
+        s if s.contains("schema::") && s.contains(".execute") => {
+            (DbLibrary::Diesel, DbOperationType::Update)
+        }
+        s if s.contains("schema::") && s.contains(".load") => {
+            (DbLibrary::Diesel, DbOperationType::Select)
+        }
+        s if s.contains("schema::") && s.contains(".delete") => {
+            (DbLibrary::Diesel, DbOperationType::Delete)
+        }
         s if s.contains(".insert_into") => (DbLibrary::Diesel, DbOperationType::Insert),
-        s if s.contains("select(") && s.contains("::") => (DbLibrary::Diesel, DbOperationType::Select),
+        s if s.contains("select(") && s.contains("::") => {
+            (DbLibrary::Diesel, DbOperationType::Select)
+        }
         s if s.contains(".update(") => (DbLibrary::Diesel, DbOperationType::Update),
 
         // SeaORM patterns
-        s if s.contains("Entity::") && s.contains(".find") => (DbLibrary::SeaOrm, DbOperationType::Select),
-        s if s.contains("Entity::") && s.contains(".insert") => (DbLibrary::SeaOrm, DbOperationType::Insert),
-        s if s.contains("Entity::") && s.contains(".update") => (DbLibrary::SeaOrm, DbOperationType::Update),
-        s if s.contains("Entity::") && s.contains(".delete") => (DbLibrary::SeaOrm, DbOperationType::Delete),
+        s if s.contains("Entity::") && s.contains(".find") => {
+            (DbLibrary::SeaOrm, DbOperationType::Select)
+        }
+        s if s.contains("Entity::") && s.contains(".insert") => {
+            (DbLibrary::SeaOrm, DbOperationType::Insert)
+        }
+        s if s.contains("Entity::") && s.contains(".update") => {
+            (DbLibrary::SeaOrm, DbOperationType::Update)
+        }
+        s if s.contains("Entity::") && s.contains(".delete") => {
+            (DbLibrary::SeaOrm, DbOperationType::Delete)
+        }
 
         // sqlx patterns
-        s if s.contains("query_as") && s.contains("PgPool") => (DbLibrary::Sqlx, DbOperationType::Select),
-        s if s.contains("query_as") && s.contains("execute") && s.contains("PgPool") => (DbLibrary::Sqlx, DbOperationType::Update),
+        s if s.contains("query_as") && s.contains("PgPool") => {
+            (DbLibrary::Sqlx, DbOperationType::Select)
+        }
+        s if s.contains("query_as") && s.contains("execute") && s.contains("PgPool") => {
+            (DbLibrary::Sqlx, DbOperationType::Update)
+        }
 
         // tokio-postgres patterns
-        s if s.contains("PgPool") && s.contains("query") => (DbLibrary::TokioPostgres, DbOperationType::Select),
-        s if s.contains("PgPool") && s.contains("execute") => (DbLibrary::TokioPostgres, DbOperationType::Update),
+        s if s.contains("PgPool") && s.contains("query") => {
+            (DbLibrary::TokioPostgres, DbOperationType::Select)
+        }
+        s if s.contains("PgPool") && s.contains("execute") => {
+            (DbLibrary::TokioPostgres, DbOperationType::Update)
+        }
 
         _ => return None,
     };
@@ -463,7 +500,10 @@ fn extract_use_items(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<Strin
             if child.kind() == "use_list" || child.kind() == "scoped_use_list" {
                 for j in 0..child.child_count() {
                     if let Some(item) = child.child(j) {
-                        if item.kind() == "identifier" || item.kind() == "use_as_clause" || item.kind() == "use_prelude_clause" {
+                        if item.kind() == "identifier"
+                            || item.kind() == "use_as_clause"
+                            || item.kind() == "use_prelude_clause"
+                        {
                             let text = parsed.text_for_node(&item);
                             if !text.is_empty() {
                                 items.push(text.trim().to_string());
@@ -1446,7 +1486,11 @@ fn detect_spawn_call(
 }
 
 /// Analyze if JoinHandle is properly awaited or error is handled.
-fn analyze_join_handle_error_handling(parsed: &ParsedFile, spawn_node: &tree_sitter::Node, _callee: &str) -> bool {
+fn analyze_join_handle_error_handling(
+    parsed: &ParsedFile,
+    spawn_node: &tree_sitter::Node,
+    _callee: &str,
+) -> bool {
     let parent = match spawn_node.parent() {
         Some(p) => p,
         None => return false,
@@ -1488,7 +1532,11 @@ fn analyze_join_handle_error_handling(parsed: &ParsedFile, spawn_node: &tree_sit
 }
 
 /// Check if a JoinHandle variable is properly awaited.
-fn check_handle_usage(parsed: &ParsedFile, start_node: &tree_sitter::Node, handle_var: &str) -> bool {
+fn check_handle_usage(
+    parsed: &ParsedFile,
+    start_node: &tree_sitter::Node,
+    handle_var: &str,
+) -> bool {
     let mut current = start_node.next_sibling();
     let mut max_nodes = 50;
 
@@ -2420,7 +2468,10 @@ async fn fetch_data() -> Result<String, reqwest::Error> {
         // HTTP calls should be populated by analyze_http_calls
         assert_eq!(sem.http_calls.len(), 1);
         assert!(sem.http_calls[0].in_async_context);
-        assert_eq!(sem.http_calls[0].method, crate::semantics::common::http::HttpMethod::Get);
+        assert_eq!(
+            sem.http_calls[0].method,
+            crate::semantics::common::http::HttpMethod::Get
+        );
     }
 
     #[test]

@@ -9,9 +9,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::ignored_result;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -68,12 +68,12 @@ impl Rule for GoUncheckedErrorRule {
                 // All unchecked errors are at least medium severity
                 let severity = Severity::Medium;
 
-                let func_name = unchecked.function_name.as_deref().unwrap_or("unknown function");
-                
-                let title = format!(
-                    "Error return from `{}` is not checked",
-                    func_name
-                );
+                let func_name = unchecked
+                    .function_name
+                    .as_deref()
+                    .unwrap_or("unknown function");
+
+                let title = format!("Error return from `{}` is not checked", func_name);
 
                 let description = format!(
                     "The call to `{}` returns an error value that is being ignored. \
@@ -152,8 +152,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -266,7 +266,7 @@ func readConfig() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // If we found something, verify properties
         for finding in &findings {
             if finding.rule_id == "go.unchecked_error" {

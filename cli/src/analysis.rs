@@ -17,10 +17,7 @@ use crate::output::{IrAnalyzeResponse, IrFinding, IrGraphStats};
 /// 3. Resolve profiles to rule IDs
 /// 4. Run matching rules against the IR
 /// 5. Convert findings to the CLI's display format
-pub async fn analyze_ir_locally(
-    ir_json: String,
-    profiles: &[String],
-) -> Result<IrAnalyzeResponse> {
+pub async fn analyze_ir_locally(ir_json: String, profiles: &[String]) -> Result<IrAnalyzeResponse> {
     let start = Instant::now();
 
     // Step 1: Deserialize IR (analysis crate's format is compatible via JSON)
@@ -33,20 +30,26 @@ pub async fn analyze_ir_locally(
     let file_count = ir.semantics.len() as i32;
 
     // Step 3: Resolve profiles to rule IDs and run rules
-    let profile_registry =
-        unfault_analysis::profiles::ProfileRegistry::with_builtin_profiles();
-    let rule_registry =
-        unfault_analysis::rules::registry::RuleRegistry::with_builtin_rules();
+    let profile_registry = unfault_analysis::profiles::ProfileRegistry::with_builtin_profiles();
+    let rule_registry = unfault_analysis::rules::registry::RuleRegistry::with_builtin_rules();
 
     let rule_ids: Vec<String> = if profiles.is_empty() {
         // No profiles specified: run all rules
-        rule_registry.all().iter().map(|r| r.id().to_string()).collect()
+        rule_registry
+            .all()
+            .iter()
+            .map(|r| r.id().to_string())
+            .collect()
     } else {
         // Resolve profile IDs to rule IDs
         let resolved = unfault_analysis::ir::resolve_profile_rules(&profile_registry, profiles);
         if resolved.is_empty() {
             // Fallback: if no profiles matched, run all rules
-            rule_registry.all().iter().map(|r| r.id().to_string()).collect()
+            rule_registry
+                .all()
+                .iter()
+                .map(|r| r.id().to_string())
+                .collect()
         } else {
             resolved
         }

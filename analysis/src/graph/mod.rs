@@ -20,16 +20,16 @@ pub mod traversal;
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
-use petgraph::Direction;
 use serde::{Deserialize, Serialize};
 
 use crate::parse::ast::FileId;
+use crate::semantics::SourceSemantics;
 use crate::semantics::common::CommonSemantics;
 use crate::semantics::python::fastapi::FastApiFileSummary;
 use crate::semantics::python::model::PyFileSemantics;
-use crate::semantics::SourceSemantics;
 use crate::types::context::Language;
 
 /// Category of external modules for better organization
@@ -139,8 +139,12 @@ impl GraphNode {
             GraphNode::Class { name, .. } => name.clone(),
             GraphNode::ExternalModule { name, .. } => name.clone(),
             GraphNode::FastApiApp { var_name, .. } => format!("FastAPI({})", var_name),
-            GraphNode::FastApiRoute { http_method, path, .. } => format!("{} {}", http_method, path),
-            GraphNode::FastApiMiddleware { middleware_type, .. } => middleware_type.clone(),
+            GraphNode::FastApiRoute {
+                http_method, path, ..
+            } => format!("{} {}", http_method, path),
+            GraphNode::FastApiMiddleware {
+                middleware_type, ..
+            } => middleware_type.clone(),
         }
     }
 
@@ -217,7 +221,11 @@ impl CodeGraph {
     }
 
     /// Get or create an external module node
-    pub fn get_or_create_external_module(&mut self, name: &str, category: ModuleCategory) -> NodeIndex {
+    pub fn get_or_create_external_module(
+        &mut self,
+        name: &str,
+        category: ModuleCategory,
+    ) -> NodeIndex {
         if let Some(&idx) = self.external_modules.get(name) {
             return idx;
         }
@@ -263,7 +271,12 @@ impl CodeGraph {
 
         self.graph
             .edges_directed(target_idx, Direction::Incoming)
-            .filter(|e| matches!(e.weight(), GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. }))
+            .filter(|e| {
+                matches!(
+                    e.weight(),
+                    GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. }
+                )
+            })
             .filter_map(|e| {
                 let source_idx = e.source();
                 if let GraphNode::File { file_id, .. } = &self.graph[source_idx] {
@@ -283,7 +296,12 @@ impl CodeGraph {
 
         self.graph
             .edges_directed(source_idx, Direction::Outgoing)
-            .filter(|e| matches!(e.weight(), GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. }))
+            .filter(|e| {
+                matches!(
+                    e.weight(),
+                    GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. }
+                )
+            })
             .filter_map(|e| {
                 let target_idx = e.target();
                 if let GraphNode::File { file_id, .. } = &self.graph[target_idx] {
@@ -296,7 +314,11 @@ impl CodeGraph {
     }
 
     /// Get all files that transitively import a given file (up to max_depth hops)
-    pub fn get_transitive_importers(&self, file_id: FileId, max_depth: usize) -> Vec<(FileId, usize)> {
+    pub fn get_transitive_importers(
+        &self,
+        file_id: FileId,
+        max_depth: usize,
+    ) -> Vec<(FileId, usize)> {
         let Some(&start_idx) = self.file_nodes.get(&file_id) else {
             return vec![];
         };
@@ -314,7 +336,10 @@ impl CodeGraph {
             }
 
             for edge in self.graph.edges_directed(current_idx, Direction::Incoming) {
-                if !matches!(edge.weight(), GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. }) {
+                if !matches!(
+                    edge.weight(),
+                    GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. }
+                ) {
                     continue;
                 }
 
@@ -380,7 +405,7 @@ impl CodeGraph {
         let mut function_count = 0;
         let mut class_count = 0;
         let mut external_module_count = 0;
-    
+
         for node in self.graph.node_weights() {
             match node {
                 GraphNode::File { .. } => file_count += 1,
@@ -390,22 +415,24 @@ impl CodeGraph {
                 _ => {}
             }
         }
-    
+
         let mut import_edge_count = 0;
         let mut contains_edge_count = 0;
         let mut uses_library_edge_count = 0;
         let mut calls_edge_count = 0;
-    
+
         for edge in self.graph.edge_weights() {
             match edge {
-                GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. } => import_edge_count += 1,
+                GraphEdgeKind::Imports | GraphEdgeKind::ImportsFrom { .. } => {
+                    import_edge_count += 1
+                }
                 GraphEdgeKind::Contains => contains_edge_count += 1,
                 GraphEdgeKind::UsesLibrary => uses_library_edge_count += 1,
                 GraphEdgeKind::Calls => calls_edge_count += 1,
                 _ => {}
             }
         }
-    
+
         GraphStats {
             file_count,
             function_count,
@@ -438,7 +465,8 @@ impl CodeGraph {
                     self.path_to_file.insert(path.clone(), node_idx);
                 }
                 GraphNode::Function { file_id, name, .. } => {
-                    self.function_nodes.insert((*file_id, name.clone()), node_idx);
+                    self.function_nodes
+                        .insert((*file_id, name.clone()), node_idx);
                 }
                 GraphNode::Class { file_id, name, .. } => {
                     self.class_nodes.insert((*file_id, name.clone()), node_idx);
@@ -536,7 +564,8 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
                 if let Some(callee_name) = func_call.callee_parts.last() {
                     let callee_key = (*file_id, callee_name.clone());
                     if let Some(&callee_idx) = cg.function_nodes.get(&callee_key) {
-                        cg.graph.add_edge(caller_idx, callee_idx, GraphEdgeKind::Calls);
+                        cg.graph
+                            .add_edge(caller_idx, callee_idx, GraphEdgeKind::Calls);
                     }
                 }
             }
@@ -547,7 +576,12 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
 }
 
 /// Add import edges from a file to other files or external modules
-fn add_import_edges(cg: &mut CodeGraph, file_node: NodeIndex, _file_id: FileId, sem: &Arc<SourceSemantics>) {
+fn add_import_edges(
+    cg: &mut CodeGraph,
+    file_node: NodeIndex,
+    _file_id: FileId,
+    sem: &Arc<SourceSemantics>,
+) {
     // Get imports via CommonSemantics trait
     let imports = match sem.as_ref() {
         SourceSemantics::Python(py) => py.imports(),
@@ -577,10 +611,12 @@ fn add_import_edges(cg: &mut CodeGraph, file_node: NodeIndex, _file_id: FileId, 
             if let Some(target_idx) = cg.find_file_by_path(path) {
                 // Found as a local file - create import edge
                 if import.items.is_empty() {
-                    cg.graph.add_edge(file_node, target_idx, GraphEdgeKind::Imports);
+                    cg.graph
+                        .add_edge(file_node, target_idx, GraphEdgeKind::Imports);
                 } else {
                     let items: Vec<String> = import.items.iter().map(|i| i.name.clone()).collect();
-                    cg.graph.add_edge(file_node, target_idx, GraphEdgeKind::ImportsFrom { items });
+                    cg.graph
+                        .add_edge(file_node, target_idx, GraphEdgeKind::ImportsFrom { items });
                 }
                 found_local_file = true;
                 break;
@@ -592,13 +628,19 @@ fn add_import_edges(cg: &mut CodeGraph, file_node: NodeIndex, _file_id: FileId, 
             let category = categorize_module(&import.module_path);
             let package_name = import.package_name().to_string();
             let module_idx = cg.get_or_create_external_module(&package_name, category);
-            cg.graph.add_edge(file_node, module_idx, GraphEdgeKind::UsesLibrary);
+            cg.graph
+                .add_edge(file_node, module_idx, GraphEdgeKind::UsesLibrary);
         }
     }
 }
 
 /// Add function nodes from a file
-fn add_function_nodes(cg: &mut CodeGraph, file_node: NodeIndex, file_id: FileId, sem: &Arc<SourceSemantics>) {
+fn add_function_nodes(
+    cg: &mut CodeGraph,
+    file_node: NodeIndex,
+    file_id: FileId,
+    sem: &Arc<SourceSemantics>,
+) {
     // Get functions via CommonSemantics trait
     let functions = match sem.as_ref() {
         SourceSemantics::Python(py) => py.functions(),
@@ -624,10 +666,12 @@ fn add_function_nodes(cg: &mut CodeGraph, file_node: NodeIndex, file_id: FileId,
         });
 
         // File contains function
-        cg.graph.add_edge(file_node, func_node, GraphEdgeKind::Contains);
+        cg.graph
+            .add_edge(file_node, func_node, GraphEdgeKind::Contains);
 
         // Store for lookup
-        cg.function_nodes.insert((file_id, func.name.clone()), func_node);
+        cg.function_nodes
+            .insert((file_id, func.name.clone()), func_node);
     }
 }
 
@@ -801,8 +845,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::python::model::PyFileSemantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::python::model::PyFileSemantics;
     use crate::types::context::{Language, SourceFile};
 
     /// Helper to parse Python source and build semantics with framework analysis
@@ -1093,8 +1137,14 @@ async def fetch_user(user_id):
         assert!(stats.function_count >= 2);
 
         // Functions should be in lookup
-        assert!(cg.function_nodes.contains_key(&(file_id, "process_data".to_string())));
-        assert!(cg.function_nodes.contains_key(&(file_id, "fetch_user".to_string())));
+        assert!(
+            cg.function_nodes
+                .contains_key(&(file_id, "process_data".to_string()))
+        );
+        assert!(
+            cg.function_nodes
+                .contains_key(&(file_id, "fetch_user".to_string()))
+        );
     }
 
     #[test]

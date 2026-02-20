@@ -55,19 +55,19 @@ impl Rule for DjangoOrmSelectRelatedRule {
 
             // Check for Django ORM imports
             let has_django_models = py.imports.iter().any(|imp| {
-                imp.module.contains("django") && 
-                (imp.module.contains("models") || imp.names.iter().any(|n| n == "models"))
+                imp.module.contains("django")
+                    && (imp.module.contains("models") || imp.names.iter().any(|n| n == "models"))
             });
 
             if !has_django_models {
                 // Also check for common Django ORM patterns in calls
                 let has_orm_calls = py.calls.iter().any(|c| {
-                    c.function_call.callee_expr.contains(".objects.") || 
-                    c.function_call.callee_expr.ends_with(".all()") ||
-                    c.function_call.callee_expr.ends_with(".filter(") ||
-                    c.function_call.callee_expr.ends_with(".get(")
+                    c.function_call.callee_expr.contains(".objects.")
+                        || c.function_call.callee_expr.ends_with(".all()")
+                        || c.function_call.callee_expr.ends_with(".filter(")
+                        || c.function_call.callee_expr.ends_with(".get(")
                 });
-                
+
                 if !has_orm_calls {
                     continue;
                 }
@@ -85,13 +85,15 @@ impl Rule for DjangoOrmSelectRelatedRule {
                         || call.function_call.callee_expr.contains(".last");
 
                     // Skip if already using select_related or prefetch_related
-                    let has_optimization = call.function_call.callee_expr.contains("select_related")
-                        || call.function_call.callee_expr.contains("prefetch_related")
-                        || call.args_repr.contains("select_related")
-                        || call.args_repr.contains("prefetch_related");
+                    let has_optimization =
+                        call.function_call.callee_expr.contains("select_related")
+                            || call.function_call.callee_expr.contains("prefetch_related")
+                            || call.args_repr.contains("select_related")
+                            || call.args_repr.contains("prefetch_related");
 
                     if is_orm_query && !has_optimization {
-                        let title = "Django ORM query inside loop may cause N+1 problem".to_string();
+                        let title =
+                            "Django ORM query inside loop may cause N+1 problem".to_string();
 
                         let description = format!(
                             "The query '{}' is executed inside a loop, which can cause N+1 query \
@@ -104,10 +106,8 @@ impl Rule for DjangoOrmSelectRelatedRule {
 
                         let fix_preview = generate_fix_preview();
 
-                        let patch = generate_optimization_patch(
-                            *file_id,
-                            call.function_call.location.line,
-                        );
+                        let patch =
+                            generate_optimization_patch(*file_id, call.function_call.location.line);
 
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
@@ -121,9 +121,9 @@ impl Rule for DjangoOrmSelectRelatedRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some(fix_preview),
                             tags: vec![
@@ -146,9 +146,10 @@ impl Rule for DjangoOrmSelectRelatedRule {
                     let parts: Vec<&str> = call.function_call.callee_expr.split('.').collect();
                     if parts.len() >= 3 {
                         // This might be accessing a related field
-                        let might_be_related_access = !call.function_call.callee_expr.contains("objects")
-                            && !call.function_call.callee_expr.starts_with("self.")
-                            && !is_builtin_method(&call.function_call.callee_expr);
+                        let might_be_related_access =
+                            !call.function_call.callee_expr.contains("objects")
+                                && !call.function_call.callee_expr.starts_with("self.")
+                                && !is_builtin_method(&call.function_call.callee_expr);
 
                         if might_be_related_access {
                             // Already reported above, skip to avoid duplicates
@@ -170,13 +171,34 @@ impl Rule for DjangoOrmSelectRelatedRule {
 /// Check if a method name is a Python builtin.
 fn is_builtin_method(callee: &str) -> bool {
     let builtins = [
-        "append", "extend", "insert", "remove", "pop", "clear",
-        "index", "count", "sort", "reverse", "copy", "keys",
-        "values", "items", "get", "update", "setdefault",
-        "format", "strip", "split", "join", "replace",
-        "lower", "upper", "startswith", "endswith",
+        "append",
+        "extend",
+        "insert",
+        "remove",
+        "pop",
+        "clear",
+        "index",
+        "count",
+        "sort",
+        "reverse",
+        "copy",
+        "keys",
+        "values",
+        "items",
+        "get",
+        "update",
+        "setdefault",
+        "format",
+        "strip",
+        "split",
+        "join",
+        "replace",
+        "lower",
+        "upper",
+        "startswith",
+        "endswith",
     ];
-    
+
     builtins.iter().any(|b| callee.ends_with(b))
 }
 
@@ -184,7 +206,9 @@ fn is_builtin_method(callee: &str) -> bool {
 fn generate_optimization_patch(file_id: FileId, line: u32) -> FilePatch {
     let hunks = vec![PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
-        replacement: "# TODO: Consider using select_related() or prefetch_related() to optimize this query\n".to_string(),
+        replacement:
+            "# TODO: Consider using select_related() or prefetch_related() to optimize this query\n"
+                .to_string(),
     }];
 
     FilePatch { file_id, hunks }
@@ -235,7 +259,8 @@ authors = Author.objects.prefetch_related(
         'books',
         queryset=Book.objects.filter(published=True).order_by('-date')
     )
-).all()"#.to_string()
+).all()"#
+        .to_string()
 }
 
 #[cfg(test)]

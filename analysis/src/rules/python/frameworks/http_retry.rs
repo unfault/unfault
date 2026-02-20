@@ -19,9 +19,11 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 /// Check if tenacity retry imports are already present
 fn has_tenacity_retry_imports(imports: &[PyImport]) -> bool {
     imports.iter().any(|imp| {
-        imp.module == "tenacity" && imp.names.iter().any(|n| {
-            n == "retry" || n == "stop_after_attempt" || n == "wait_exponential"
-        })
+        imp.module == "tenacity"
+            && imp
+                .names
+                .iter()
+                .any(|n| n == "retry" || n == "stop_after_attempt" || n == "wait_exponential")
     })
 }
 
@@ -70,7 +72,9 @@ impl Rule for PythonHttpMissingRetryRule {
                 "Only retry idempotent operations (or add idempotency keys)".to_string(),
                 "Define which failures are retryable and apply backoff + max attempts".to_string(),
             ],
-            notes: Some("Retries can increase load during outages; tune carefully and measure.".to_string()),
+            notes: Some(
+                "Retries can increase load during outages; tune carefully and measure.".to_string(),
+            ),
         })
     }
 
@@ -125,7 +129,8 @@ impl Rule for PythonHttpMissingRetryRule {
                     import_line: py.module_docstring_end_line.map(|l| l + 1).unwrap_or(1),
                     // We need the function definition line to add decorator
                     function_def_line: call.function_name.as_ref().and_then(|fn_name| {
-                        py.functions.iter()
+                        py.functions
+                            .iter()
                             .find(|f| &f.name == fn_name)
                             .map(|f| f.location.range.start_line + 1) // Convert 0-indexed to 1-indexed
                     }),
@@ -150,7 +155,7 @@ impl Rule for PythonHttpMissingRetryRule {
                     column: Some(location.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(file_patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -175,16 +180,18 @@ impl Rule for PythonHttpMissingRetryRule {
 /// 2. Add @retry decorator before the function definition
 fn generate_retry_patch(client: &str, file_id: FileId, ctx: &RetryPatchContext) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Hunk 1: Add tenacity import after docstring (only if not already present)
     if !has_tenacity_retry_imports(ctx.imports) {
         let import_str = "from tenacity import retry, stop_after_attempt, wait_exponential\n";
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: ctx.import_line },
+            range: PatchRange::InsertBeforeLine {
+                line: ctx.import_line,
+            },
             replacement: import_str.to_string(),
         });
     }
-    
+
     // Hunk 2: Add @retry decorator before the function definition (if we know it)
     if let Some(fn_line) = ctx.function_def_line {
         let decorator = if ctx.is_async {
@@ -193,7 +200,7 @@ fn generate_retry_patch(client: &str, file_id: FileId, ctx: &RetryPatchContext) 
         } else {
             "@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=10))\n"
         };
-        
+
         // Add client-specific comment
         let comment = match client {
             "requests" => "# Retry policy added for requests HTTP calls\n",
@@ -201,13 +208,13 @@ fn generate_retry_patch(client: &str, file_id: FileId, ctx: &RetryPatchContext) 
             "aiohttp" => "# Retry policy added for aiohttp HTTP calls\n",
             _ => "# Retry policy added for HTTP calls\n",
         };
-        
+
         hunks.push(PatchHunk {
             range: PatchRange::InsertBeforeLine { line: fn_line },
             replacement: format!("{}{}", comment, decorator),
         });
     }
-    
+
     FilePatch { file_id, hunks }
 }
 
@@ -338,7 +345,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag calls with @retry decorator");
+        assert!(
+            findings.is_empty(),
+            "Should not flag calls with @retry decorator"
+        );
     }
 
     #[tokio::test]
@@ -355,7 +365,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag calls with @tenacity.retry decorator");
+        assert!(
+            findings.is_empty(),
+            "Should not flag calls with @tenacity.retry decorator"
+        );
     }
 
     #[tokio::test]
@@ -372,7 +385,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag calls with @backoff decorator");
+        assert!(
+            findings.is_empty(),
+            "Should not flag calls with @backoff decorator"
+        );
     }
 
     #[tokio::test]
@@ -394,7 +410,10 @@ def fetch_data():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not flag calls when session retry is configured");
+        assert!(
+            findings.is_empty(),
+            "Should not flag calls when session retry is configured"
+        );
     }
 
     // ==================== evaluate Tests - With Findings ====================
@@ -550,7 +569,11 @@ def fetch_data():
 
         let findings = rule.evaluate(&semantics, None).await;
         let patch = findings[0].patch.as_ref().unwrap();
-        assert_eq!(patch.hunks.len(), 2, "Should have import hunk + decorator hunk");
+        assert_eq!(
+            patch.hunks.len(),
+            2,
+            "Should have import hunk + decorator hunk"
+        );
     }
 
     #[tokio::test]
@@ -562,7 +585,11 @@ def fetch_data():
 
         let findings = rule.evaluate(&semantics, None).await;
         let patch = findings[0].patch.as_ref().unwrap();
-        assert_eq!(patch.hunks.len(), 1, "Should only have import hunk for module-level calls");
+        assert_eq!(
+            patch.hunks.len(),
+            1,
+            "Should only have import hunk for module-level calls"
+        );
     }
 
     #[tokio::test]
@@ -695,10 +722,10 @@ def fetch_data():
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         assert_eq!(patch.hunks.len(), 2);
-        
+
         // First hunk should insert imports after docstring (line 5 = after line 4 which is """)
         let import_hunk = &patch.hunks[0];
         if let PatchRange::InsertBeforeLine { line } = import_hunk.range {
@@ -707,7 +734,7 @@ def fetch_data():
         } else {
             panic!("Expected InsertBeforeLine for import hunk");
         }
-        
+
         // Second hunk should add decorator before function
         let decorator_hunk = &patch.hunks[1];
         if let PatchRange::InsertBeforeLine { line } = decorator_hunk.range {
@@ -731,10 +758,10 @@ async def handle_webhook(data):
 
         let findings = rule.evaluate(&semantics, None).await;
         assert_eq!(findings.len(), 1);
-        
+
         let patch = findings[0].patch.as_ref().unwrap();
         assert_eq!(patch.hunks.len(), 2);
-        
+
         // Decorator hunk should contain @retry
         let decorator_hunk = &patch.hunks[1];
         assert!(decorator_hunk.replacement.contains("@retry"));

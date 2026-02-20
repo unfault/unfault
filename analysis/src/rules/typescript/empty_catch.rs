@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -93,7 +93,7 @@ impl Rule for TypescriptEmptyCatchRule {
                     column: Some(empty_catch.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -126,7 +126,8 @@ fn generate_empty_catch_patch(
                 start: empty_catch.start_byte,
                 end: empty_catch.end_byte,
             },
-            replacement: "catch (error) {\n    console.error('Unhandled error:', error);\n}".to_string(),
+            replacement: "catch (error) {\n    console.error('Unhandled error:', error);\n}"
+                .to_string(),
         }],
     }
 }

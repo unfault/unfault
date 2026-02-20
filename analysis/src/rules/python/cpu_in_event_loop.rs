@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::{ImportInsertionType, PyImport};
@@ -137,10 +137,7 @@ impl Rule for PythonCpuInEventLoopRule {
             };
 
             // Find async functions
-            let async_functions: Vec<_> = py.functions
-                .iter()
-                .filter(|f| f.is_async)
-                .collect();
+            let async_functions: Vec<_> = py.functions.iter().filter(|f| f.is_async).collect();
 
             if async_functions.is_empty() {
                 continue;
@@ -160,7 +157,10 @@ impl Rule for PythonCpuInEventLoopRule {
                     // and the call is not using run_in_executor
 
                     if !is_offloaded_to_executor(&callee_joined, &call.args_repr)
-                        && !is_offloaded_to_executor(&call.function_call.callee_expr, &call.args_repr)
+                        && !is_offloaded_to_executor(
+                            &call.function_call.callee_expr,
+                            &call.args_repr,
+                        )
                     {
                         // Prefer the semantic caller_function (more reliable than line ranges)
                         // and fall back to the line-range heuristic.
@@ -188,7 +188,9 @@ impl Rule for PythonCpuInEventLoopRule {
                                     end_byte: call.end_byte,
                                     args_repr: call.args_repr.clone(),
                                     imports: py.imports.clone(),
-                                    stdlib_import_line: py.import_insertion_line_for(ImportInsertionType::stdlib_import()),
+                                    stdlib_import_line: py.import_insertion_line_for(
+                                        ImportInsertionType::stdlib_import(),
+                                    ),
                                 },
                                 *file_id,
                                 &py.path,
@@ -205,73 +207,104 @@ impl Rule for PythonCpuInEventLoopRule {
 
 fn detect_cpu_intensive_operation(callee: &str) -> Option<CpuOperationType> {
     // JSON processing
-    if callee.contains("json.loads") || callee.contains("json.dumps") 
-        || callee.contains("json.load") || callee.contains("json.dump")
-        || callee == "loads" || callee == "dumps" {
+    if callee.contains("json.loads")
+        || callee.contains("json.dumps")
+        || callee.contains("json.load")
+        || callee.contains("json.dump")
+        || callee == "loads"
+        || callee == "dumps"
+    {
         return Some(CpuOperationType::JsonProcessing);
     }
 
     // Cryptography
-    if callee.contains("hashlib") || callee.contains("hmac")
-        || callee.contains("bcrypt") || callee.contains("scrypt")
-        || callee.contains("pbkdf2") || callee.contains("argon2")
-        || callee.contains(".hash(") || callee.contains(".encrypt(")
-        || callee.contains(".decrypt(") || callee.contains("sha256")
-        || callee.contains("sha512") || callee.contains("md5") {
+    if callee.contains("hashlib")
+        || callee.contains("hmac")
+        || callee.contains("bcrypt")
+        || callee.contains("scrypt")
+        || callee.contains("pbkdf2")
+        || callee.contains("argon2")
+        || callee.contains(".hash(")
+        || callee.contains(".encrypt(")
+        || callee.contains(".decrypt(")
+        || callee.contains("sha256")
+        || callee.contains("sha512")
+        || callee.contains("md5")
+    {
         return Some(CpuOperationType::Cryptography);
     }
 
     // Compression
-    if callee.contains("gzip") || callee.contains("zlib")
-        || callee.contains("bz2") || callee.contains("lzma")
-        || callee.contains("compress") || callee.contains("decompress") {
+    if callee.contains("gzip")
+        || callee.contains("zlib")
+        || callee.contains("bz2")
+        || callee.contains("lzma")
+        || callee.contains("compress")
+        || callee.contains("decompress")
+    {
         return Some(CpuOperationType::Compression);
     }
 
     // Regex
-    if callee.contains("re.match") || callee.contains("re.search")
-        || callee.contains("re.findall") || callee.contains("re.sub")
-        || callee.contains("re.compile") || callee.contains("regex.") {
+    if callee.contains("re.match")
+        || callee.contains("re.search")
+        || callee.contains("re.findall")
+        || callee.contains("re.sub")
+        || callee.contains("re.compile")
+        || callee.contains("regex.")
+    {
         return Some(CpuOperationType::RegexProcessing);
     }
 
     // Image processing
-    if callee.contains("PIL") || callee.contains("Pillow")
-        || callee.contains("cv2") || callee.contains("opencv")
-        || callee.contains("Image.") || callee.contains(".resize(")
-        || callee.contains(".thumbnail(") {
+    if callee.contains("PIL")
+        || callee.contains("Pillow")
+        || callee.contains("cv2")
+        || callee.contains("opencv")
+        || callee.contains("Image.")
+        || callee.contains(".resize(")
+        || callee.contains(".thumbnail(")
+    {
         return Some(CpuOperationType::ImageProcessing);
     }
 
     // Serialization
-    if callee.contains("pickle") || callee.contains("marshal")
-        || callee.contains("msgpack") || callee.contains("protobuf") {
+    if callee.contains("pickle")
+        || callee.contains("marshal")
+        || callee.contains("msgpack")
+        || callee.contains("protobuf")
+    {
         return Some(CpuOperationType::Serialization);
     }
 
     // Math computations
-    if callee.contains("numpy") || callee.contains("scipy")
-        || callee.contains("pandas") || callee.contains("np.")
-        || callee.contains("math.") {
+    if callee.contains("numpy")
+        || callee.contains("scipy")
+        || callee.contains("pandas")
+        || callee.contains("np.")
+        || callee.contains("math.")
+    {
         return Some(CpuOperationType::MathComputation);
     }
 
     // Sorting
-    if callee == "sorted" || callee.ends_with(".sort(") 
-        || callee.contains(".sort()") {
+    if callee == "sorted" || callee.ends_with(".sort(") || callee.contains(".sort()") {
         return Some(CpuOperationType::Sorting);
     }
 
     // File parsing
-    if callee.contains("xml.") || callee.contains("yaml.")
-        || callee.contains("toml.") || callee.contains("ElementTree")
-        || callee.contains("lxml") || callee.contains("BeautifulSoup") {
+    if callee.contains("xml.")
+        || callee.contains("yaml.")
+        || callee.contains("toml.")
+        || callee.contains("ElementTree")
+        || callee.contains("lxml")
+        || callee.contains("BeautifulSoup")
+    {
         return Some(CpuOperationType::FileParsing);
     }
 
     // String processing (potentially CPU-intensive)
-    if callee.contains(".encode(") || callee.contains(".decode(")
-        || callee.contains("base64") {
+    if callee.contains(".encode(") || callee.contains(".decode(") || callee.contains("base64") {
         return Some(CpuOperationType::StringProcessing);
     }
 
@@ -280,7 +313,7 @@ fn detect_cpu_intensive_operation(callee: &str) -> Option<CpuOperationType> {
 
 fn is_offloaded_to_executor(callee: &str, args: &str) -> bool {
     // Check if the call is wrapped in run_in_executor or to_thread
-    callee.contains("run_in_executor") 
+    callee.contains("run_in_executor")
         || callee.contains("to_thread")
         || callee.contains("ProcessPoolExecutor")
         || callee.contains("ThreadPoolExecutor")
@@ -295,11 +328,11 @@ fn find_enclosing_async_function(
     // Find the async function that contains this call
     // A call is inside a function if it's between the function's start and end lines
     let mut best_match: Option<&crate::semantics::python::model::PyFunction> = None;
-    
+
     for func in async_functions {
         let func_start = func.location.range.start_line;
         let func_end = func.location.range.end_line;
-        
+
         // Check if the call is within the function's range
         if call_line >= func_start && call_line <= func_end {
             match best_match {
@@ -354,7 +387,11 @@ async def {func}():
     # loop = asyncio.get_event_loop()
     # result = await loop.run_in_executor(None, {callee}, data)"#,
         func = cpu_call.async_function,
-        callee = cpu_call.callee.split('.').last().unwrap_or(&cpu_call.callee)
+        callee = cpu_call
+            .callee
+            .split('.')
+            .last()
+            .unwrap_or(&cpu_call.callee)
     );
 
     RuleFinding {
@@ -369,9 +406,9 @@ async def {func}():
         file_path: file_path.to_string(),
         line: Some(cpu_call.line),
         column: Some(cpu_call.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+        end_line: None,
+        end_column: None,
+        byte_range: None,
         patch: Some(patch),
         fix_preview: Some(fix_preview),
         tags: vec![
@@ -386,26 +423,25 @@ async def {func}():
 
 /// Check if asyncio is already imported
 fn has_asyncio_import(imports: &[PyImport]) -> bool {
-    imports.iter().any(|imp| {
-        imp.module == "asyncio" || imp.names.iter().any(|n| n == "asyncio")
-    })
+    imports
+        .iter()
+        .any(|imp| imp.module == "asyncio" || imp.names.iter().any(|n| n == "asyncio"))
 }
 
-fn generate_executor_patch(
-    cpu_call: &CpuIntensiveCall,
-    file_id: FileId,
-) -> FilePatch {
+fn generate_executor_patch(cpu_call: &CpuIntensiveCall, file_id: FileId) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Only add asyncio import if not already present
     // Use stdlib_import_line to ensure it's placed before third-party imports
     if !has_asyncio_import(&cpu_call.imports) {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: cpu_call.stdlib_import_line },
+            range: PatchRange::InsertBeforeLine {
+                line: cpu_call.stdlib_import_line,
+            },
             replacement: "import asyncio  # Added by unfault for to_thread\n".to_string(),
         });
     }
-    
+
     // Generate the actual code transformation using ReplaceBytes
     // Transform: func(args) -> await asyncio.to_thread(func, args)
     let replacement = if cpu_call.args_repr.is_empty() {
@@ -413,9 +449,12 @@ fn generate_executor_patch(
         format!("await asyncio.to_thread({})", cpu_call.callee)
     } else {
         // With arguments: func(a, b) -> await asyncio.to_thread(func, a, b)
-        format!("await asyncio.to_thread({}, {})", cpu_call.callee, cpu_call.args_repr)
+        format!(
+            "await asyncio.to_thread({}, {})",
+            cpu_call.callee, cpu_call.args_repr
+        )
     };
-    
+
     hunks.push(PatchHunk {
         range: PatchRange::ReplaceBytes {
             start: cpu_call.start_byte,
@@ -424,10 +463,7 @@ fn generate_executor_patch(
         replacement,
     });
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -490,8 +526,11 @@ async def process_data(data):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(!findings.is_empty(), "Should detect json.loads in async function");
+
+        assert!(
+            !findings.is_empty(),
+            "Should detect json.loads in async function"
+        );
         assert_eq!(findings[0].rule_id, "python.cpu_in_event_loop");
     }
 
@@ -509,7 +548,10 @@ async def hash_password(password):
 
         let findings = rule.evaluate(&semantics, None).await;
 
-        assert!(!findings.is_empty(), "Should detect hashlib in async function");
+        assert!(
+            !findings.is_empty(),
+            "Should detect hashlib in async function"
+        );
     }
 
     #[tokio::test]
@@ -526,8 +568,11 @@ def process_data(data):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(findings.is_empty(), "Should not flag CPU work in sync functions");
+
+        assert!(
+            findings.is_empty(),
+            "Should not flag CPU work in sync functions"
+        );
     }
 
     #[tokio::test]
@@ -545,10 +590,11 @@ async def process_data(data):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag when properly offloaded
         // Note: This depends on detection accuracy
-        let cpu_findings: Vec<_> = findings.iter()
+        let cpu_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "python.cpu_in_event_loop")
             .collect();
         // The to_thread usage should prevent flagging
@@ -588,7 +634,7 @@ async def handler():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             let finding = &findings[0];
             assert_eq!(finding.rule_id, "python.cpu_in_event_loop");
@@ -638,8 +684,20 @@ async def handler():
 
     #[test]
     fn cpu_operation_type_descriptions_are_meaningful() {
-        assert!(CpuOperationType::JsonProcessing.description().contains("JSON"));
-        assert!(CpuOperationType::Cryptography.description().contains("cryptographic"));
-        assert!(CpuOperationType::Compression.description().contains("compression"));
+        assert!(
+            CpuOperationType::JsonProcessing
+                .description()
+                .contains("JSON")
+        );
+        assert!(
+            CpuOperationType::Cryptography
+                .description()
+                .contains("cryptographic")
+        );
+        assert!(
+            CpuOperationType::Compression
+                .description()
+                .contains("compression")
+        );
     }
 }

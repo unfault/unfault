@@ -240,8 +240,7 @@ mod tests {
 
     #[test]
     fn test_extract_postgres_url() {
-        let result =
-            extract_url_from_call("create_engine('postgres://user:pass@host:5432/mydb')");
+        let result = extract_url_from_call("create_engine('postgres://user:pass@host:5432/mydb')");
         assert!(result.is_some());
         let extracted = result.unwrap();
         assert_eq!(extracted.raw_value, "postgres://user:pass@host:5432/mydb");
@@ -259,11 +258,13 @@ mod tests {
 
     #[test]
     fn test_extract_mongodb_url() {
-        let result =
-            extract_url_from_call("MongoClient('mongodb+srv://cluster.example.com/mydb')");
+        let result = extract_url_from_call("MongoClient('mongodb+srv://cluster.example.com/mydb')");
         assert!(result.is_some());
         let extracted = result.unwrap();
-        assert_eq!(extracted.raw_value, "mongodb+srv://cluster.example.com/mydb");
+        assert_eq!(
+            extracted.raw_value,
+            "mongodb+srv://cluster.example.com/mydb"
+        );
         assert!(!extracted.is_dynamic);
     }
 
@@ -305,7 +306,8 @@ mod tests {
 
     #[test]
     fn test_extract_host_port() {
-        let result = extract_url_from_call("redis.NewClient(&redis.Options{Addr: \"localhost:6379\"})");
+        let result =
+            extract_url_from_call("redis.NewClient(&redis.Options{Addr: \"localhost:6379\"})");
         assert!(result.is_some());
         let extracted = result.unwrap();
         assert_eq!(extracted.raw_value, "localhost:6379");

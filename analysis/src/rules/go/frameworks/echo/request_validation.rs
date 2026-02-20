@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -50,9 +50,10 @@ impl Rule for EchoRequestValidationRule {
             };
 
             // Check if Echo is imported
-            let has_echo = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("github.com/labstack/echo")
-            });
+            let has_echo = go_sem
+                .imports
+                .iter()
+                .any(|imp| imp.path.contains("github.com/labstack/echo"));
 
             if !has_echo {
                 continue;
@@ -60,19 +61,21 @@ impl Rule for EchoRequestValidationRule {
 
             // Check for validator import
             let has_validator = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("validator")
-                    || imp.path.contains("go-playground/validator")
+                imp.path.contains("validator") || imp.path.contains("go-playground/validator")
             });
 
             // Look for Bind calls without subsequent Validate
             for call in &go_sem.calls {
-                if call.function_call.callee_expr.contains(".Bind") || call.function_call.callee_expr.ends_with("Bind") {
+                if call.function_call.callee_expr.contains(".Bind")
+                    || call.function_call.callee_expr.ends_with("Bind")
+                {
                     let bind_line = call.function_call.location.line;
 
                     // Check if there's a Validate call nearby (within 10 lines)
                     let has_validation = go_sem.calls.iter().any(|c| {
                         let validate_line = c.function_call.location.line;
-                        (c.function_call.callee_expr.contains("Validate") || c.function_call.callee_expr.contains(".Struct"))
+                        (c.function_call.callee_expr.contains("Validate")
+                            || c.function_call.callee_expr.contains(".Struct"))
                             && validate_line > bind_line
                             && validate_line <= bind_line + 10
                     });
@@ -80,10 +83,7 @@ impl Rule for EchoRequestValidationRule {
                     if !has_validation {
                         let line = call.function_call.location.line;
 
-                        let title = format!(
-                            "Echo Bind() at line {} lacks validation",
-                            line
-                        );
+                        let title = format!("Echo Bind() at line {} lacks validation", line);
 
                         let description = format!(
                             "Echo Bind() at line {} lacks validation. Use go-playground/validator \
@@ -106,9 +106,9 @@ impl Rule for EchoRequestValidationRule {
                             file_path: go_sem.path.clone(),
                             line: Some(line),
                             column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some("// Add validation after binding".to_string()),
                             tags: vec![
@@ -137,7 +137,8 @@ fn generate_validation_patch(file_id: FileId, line: u32, has_validator: bool) ->
     // if err := validate.Struct(req); err != nil {
     //     return echo.NewHTTPError(http.StatusBadRequest, err.Error())
     // }
-"#.to_string()
+"#
+        .to_string()
     } else {
         r#"    // Add go-playground/validator:
     // import "github.com/go-playground/validator/v10"
@@ -146,7 +147,8 @@ fn generate_validation_patch(file_id: FileId, line: u32, has_validator: bool) ->
     // if err := validate.Struct(req); err != nil {
     //     return echo.NewHTTPError(http.StatusBadRequest, err.Error())
     // }
-"#.to_string()
+"#
+        .to_string()
     };
 
     FilePatch {

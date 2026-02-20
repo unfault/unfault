@@ -49,7 +49,7 @@ impl Rule for PythonHttpBlockingInAsyncRule {
                 if !call.in_async_function {
                     continue;
                 }
-                
+
                 // Skip calls that are already offloaded to a thread
                 // (e.g., wrapped in asyncio.to_thread or loop.run_in_executor)
                 if call.is_thread_offloaded {
@@ -80,7 +80,8 @@ impl Rule for PythonHttpBlockingInAsyncRule {
 
                         // Generate patch to wrap with asyncio.to_thread
                         // Use stdlib_import() for `import asyncio` placement
-                        let import_line = py.import_insertion_line_for(ImportInsertionType::stdlib_import());
+                        let import_line =
+                            py.import_insertion_line_for(ImportInsertionType::stdlib_import());
                         let patch = generate_to_thread_patch(
                             &call.call_text,
                             call.start_byte,
@@ -142,9 +143,9 @@ impl Rule for PythonHttpBlockingInAsyncRule {
 
 /// Check if asyncio is already imported
 fn has_asyncio_import(imports: &[PyImport]) -> bool {
-    imports.iter().any(|imp| {
-        imp.module == "asyncio" || imp.names.iter().any(|n| n == "asyncio")
-    })
+    imports
+        .iter()
+        .any(|imp| imp.module == "asyncio" || imp.names.iter().any(|n| n == "asyncio"))
 }
 
 /// Generate a patch to wrap a blocking call with asyncio.to_thread
@@ -161,7 +162,9 @@ fn generate_to_thread_patch(
     // Only add asyncio import if not already present
     if !has_asyncio_import(imports) {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+            range: PatchRange::InsertBeforeLine {
+                line: import_insertion_line,
+            },
             replacement: "import asyncio  # Added by unfault for to_thread\n".to_string(),
         });
     }
@@ -471,14 +474,15 @@ async def fetch():
 
         let findings = rule.evaluate(&semantics, None).await;
         let patch = findings[0].patch.as_ref().unwrap();
-        
+
         // Should have import hunk and replacement hunk
         assert_eq!(patch.hunks.len(), 2);
-        
+
         // Check that the replacement contains to_thread
-        let has_to_thread = patch.hunks.iter().any(|h| {
-            h.replacement.contains("to_thread")
-        });
+        let has_to_thread = patch
+            .hunks
+            .iter()
+            .any(|h| h.replacement.contains("to_thread"));
         assert!(has_to_thread, "Patch should use asyncio.to_thread");
     }
 
@@ -663,7 +667,10 @@ async def fetch():
 
         let findings = rule.evaluate(&semantics, None).await;
         // The call is wrapped in asyncio.to_thread, so it's no longer blocking
-        assert!(findings.is_empty(), "Should not flag calls wrapped in asyncio.to_thread");
+        assert!(
+            findings.is_empty(),
+            "Should not flag calls wrapped in asyncio.to_thread"
+        );
     }
 
     #[tokio::test]
@@ -679,7 +686,10 @@ async def fetch():
 
         let findings = rule.evaluate(&semantics, None).await;
         // The call is wrapped in run_in_executor, so it's no longer blocking
-        assert!(findings.is_empty(), "Should not flag calls wrapped in run_in_executor");
+        assert!(
+            findings.is_empty(),
+            "Should not flag calls wrapped in run_in_executor"
+        );
     }
 
     #[tokio::test]
@@ -696,7 +706,10 @@ async def fetch():
 
         let findings = rule.evaluate(&semantics, None).await;
         // The call is wrapped in sync_to_async, so it's no longer blocking
-        assert!(findings.is_empty(), "Should not flag calls wrapped in sync_to_async");
+        assert!(
+            findings.is_empty(),
+            "Should not flag calls wrapped in sync_to_async"
+        );
     }
 
     #[tokio::test]
@@ -715,7 +728,14 @@ async def direct_fetch():
 
         let findings = rule.evaluate(&semantics, None).await;
         // Only the direct call should be flagged (not the wrapped one)
-        assert_eq!(findings.len(), 1, "Should only flag the direct blocking call");
-        assert!(findings[0].title.contains("direct_fetch"), "Should flag the direct call in direct_fetch");
+        assert_eq!(
+            findings.len(),
+            1,
+            "Should only flag the direct blocking call"
+        );
+        assert!(
+            findings[0].title.contains("direct_fetch"),
+            "Should flag the direct call in direct_fetch"
+        );
     }
 }

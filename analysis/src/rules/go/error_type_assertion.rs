@@ -3,14 +3,14 @@
 //! Detects type assertions on errors (err.(*MyError)) instead of using errors.As(),
 //! which doesn't work correctly with wrapped errors.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::error_handling_in_handler;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -57,27 +57,29 @@ impl Rule for GoErrorTypeAssertionRule {
             };
 
             // Check for errors.As usage (if they use it, they're already aware)
-            let uses_errors_as = go.calls.iter().any(|c| c.function_call.callee_expr == "errors.As");
+            let uses_errors_as = go
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "errors.As");
 
             // Look for error type assertion patterns in calls and declarations
             // Pattern: err.(*SomeError) or err.(SomeError)
-            
+
             for call in &go.calls {
                 let args = &call.args_repr;
-                
+
                 // Check for patterns like: err.(*MyError), err.(MyError), etc.
                 // Common error-related patterns
                 if (args.contains("err.(") || args.contains("error.(")) && !uses_errors_as {
                     // Check if this looks like an error type assertion
-                    let is_error_type_assertion = 
-                        args.contains("err.(*") ||
-                        args.contains("err.(") ||
-                        args.contains("Error)") ||
-                        args.contains("Err)");
-                    
+                    let is_error_type_assertion = args.contains("err.(*")
+                        || args.contains("err.(")
+                        || args.contains("Error)")
+                        || args.contains("Err)");
+
                     if is_error_type_assertion {
                         let line = call.function_call.location.line;
-                        
+
                         let title = "Type assertion on error instead of errors.As()".to_string();
 
                         let description = format!(
@@ -121,16 +123,12 @@ impl Rule for GoErrorTypeAssertionRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some("Use errors.As(err, &target)".to_string()),
-                            tags: vec![
-                                "go".into(),
-                                "error-handling".into(),
-                                "errors.As".into(),
-                            ],
+                            tags: vec!["go".into(), "error-handling".into(), "errors.As".into()],
                         });
                     }
                 }
@@ -140,17 +138,15 @@ impl Rule for GoErrorTypeAssertionRule {
             for decl in &go.declarations {
                 if let Some(ref value) = decl.value_repr {
                     // Check for err.(*Type) pattern in value
-                    let has_error_type_assertion = 
-                        (value.contains("err.(*") || value.contains("err.(")) &&
-                        !value.contains("errors.As");
-                    
+                    let has_error_type_assertion = (value.contains("err.(*")
+                        || value.contains("err.("))
+                        && !value.contains("errors.As");
+
                     if has_error_type_assertion && !uses_errors_as {
                         let line = decl.location.range.start_line + 1;
-                        
-                        let title = format!(
-                            "Type assertion on error in '{}' assignment",
-                            decl.name
-                        );
+
+                        let title =
+                            format!("Type assertion on error in '{}' assignment", decl.name);
 
                         let description = format!(
                             "Error type assertion at line {} in variable '{}' will fail \
@@ -188,15 +184,12 @@ impl Rule for GoErrorTypeAssertionRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: None,
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(patch),
                             fix_preview: Some("Use errors.As()".to_string()),
-                            tags: vec![
-                                "go".into(),
-                                "error-handling".into(),
-                            ],
+                            tags: vec!["go".into(), "error-handling".into()],
                         });
                     }
                 }
@@ -212,8 +205,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::go::parse_go_file;
-    use crate::semantics::go::build_go_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::go::build_go_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
@@ -238,7 +231,8 @@ mod tests {
     #[tokio::test]
     async fn test_detects_error_type_assertion() {
         let rule = GoErrorTypeAssertionRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 type ValidationError struct {
@@ -256,10 +250,11 @@ func handleError(err error) string {
     }
     return "unknown"
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Rule should detect the pattern (depends on semantics)
         let _ = findings;
     }
@@ -267,7 +262,8 @@ func handleError(err error) string {
     #[tokio::test]
     async fn test_no_finding_with_errors_as() {
         let rule = GoErrorTypeAssertionRule::new();
-        let (file_id, sem) = parse_and_build_semantics(r#"
+        let (file_id, sem) = parse_and_build_semantics(
+            r#"
 package main
 
 import "errors"
@@ -283,12 +279,14 @@ func handleError(err error) string {
     }
     return "unknown"
 }
-"#);
+"#,
+        );
         let semantics = vec![(file_id, sem)];
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag when errors.As is used
-        let error_findings: Vec<_> = findings.iter()
+        let error_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.rule_id == "go.error_type_assertion")
             .collect();
         assert!(error_findings.is_empty());

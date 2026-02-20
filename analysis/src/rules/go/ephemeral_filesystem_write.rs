@@ -2,14 +2,14 @@
 //!
 //! Detects writes to filesystem in containerized environments where storage is ephemeral.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -54,12 +54,12 @@ impl Rule for GoEphemeralFilesystemWriteRule {
 
             // Check if using proper external storage
             let has_external_storage = go.imports.iter().any(|imp| {
-                imp.path.contains("cloud.google.com/go/storage") ||
-                imp.path.contains("github.com/aws/aws-sdk-go") ||
-                imp.path.contains("s3") ||
-                imp.path.contains("minio") ||
-                imp.path.contains("azure") ||
-                imp.path.contains("blob")
+                imp.path.contains("cloud.google.com/go/storage")
+                    || imp.path.contains("github.com/aws/aws-sdk-go")
+                    || imp.path.contains("s3")
+                    || imp.path.contains("minio")
+                    || imp.path.contains("azure")
+                    || imp.path.contains("blob")
             });
 
             if has_external_storage {
@@ -69,14 +69,13 @@ impl Rule for GoEphemeralFilesystemWriteRule {
             // Look for file write calls
             for call in &go.calls {
                 let callee = &call.function_call.callee_expr;
-                
-                let is_file_write = 
-                    callee == "os.Create" ||
-                    callee == "os.OpenFile" ||
-                    callee == "os.WriteFile" ||
-                    callee == "ioutil.WriteFile" ||
-                    callee.ends_with(".Write") ||
-                    callee.ends_with(".WriteString");
+
+                let is_file_write = callee == "os.Create"
+                    || callee == "os.OpenFile"
+                    || callee == "os.WriteFile"
+                    || callee == "ioutil.WriteFile"
+                    || callee.ends_with(".Write")
+                    || callee.ends_with(".WriteString");
 
                 if !is_file_write {
                     continue;
@@ -84,15 +83,18 @@ impl Rule for GoEphemeralFilesystemWriteRule {
 
                 // Check if the call argument contains ephemeral path patterns
                 let args = &call.args_repr;
-                let writes_ephemeral = 
-                    args.contains("\"/tmp") ||
-                    args.contains("\"./") ||
-                    args.contains("\"../") ||
-                    args.contains("\"/var/") ||
-                    args.contains("\"/app/") ||
-                    args.contains("\"/data/");
+                let writes_ephemeral = args.contains("\"/tmp")
+                    || args.contains("\"./")
+                    || args.contains("\"../")
+                    || args.contains("\"/var/")
+                    || args.contains("\"/app/")
+                    || args.contains("\"/data/");
 
-                if writes_ephemeral || callee == "os.Create" || callee == "os.WriteFile" || callee == "ioutil.WriteFile" {
+                if writes_ephemeral
+                    || callee == "os.Create"
+                    || callee == "os.WriteFile"
+                    || callee == "ioutil.WriteFile"
+                {
                     let line = call.function_call.location.line;
                     let column = call.function_call.location.column;
 
@@ -102,7 +104,8 @@ impl Rule for GoEphemeralFilesystemWriteRule {
                         description: Some(
                             "In containerized environments (Docker, Kubernetes), local \
                              filesystem writes are ephemeral and lost on restart. Use \
-                             external storage (S3, GCS, mounted volumes) for persistent data.".to_string()
+                             external storage (S3, GCS, mounted volumes) for persistent data."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Medium,
@@ -112,15 +115,15 @@ impl Rule for GoEphemeralFilesystemWriteRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: 
-"// Use external storage for persistent data in containers:
+                                replacement:
+                                    "// Use external storage for persistent data in containers:
 // 
 // Option 1: Cloud storage (S3, GCS, Azure Blob)
 // import \"cloud.google.com/go/storage\"
@@ -133,7 +136,8 @@ impl Rule for GoEphemeralFilesystemWriteRule {
 // 
 // Option 3: For temp files, use os.CreateTemp and clean up
 // tmpFile, _ := os.CreateTemp(\"\", \"prefix-*.txt\")
-// defer os.Remove(tmpFile.Name())".to_string(),
+// defer os.Remove(tmpFile.Name())"
+                                        .to_string(),
                             }],
                         }),
                         fix_preview: Some("Use external/mounted storage".to_string()),
@@ -142,11 +146,10 @@ impl Rule for GoEphemeralFilesystemWriteRule {
                 }
 
                 // Check for state stored in local files (common anti-pattern)
-                let stores_state = 
-                    args.contains("state.json") ||
-                    args.contains("cache.json") ||
-                    args.contains(".db\"") ||
-                    args.contains("sqlite");
+                let stores_state = args.contains("state.json")
+                    || args.contains("cache.json")
+                    || args.contains(".db\"")
+                    || args.contains("sqlite");
 
                 if stores_state {
                     let line = call.function_call.location.line;
@@ -158,7 +161,8 @@ impl Rule for GoEphemeralFilesystemWriteRule {
                         description: Some(
                             "Storing application state in local files doesn't work in \
                              distributed/containerized environments. Use Redis, database, \
-                             or distributed cache for state.".to_string()
+                             or distributed cache for state."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::High,
@@ -168,15 +172,14 @@ impl Rule for GoEphemeralFilesystemWriteRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: 
-"// Use distributed storage for application state:
+                                replacement: "// Use distributed storage for application state:
 // - Redis for session/cache state
 // - PostgreSQL/MySQL for persistent state  
 // - etcd for configuration state
@@ -184,11 +187,17 @@ impl Rule for GoEphemeralFilesystemWriteRule {
 // Example with Redis:
 // import \"github.com/redis/go-redis/v9\"
 // rdb := redis.NewClient(&redis.Options{Addr: \"localhost:6379\"})
-// rdb.Set(ctx, \"key\", value, time.Hour)".to_string(),
+// rdb.Set(ctx, \"key\", value, time.Hour)"
+                                    .to_string(),
                             }],
                         }),
                         fix_preview: Some("Use distributed state storage".to_string()),
-                        tags: vec!["go".into(), "container".into(), "state".into(), "distributed".into()],
+                        tags: vec![
+                            "go".into(),
+                            "container".into(),
+                            "state".into(),
+                            "distributed".into(),
+                        ],
                     });
                 }
             }

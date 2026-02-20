@@ -24,12 +24,12 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::error::EngineError;
-use crate::graph::{build_code_graph, CodeGraph};
+use crate::graph::{CodeGraph, build_code_graph};
 use crate::parse::{self, ast::FileId};
 use crate::profiles::ProfileRegistry;
 use crate::rules::finding::RuleFinding;
 use crate::rules::registry::RuleRegistry;
-use crate::semantics::{build_source_semantics, SourceSemantics};
+use crate::semantics::{SourceSemantics, build_source_semantics};
 use crate::types::context::SourceFile;
 
 /// The intermediate representation containing semantics and code graph.
@@ -161,10 +161,7 @@ pub fn build_ir(files: Vec<SourceFile>) -> Result<IntermediateRepresentation, En
 /// let rules = RuleRegistry::with_builtin_rules();
 /// let findings = analyze_ir(&ir, &rules).await;
 /// ```
-pub async fn analyze_ir(
-    ir: &IntermediateRepresentation,
-    rules: &RuleRegistry,
-) -> Vec<RuleFinding> {
+pub async fn analyze_ir(ir: &IntermediateRepresentation, rules: &RuleRegistry) -> Vec<RuleFinding> {
     // Build sem_entries for rule evaluation
     // SourceSemantics has file_id() method to get the FileId
     let sem_entries: Vec<(FileId, Arc<SourceSemantics>)> = ir
@@ -222,22 +219,19 @@ pub async fn analyze_ir_with_rules(
 /// # Returns
 ///
 /// * A vector of rule IDs from all matched profiles
-pub fn resolve_profile_rules(
-    profiles: &ProfileRegistry,
-    profile_names: &[String],
-) -> Vec<String> {
+pub fn resolve_profile_rules(profiles: &ProfileRegistry, profile_names: &[String]) -> Vec<String> {
     let mut rule_ids = Vec::new();
-    
+
     for name in profile_names {
         if let Some(profile) = profiles.get(name) {
             rule_ids.extend(profile.rule_ids.clone());
         }
     }
-    
+
     // Deduplicate while preserving order
     let mut seen = std::collections::HashSet::new();
     rule_ids.retain(|id| seen.insert(id.clone()));
-    
+
     rule_ids
 }
 
@@ -301,17 +295,17 @@ mod tests {
         }];
 
         let ir = build_ir(files).unwrap();
-        
+
         // Serialize
         let serialized = serde_json::to_string(&ir).expect("serialization should succeed");
-        
+
         // Deserialize
-        let mut deserialized: IntermediateRepresentation = 
+        let mut deserialized: IntermediateRepresentation =
             serde_json::from_str(&serialized).expect("deserialization should succeed");
-        
+
         // Rebuild indexes
         deserialized.rebuild_indexes();
-        
+
         // Verify structure is preserved
         assert_eq!(ir.semantics.len(), deserialized.semantics.len());
         assert_eq!(
@@ -327,7 +321,7 @@ mod tests {
             graph: CodeGraph::new(),
         };
         let rules = RuleRegistry::new();
-        
+
         let findings = analyze_ir(&ir, &rules).await;
         assert!(findings.is_empty());
     }
@@ -342,7 +336,7 @@ mod tests {
 
         let ir = build_ir(files).unwrap();
         let rules = RuleRegistry::with_builtin_rules();
-        
+
         // Run with all rules
         let findings = analyze_ir(&ir, &rules).await;
         // May or may not have findings depending on rule implementations
@@ -352,7 +346,7 @@ mod tests {
     #[test]
     fn test_resolve_profile_rules() {
         let profiles = ProfileRegistry::with_builtin_profiles();
-        
+
         let rule_ids = resolve_profile_rules(&profiles, &["stability".to_string()]);
         // Should have some rules from the stability profile
         // The actual rules depend on the profile configuration
@@ -362,13 +356,13 @@ mod tests {
     #[test]
     fn test_resolve_profile_rules_deduplicates() {
         let profiles = ProfileRegistry::with_builtin_profiles();
-        
+
         // Request overlapping profiles
         let rule_ids = resolve_profile_rules(
             &profiles,
             &["stability".to_string(), "correctness".to_string()],
         );
-        
+
         // Check for uniqueness
         let unique: std::collections::HashSet<_> = rule_ids.iter().collect();
         assert_eq!(unique.len(), rule_ids.len());

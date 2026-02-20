@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::tracing;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -65,18 +65,21 @@ impl Rule for GoMissingTracingRule {
 
             // Check if there are HTTP handlers (functions with http.ResponseWriter)
             let has_http_handler = go_sem.functions.iter().any(|f| {
-                f.params.iter().any(|p| 
-                    p.param_type.contains("http.ResponseWriter") || p.param_type.contains("*http.Request")
-                )
+                f.params.iter().any(|p| {
+                    p.param_type.contains("http.ResponseWriter")
+                        || p.param_type.contains("*http.Request")
+                })
             });
 
             if has_http_handler {
                 let title = "HTTP handlers without OpenTelemetry tracing".to_string();
 
-                let description = "This file contains HTTP handlers but does not use OpenTelemetry \
+                let description =
+                    "This file contains HTTP handlers but does not use OpenTelemetry \
                     for distributed tracing. Tracing is essential for observability in \
                     production systems, enabling you to trace requests across services, \
-                    identify bottlenecks, and debug issues in distributed architectures.".to_string();
+                    identify bottlenecks, and debug issues in distributed architectures."
+                        .to_string();
 
                 let patch = generate_tracing_patch(*file_id);
 
@@ -94,7 +97,7 @@ impl Rule for GoMissingTracingRule {
                     column: Some(1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("// Add OpenTelemetry tracing".to_string()),
                     tags: vec![
@@ -121,7 +124,8 @@ fn generate_tracing_patch(file_id: FileId) -> FilePatch {
 //     defer span.End()
 //     // ... handler logic using ctx
 // }
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

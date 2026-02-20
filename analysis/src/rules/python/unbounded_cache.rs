@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::{ImportInsertionType, PyImport};
@@ -72,18 +72,14 @@ enum CachePatternType {
 impl CachePatternType {
     fn description(&self) -> &'static str {
         match self {
-            CachePatternType::PlainDict => {
-                "Plain dict used as cache without size limits"
-            }
+            CachePatternType::PlainDict => "Plain dict used as cache without size limits",
             CachePatternType::LruCacheUnbounded => {
                 "lru_cache with maxsize=None allows unbounded growth"
             }
             CachePatternType::FunctoolsCache => {
                 "functools.cache has no size limit (equivalent to lru_cache(maxsize=None))"
             }
-            CachePatternType::CachetoolsUnbounded => {
-                "cachetools cache without maxsize or ttl"
-            }
+            CachePatternType::CachetoolsUnbounded => "cachetools cache without maxsize or ttl",
             CachePatternType::CustomCacheUnbounded => {
                 "Custom cache implementation without apparent size limits"
             }
@@ -142,13 +138,11 @@ impl Rule for PythonUnboundedCacheRule {
             let patterns = detect_unbounded_caches(py);
 
             // Use third_party_from_import since we're adding "from cachetools import TTLCache"
-            let import_line = py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
-            
+            let import_line =
+                py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
+
             for pattern in &patterns {
-                let title = format!(
-                    "Unbounded cache: {}",
-                    pattern.cache_name
-                );
+                let title = format!("Unbounded cache: {}", pattern.cache_name);
 
                 let description = format!(
                     "{}. This can lead to memory exhaustion in production. {}",
@@ -174,7 +168,7 @@ impl Rule for PythonUnboundedCacheRule {
                     column: Some(pattern.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -191,13 +185,15 @@ impl Rule for PythonUnboundedCacheRule {
     }
 }
 
-fn detect_unbounded_caches(py: &crate::semantics::python::model::PyFileSemantics) -> Vec<UnboundedCachePattern> {
+fn detect_unbounded_caches(
+    py: &crate::semantics::python::model::PyFileSemantics,
+) -> Vec<UnboundedCachePattern> {
     let mut patterns = Vec::new();
 
     // Check for @cache or @lru_cache decorators in function calls
     for call in &py.calls {
         let callee = &call.function_call.callee_expr;
-        
+
         // Check for functools.cache (always unbounded)
         if callee == "cache" || callee == "functools.cache" {
             patterns.push(UnboundedCachePattern {
@@ -209,7 +205,7 @@ fn detect_unbounded_caches(py: &crate::semantics::python::model::PyFileSemantics
                 end_byte: call.end_byte,
             });
         }
-        
+
         // Check for lru_cache with maxsize=None
         if callee == "lru_cache" || callee == "functools.lru_cache" {
             let args_text = &call.args_repr;
@@ -227,8 +223,12 @@ fn detect_unbounded_caches(py: &crate::semantics::python::model::PyFileSemantics
         }
 
         // Check for cachetools patterns without limits
-        if callee.contains("Cache") && (callee.starts_with("cachetools.") || 
-            callee == "TTLCache" || callee == "LRUCache" || callee == "LFUCache") {
+        if callee.contains("Cache")
+            && (callee.starts_with("cachetools.")
+                || callee == "TTLCache"
+                || callee == "LRUCache"
+                || callee == "LFUCache")
+        {
             let args_text = &call.args_repr;
             // If no maxsize argument is provided, it might be unbounded
             if !args_text.contains("maxsize") && !args_text.contains("ttl") {
@@ -248,7 +248,7 @@ fn detect_unbounded_caches(py: &crate::semantics::python::model::PyFileSemantics
     for assign in &py.assignments {
         let target = &assign.target;
         let value = &assign.value_repr;
-        
+
         // Check if it's a dict that looks like a cache
         if is_cache_like_name(target) && (value == "{}" || value.starts_with("dict(")) {
             patterns.push(UnboundedCachePattern {
@@ -267,19 +267,18 @@ fn detect_unbounded_caches(py: &crate::semantics::python::model::PyFileSemantics
 
 fn is_cache_like_name(name: &str) -> bool {
     let lower = name.to_lowercase();
-    lower.contains("cache") || 
-    lower.contains("memo") || 
-    lower.contains("_cache") ||
-    lower.ends_with("_map") ||
-    lower == "seen" ||
-    lower == "visited" ||
-    lower.contains("lookup")
+    lower.contains("cache")
+        || lower.contains("memo")
+        || lower.contains("_cache")
+        || lower.ends_with("_map")
+        || lower == "seen"
+        || lower == "visited"
+        || lower.contains("lookup")
 }
 
 fn get_fix_preview(pattern_type: &CachePatternType) -> String {
     match pattern_type {
-        CachePatternType::PlainDict => {
-            r#"# Before (unbounded):
+        CachePatternType::PlainDict => r#"# Before (unbounded):
 cache = {}
 
 # After (bounded with TTL):
@@ -291,10 +290,9 @@ from functools import lru_cache
 
 @lru_cache(maxsize=128)
 def cached_function(key):
-    return expensive_computation(key)"#.to_string()
-        }
-        CachePatternType::LruCacheUnbounded => {
-            r#"# Before (unbounded):
+    return expensive_computation(key)"#
+            .to_string(),
+        CachePatternType::LruCacheUnbounded => r#"# Before (unbounded):
 @lru_cache(maxsize=None)
 def expensive_function(x):
     return compute(x)
@@ -302,10 +300,9 @@ def expensive_function(x):
 # After (bounded):
 @lru_cache(maxsize=128)  # Limit to 128 entries
 def expensive_function(x):
-    return compute(x)"#.to_string()
-        }
-        CachePatternType::FunctoolsCache => {
-            r#"# Before (unbounded):
+    return compute(x)"#
+            .to_string(),
+        CachePatternType::FunctoolsCache => r#"# Before (unbounded):
 from functools import cache
 
 @cache
@@ -317,22 +314,22 @@ from functools import lru_cache
 
 @lru_cache(maxsize=128)  # Limit to 128 entries
 def expensive_function(x):
-    return compute(x)"#.to_string()
-        }
-        CachePatternType::CachetoolsUnbounded => {
-            r#"# Before (potentially unbounded):
+    return compute(x)"#
+            .to_string(),
+        CachePatternType::CachetoolsUnbounded => r#"# Before (potentially unbounded):
 from cachetools import Cache
 cache = Cache()
 
 # After (bounded with TTL):
 from cachetools import TTLCache
-cache = TTLCache(maxsize=1000, ttl=300)  # 1000 items, 5 min TTL"#.to_string()
-        }
+cache = TTLCache(maxsize=1000, ttl=300)  # 1000 items, 5 min TTL"#
+            .to_string(),
         CachePatternType::CustomCacheUnbounded => {
             r#"# Add size limits and TTL to your cache implementation:
 # - Track number of entries
 # - Evict oldest entries when limit reached
-# - Add timestamp-based expiration"#.to_string()
+# - Add timestamp-based expiration"#
+                .to_string()
         }
     }
 }
@@ -352,13 +349,15 @@ fn generate_cache_fix_patch(
     import_insertion_line: u32,
 ) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     match pattern.pattern_type {
         CachePatternType::PlainDict => {
             // Only add import for cachetools.TTLCache if not already imported
             if !has_ttlcache_import(imports) {
                 hunks.push(PatchHunk {
-                    range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+                    range: PatchRange::InsertBeforeLine {
+                        line: import_insertion_line,
+                    },
                     replacement: "from cachetools import TTLCache\n".to_string(),
                 });
             }
@@ -407,7 +406,8 @@ fn generate_cache_fix_patch(
             } else {
                 // Fallback to comment if no byte offsets
                 let replacement =
-                    "# Fix: Replace @cache with bounded @lru_cache:\n# @lru_cache(maxsize=128)\n".to_string();
+                    "# Fix: Replace @cache with bounded @lru_cache:\n# @lru_cache(maxsize=128)\n"
+                        .to_string();
                 hunks.push(PatchHunk {
                     range: PatchRange::InsertBeforeLine { line: pattern.line },
                     replacement,
@@ -448,10 +448,7 @@ fn generate_cache_fix_patch(
         }
     };
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -514,7 +511,7 @@ result = cache(expensive_function)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(!findings.is_empty(), "Should detect cache() call");
         assert_eq!(findings[0].rule_id, "python.unbounded_cache");
     }
@@ -533,8 +530,11 @@ def expensive_function(x):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        assert!(!findings.is_empty(), "Should detect lru_cache with maxsize=None");
+
+        assert!(
+            !findings.is_empty(),
+            "Should detect lru_cache with maxsize=None"
+        );
     }
 
     #[tokio::test]
@@ -553,7 +553,7 @@ def get_cached(key):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(!findings.is_empty(), "Should detect plain dict cache");
     }
 
@@ -571,7 +571,7 @@ def expensive_function(x):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         assert!(findings.is_empty(), "Should not flag bounded lru_cache");
     }
 
@@ -587,7 +587,7 @@ config = {}
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag regular dicts that don't look like caches
         assert!(findings.is_empty(), "Should not flag regular dicts");
     }
@@ -625,7 +625,7 @@ def func(x):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             let finding = &findings[0];
             assert_eq!(finding.rule_id, "python.unbounded_cache");
@@ -640,15 +640,35 @@ def func(x):
     #[test]
     fn cache_pattern_descriptions_are_meaningful() {
         assert!(CachePatternType::PlainDict.description().contains("dict"));
-        assert!(CachePatternType::LruCacheUnbounded.description().contains("lru_cache"));
-        assert!(CachePatternType::FunctoolsCache.description().contains("functools.cache"));
+        assert!(
+            CachePatternType::LruCacheUnbounded
+                .description()
+                .contains("lru_cache")
+        );
+        assert!(
+            CachePatternType::FunctoolsCache
+                .description()
+                .contains("functools.cache")
+        );
     }
 
     #[test]
     fn cache_pattern_fix_suggestions_are_meaningful() {
-        assert!(CachePatternType::PlainDict.fix_suggestion().contains("lru_cache"));
-        assert!(CachePatternType::LruCacheUnbounded.fix_suggestion().contains("maxsize"));
-        assert!(CachePatternType::FunctoolsCache.fix_suggestion().contains("lru_cache"));
+        assert!(
+            CachePatternType::PlainDict
+                .fix_suggestion()
+                .contains("lru_cache")
+        );
+        assert!(
+            CachePatternType::LruCacheUnbounded
+                .fix_suggestion()
+                .contains("maxsize")
+        );
+        assert!(
+            CachePatternType::FunctoolsCache
+                .fix_suggestion()
+                .contains("lru_cache")
+        );
     }
 
     #[test]
@@ -660,7 +680,7 @@ def func(x):
         assert!(is_cache_like_name("memoize"));
         assert!(is_cache_like_name("lookup_table"));
         assert!(is_cache_like_name("seen"));
-        
+
         assert!(!is_cache_like_name("data"));
         assert!(!is_cache_like_name("config"));
         assert!(!is_cache_like_name("result"));

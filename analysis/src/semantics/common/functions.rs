@@ -141,7 +141,10 @@ impl FunctionDecorator {
     /// Check if this decorator matches a pattern (case-insensitive contains)
     pub fn matches(&self, pattern: &str) -> bool {
         self.name.to_lowercase().contains(&pattern.to_lowercase())
-            || self.full_text.to_lowercase().contains(&pattern.to_lowercase())
+            || self
+                .full_text
+                .to_lowercase()
+                .contains(&pattern.to_lowercase())
     }
 
     /// Check if this is a route decorator (FastAPI, Flask, Express-like)

@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -114,17 +114,13 @@ impl Rule for TypescriptPromiseNoCatchRule {
                     ".execute",    // query.execute()
                 ];
 
-                let is_orm_pattern = orm_patterns
-                    .iter()
-                    .any(|p| callee_lower.ends_with(p));
+                let is_orm_pattern = orm_patterns.iter().any(|p| callee_lower.ends_with(p));
 
                 let might_be_async = is_fetch || is_http_client || is_orm_pattern;
 
                 if might_be_async && !call.in_loop {
-                    let title = format!(
-                        "Async call '{}' may have unhandled rejection",
-                        call.callee
-                    );
+                    let title =
+                        format!("Async call '{}' may have unhandled rejection", call.callee);
 
                     let description = format!(
                         "The call to '{}' returns a Promise that is not awaited and has no .catch() handler. \
@@ -142,8 +138,7 @@ impl Rule for TypescriptPromiseNoCatchRule {
                             },
                             replacement: format!(
                                 "{}{}.catch(err => {{ logger.error('Unhandled error', {{ error: err }}); }})",
-                                call.callee,
-                                call.args_repr
+                                call.callee, call.args_repr
                             ),
                         }],
                     };
@@ -165,9 +160,9 @@ impl Rule for TypescriptPromiseNoCatchRule {
                         file_path: ts.path.clone(),
                         line: Some(call.location.range.start_line + 1),
                         column: Some(call.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -280,7 +275,11 @@ function activate() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not detect sync VS Code APIs as async. Found: {:?}", findings);
+        assert!(
+            findings.is_empty(),
+            "Should not detect sync VS Code APIs as async. Found: {:?}",
+            findings
+        );
     }
 
     #[tokio::test]
@@ -299,7 +298,11 @@ function test() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not detect console/setTimeout as async. Found: {:?}", findings);
+        assert!(
+            findings.is_empty(),
+            "Should not detect console/setTimeout as async. Found: {:?}",
+            findings
+        );
     }
 
     #[tokio::test]
@@ -319,7 +322,11 @@ function test() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not detect sync array methods as async. Found: {:?}", findings);
+        assert!(
+            findings.is_empty(),
+            "Should not detect sync array methods as async. Found: {:?}",
+            findings
+        );
     }
 
     #[tokio::test]
@@ -374,6 +381,10 @@ function activate() {
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        assert!(findings.is_empty(), "Should not detect sync config.get() as async. Found: {:?}", findings);
+        assert!(
+            findings.is_empty(),
+            "Should not detect sync config.get() as async. Found: {:?}",
+            findings
+        );
     }
 }

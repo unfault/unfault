@@ -19,10 +19,10 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
-use crate::semantics::typescript::model::{is_server_side_code, TsFileSemantics};
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
+use crate::semantics::typescript::model::{TsFileSemantics, is_server_side_code};
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -74,7 +74,8 @@ impl Rule for TypescriptCpuInEventLoopRule {
                 let callee_lower = call.callee.to_lowercase();
 
                 // Detect CPU-intensive patterns with context awareness
-                let detection = detect_cpu_operation(&callee_lower, call.in_loop, is_hot_path_context);
+                let detection =
+                    detect_cpu_operation(&callee_lower, call.in_loop, is_hot_path_context);
                 let detection = match detection {
                     Some(d) => d,
                     None => continue,
@@ -116,10 +117,14 @@ impl Rule for TypescriptCpuInEventLoopRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
-                    tags: vec!["performance".into(), "event-loop".into(), detection.tag.into()],
+                    tags: vec![
+                        "performance".into(),
+                        "event-loop".into(),
+                        detection.tag.into(),
+                    ],
                 });
             }
         }
@@ -156,8 +161,15 @@ fn has_request_handler(ts: &TsFileSemantics) -> bool {
         let module = import.module.as_str();
         if matches!(
             module,
-            "express" | "fastify" | "koa" | "hapi" | "@hapi/hapi" |
-            "@nestjs/common" | "restify" | "polka" | "micro"
+            "express"
+                | "fastify"
+                | "koa"
+                | "hapi"
+                | "@hapi/hapi"
+                | "@nestjs/common"
+                | "restify"
+                | "polka"
+                | "micro"
         ) {
             return true;
         }
@@ -259,7 +271,11 @@ fn detect_cpu_operation(
 }
 
 /// Generate patch and fix preview based on the detection type.
-fn generate_patch(file_id: FileId, line: u32, detection: &CpuOperationDetection) -> (FilePatch, String) {
+fn generate_patch(
+    file_id: FileId,
+    line: u32,
+    detection: &CpuOperationDetection,
+) -> (FilePatch, String) {
     let (replacement, fix_preview) = match detection.tag {
         "crypto" => (
             "// Use async crypto APIs:\n\

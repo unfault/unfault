@@ -14,9 +14,9 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 
 /// Check if timedelta is already imported from datetime
 fn has_timedelta_import(imports: &[PyImport]) -> bool {
-    imports.iter().any(|imp| {
-        imp.module == "datetime" && imp.names.iter().any(|n| n == "timedelta")
-    })
+    imports
+        .iter()
+        .any(|imp| imp.module == "datetime" && imp.names.iter().any(|n| n == "timedelta"))
 }
 
 /// Rule: Flask Missing Session Timeout
@@ -62,9 +62,10 @@ impl Rule for FlaskSessionTimeoutRule {
             };
 
             // Check for Flask imports
-            let has_flask = py.imports.iter().any(|imp| {
-                imp.module == "flask" || imp.names.iter().any(|n| n == "Flask")
-            });
+            let has_flask = py
+                .imports
+                .iter()
+                .any(|imp| imp.module == "flask" || imp.names.iter().any(|n| n == "Flask"));
 
             let is_config_file = py.path.contains("config")
                 || py.path.contains("settings")
@@ -128,30 +129,39 @@ impl Rule for FlaskSessionTimeoutRule {
             }
 
             // Check for Flask app creation without session configuration
-            let has_flask_app = py.calls.iter().any(|c| c.function_call.callee_expr == "Flask");
+            let has_flask_app = py
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "Flask");
 
             if has_flask_app && !has_permanent_session_lifetime {
                 // Check if this file uses sessions
-                let uses_sessions = py.imports.iter().any(|imp| {
-                    imp.names.iter().any(|n| n == "session")
-                }) || py.calls.iter().any(|c| {
-                    c.function_call.callee_expr.contains("session")
-                });
+                let uses_sessions = py
+                    .imports
+                    .iter()
+                    .any(|imp| imp.names.iter().any(|n| n == "session"))
+                    || py
+                        .calls
+                        .iter()
+                        .any(|c| c.function_call.callee_expr.contains("session"));
 
                 if uses_sessions {
                     let title = "Flask session timeout not configured".to_string();
 
-                    let description = 
+                    let description =
                         "Flask application uses sessions but PERMANENT_SESSION_LIFETIME is not \
                          configured. By default, Flask sessions expire when the browser closes \
                          (if SESSION_PERMANENT is False) or after 31 days (if SESSION_PERMANENT \
-                         is True). Configure an appropriate session lifetime.".to_string();
+                         is True). Configure an appropriate session lifetime."
+                            .to_string();
 
                     let fix_preview = generate_missing_timeout_fix_preview();
 
                     // Use stdlib_from_import since we're adding "from datetime import timedelta"
-                    let import_line = py.import_insertion_line_for(ImportInsertionType::stdlib_from_import());
-                    let patch = generate_session_timeout_patch(*file_id, 1, &py.imports, import_line);
+                    let import_line =
+                        py.import_insertion_line_for(ImportInsertionType::stdlib_from_import());
+                    let patch =
+                        generate_session_timeout_patch(*file_id, 1, &py.imports, import_line);
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
@@ -165,9 +175,9 @@ impl Rule for FlaskSessionTimeoutRule {
                         file_path: py.path.clone(),
                         line: Some(1),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(fix_preview),
                         tags: vec![
@@ -194,24 +204,32 @@ impl Rule for FlaskSessionTimeoutRule {
 }
 
 /// Generate patch for missing session timeout - adds actual import and configuration.
-fn generate_session_timeout_patch(file_id: FileId, line: u32, imports: &[PyImport], import_insertion_line: u32) -> FilePatch {
+fn generate_session_timeout_patch(
+    file_id: FileId,
+    line: u32,
+    imports: &[PyImport],
+    import_insertion_line: u32,
+) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Add timedelta import at the top of the file only if not already imported
     if !has_timedelta_import(imports) {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+            range: PatchRange::InsertBeforeLine {
+                line: import_insertion_line,
+            },
             replacement: "from datetime import timedelta\n".to_string(),
         });
     }
-    
+
     // Add session configuration code before the problematic line
     hunks.push(PatchHunk {
         range: PatchRange::InsertBeforeLine { line },
         replacement: r#"# Session timeout configuration (added by unfault)
 PERMANENT_SESSION_LIFETIME = timedelta(hours=1)
 SESSION_PERMANENT = True
-"#.to_string(),
+"#
+        .to_string(),
     });
 
     FilePatch { file_id, hunks }
@@ -235,7 +253,8 @@ app.config['SESSION_PERMANENT'] = True
 # For per-request session refresh:
 @app.before_request
 def make_session_permanent():
-    session.permanent = True"#.to_string()
+    session.permanent = True"#
+        .to_string()
 }
 
 /// Generate fix preview for missing session timeout.
@@ -268,7 +287,8 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # CSRF protection
 # pip install Flask-Session
 from flask_session import Session
 app.config['SESSION_TYPE'] = 'redis'  # or 'filesystem', 'sqlalchemy'
-Session(app)"#.to_string()
+Session(app)"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -331,7 +351,9 @@ PERMANENT_SESSION_LIFETIME = 3600
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should not flag if PERMANENT_SESSION_LIFETIME is set
-        assert!(findings.is_empty() || !findings.iter().any(|f| f.title.contains("not configured")));
+        assert!(
+            findings.is_empty() || !findings.iter().any(|f| f.title.contains("not configured"))
+        );
     }
 
     #[tokio::test]

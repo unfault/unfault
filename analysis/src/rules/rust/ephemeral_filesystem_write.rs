@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -56,7 +56,7 @@ impl Rule for RustEphemeralFilesystemWriteRule {
             // Look for file write operations with ephemeral paths
             for call in &rust.calls {
                 let callee_lower = call.function_call.callee_expr.to_lowercase();
-                
+
                 let is_write_op = callee_lower.contains("file::create")
                     || callee_lower.contains("write_all")
                     || callee_lower.contains("openoptions")
@@ -75,7 +75,10 @@ impl Rule for RustEphemeralFilesystemWriteRule {
                     || callee_lower.contains("temp_dir")
                     || callee_lower.contains("tempfile")
                     || callee_lower.contains("tempdir")
-                    || rust.uses.iter().any(|u| u.path.contains("tempfile") || u.path.contains("tempdir"));
+                    || rust
+                        .uses
+                        .iter()
+                        .any(|u| u.path.contains("tempfile") || u.path.contains("tempdir"));
 
                 if !has_ephemeral_path {
                     continue;
@@ -137,9 +140,11 @@ impl Rule for RustEphemeralFilesystemWriteRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
-                    fix_preview: Some("// Use object storage (S3, GCS) or persistent volumes".to_string()),
+                    fix_preview: Some(
+                        "// Use object storage (S3, GCS) or persistent volumes".to_string(),
+                    ),
                     tags: vec![
                         "rust".into(),
                         "filesystem".into(),

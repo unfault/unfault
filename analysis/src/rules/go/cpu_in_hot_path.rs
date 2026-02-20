@@ -2,14 +2,14 @@
 //!
 //! Detects CPU-intensive operations in HTTP handlers or critical paths.
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -28,10 +28,10 @@ impl GoCpuInHotPathRule {
     #[allow(dead_code)]
     fn is_http_handler(func: &crate::semantics::go::model::GoFunction) -> bool {
         func.params.iter().any(|p| {
-            p.param_type.contains("http.ResponseWriter") ||
-            p.param_type.contains("*gin.Context") ||
-            p.param_type.contains("echo.Context") ||
-            p.param_type.contains("*fiber.Ctx")
+            p.param_type.contains("http.ResponseWriter")
+                || p.param_type.contains("*gin.Context")
+                || p.param_type.contains("echo.Context")
+                || p.param_type.contains("*fiber.Ctx")
         }) || func.name.to_lowercase().contains("handler")
     }
 }
@@ -66,15 +66,16 @@ impl Rule for GoCpuInHotPathRule {
             // Check for CPU-intensive operations in HTTP handlers by looking at call sites
             for call in &go.calls {
                 let callee = &call.function_call.callee_expr;
-                
+
                 // Check for crypto operations
-                if callee.starts_with("bcrypt.") || 
-                   callee.starts_with("scrypt.") ||
-                   callee.starts_with("argon2.") ||
-                   callee.starts_with("pbkdf2.") {
+                if callee.starts_with("bcrypt.")
+                    || callee.starts_with("scrypt.")
+                    || callee.starts_with("argon2.")
+                    || callee.starts_with("pbkdf2.")
+                {
                     let line = call.function_call.location.line;
                     let column = call.function_call.location.column;
-                    
+
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "CPU-intensive hash operation".to_string(),
@@ -82,7 +83,8 @@ impl Rule for GoCpuInHotPathRule {
                             "Password hashing (bcrypt, scrypt, argon2) is intentionally \
                              CPU-intensive and blocks the goroutine. Consider running \
                              these operations in a worker pool or limiting concurrent \
-                             operations.".to_string()
+                             operations."
+                                .to_string(),
                         ),
                         kind: FindingKind::PerformanceSmell,
                         severity: Severity::Medium,
@@ -92,14 +94,14 @@ impl Rule for GoCpuInHotPathRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: 
+                                replacement:
 "// Consider using a bounded worker pool for CPU-intensive operations:
 // var hashPool = make(chan struct{}, runtime.NumCPU())
 // 
@@ -116,18 +118,18 @@ impl Rule for GoCpuInHotPathRule {
                 }
 
                 // Check for compression calls
-                if callee.contains("gzip.NewWriter") ||
-                   callee.contains("zlib.NewWriter") {
+                if callee.contains("gzip.NewWriter") || callee.contains("zlib.NewWriter") {
                     let line = call.function_call.location.line;
                     let column = call.function_call.location.column;
-                    
+
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "Compression operation".to_string(),
                         description: Some(
                             "Compression is CPU-intensive and can block the handler. \
                              Consider using compression middleware that streams, or \
-                             pre-compressing static content.".to_string()
+                             pre-compressing static content."
+                                .to_string(),
                         ),
                         kind: FindingKind::PerformanceSmell,
                         severity: Severity::Low,
@@ -137,14 +139,16 @@ impl Rule for GoCpuInHotPathRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: "// Consider compression middleware or pre-compressed content".to_string(),
+                                replacement:
+                                    "// Consider compression middleware or pre-compressed content"
+                                        .to_string(),
                             }],
                         }),
                         fix_preview: Some("Use compression middleware".to_string()),
@@ -153,18 +157,18 @@ impl Rule for GoCpuInHotPathRule {
                 }
 
                 // Check for image processing
-                if callee.contains("image.Decode") ||
-                   callee.starts_with("imaging.") {
+                if callee.contains("image.Decode") || callee.starts_with("imaging.") {
                     let line = call.function_call.location.line;
                     let column = call.function_call.location.column;
-                    
+
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),
                         title: "Image processing operation".to_string(),
                         description: Some(
                             "Image processing is CPU and memory intensive. Handle image \
                              operations asynchronously with a job queue, or offload to \
-                             a dedicated service.".to_string()
+                             a dedicated service."
+                                .to_string(),
                         ),
                         kind: FindingKind::PerformanceSmell,
                         severity: Severity::High,
@@ -174,18 +178,18 @@ impl Rule for GoCpuInHotPathRule {
                         file_path: go.path.clone(),
                         line: Some(line),
                         column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(FilePatch {
                             file_id: *file_id,
                             hunks: vec![PatchHunk {
                                 range: PatchRange::InsertBeforeLine { line },
-                                replacement: 
-"// Process images asynchronously:
+                                replacement: "// Process images asynchronously:
 // 1. Accept upload and return immediately with job ID
 // 2. Process in background worker
-// 3. Notify client when complete (webhook, polling, websocket)".to_string(),
+// 3. Notify client when complete (webhook, polling, websocket)"
+                                    .to_string(),
                             }],
                         }),
                         fix_preview: Some("Process images asynchronously".to_string()),
@@ -200,13 +204,14 @@ impl Rule for GoCpuInHotPathRule {
                     if call.in_loop {
                         let line = call.function_call.location.line;
                         let column = call.function_call.location.column;
-                        
+
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Regex compilation in loop".to_string(),
                             description: Some(
                                 "Compiling regex is expensive. Compile patterns once at \
-                                 initialization and reuse them.".to_string()
+                                 initialization and reuse them."
+                                    .to_string(),
                             ),
                             kind: FindingKind::PerformanceSmell,
                             severity: Severity::High,
@@ -216,16 +221,16 @@ impl Rule for GoCpuInHotPathRule {
                             file_path: go.path.clone(),
                             line: Some(line),
                             column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: Some(FilePatch {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
                                     range: PatchRange::InsertBeforeLine { line },
-                                    replacement: 
-"// Compile regex once at package level:
-// var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$`)".to_string(),
+                                    replacement: "// Compile regex once at package level:
+// var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$`)"
+                                        .to_string(),
                                 }],
                             }),
                             fix_preview: Some("Compile regex at init".to_string()),
@@ -243,8 +248,8 @@ impl Rule for GoCpuInHotPathRule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::semantics::go::model::GoFunction;
     use crate::parse::ast::{AstLocation, TextRange};
+    use crate::semantics::go::model::GoFunction;
 
     #[test]
     fn test_rule_metadata() {
@@ -306,12 +311,10 @@ mod tests {
     fn test_is_not_http_handler() {
         let func = GoFunction {
             name: "processData".to_string(),
-            params: vec![
-                crate::semantics::go::model::GoParam {
-                    name: "data".to_string(),
-                    param_type: "[]byte".to_string(),
-                },
-            ],
+            params: vec![crate::semantics::go::model::GoParam {
+                name: "data".to_string(),
+                param_type: "[]byte".to_string(),
+            }],
             return_types: vec!["error".to_string()],
             returns_error: true,
             location: AstLocation {

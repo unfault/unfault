@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::parse::ast::{AstLocation, FileId, ParsedFile};
-use crate::semantics::common::{calls::FunctionCall, CommonLocation};
+use crate::semantics::common::{CommonLocation, calls::FunctionCall};
 use crate::semantics::python::http::HttpCallSite;
 use crate::semantics::python::orm::OrmQueryCall;
 use crate::types::context::Language;
@@ -1843,19 +1843,21 @@ async def async_func():
     #[test]
     fn collects_simple_function_call() {
         let sem = parse_and_build_semantics("print('hello')");
-        assert!(sem
-            .calls
-            .iter()
-            .any(|c| c.function_call.callee_expr == "print"));
+        assert!(
+            sem.calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "print")
+        );
     }
 
     #[test]
     fn collects_method_call() {
         let sem = parse_and_build_semantics("app.add_middleware(CORSMiddleware)");
-        assert!(sem
-            .calls
-            .iter()
-            .any(|c| c.function_call.callee_expr == "app.add_middleware"));
+        assert!(
+            sem.calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "app.add_middleware")
+        );
     }
 
     #[test]
@@ -1876,14 +1878,16 @@ result = outer(inner(x))
 "#;
         let sem = parse_and_build_semantics(src);
         // Should collect both outer and inner calls
-        assert!(sem
-            .calls
-            .iter()
-            .any(|c| c.function_call.callee_expr == "outer"));
-        assert!(sem
-            .calls
-            .iter()
-            .any(|c| c.function_call.callee_expr == "inner"));
+        assert!(
+            sem.calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "outer")
+        );
+        assert!(
+            sem.calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "inner")
+        );
     }
 
     #[test]
@@ -2005,14 +2009,16 @@ def helper():
         assert!(sem.functions.iter().any(|f| f.name == "helper"));
 
         // Should have calls
-        assert!(sem
-            .calls
-            .iter()
-            .any(|c| c.function_call.callee_expr == "FastAPI"));
-        assert!(sem
-            .calls
-            .iter()
-            .any(|c| c.function_call.callee_expr == "app.add_middleware"));
+        assert!(
+            sem.calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "FastAPI")
+        );
+        assert!(
+            sem.calls
+                .iter()
+                .any(|c| c.function_call.callee_expr == "app.add_middleware")
+        );
     }
 
     #[test]

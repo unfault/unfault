@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingKind, Severity};
@@ -53,9 +53,10 @@ impl Rule for RustGrpcNoDeadlineRule {
             };
 
             // Check if using tonic (most common Rust gRPC library)
-            let uses_grpc = rust.uses.iter().any(|u| {
-                u.path.contains("tonic") || u.path.contains("grpc")
-            });
+            let uses_grpc = rust
+                .uses
+                .iter()
+                .any(|u| u.path.contains("tonic") || u.path.contains("grpc"));
 
             if !uses_grpc {
                 continue;
@@ -77,7 +78,8 @@ impl Rule for RustGrpcNoDeadlineRule {
                 let is_grpc_call = call.function_call.callee_expr.contains("_client")
                     || call.function_call.callee_expr.contains("Client::")
                     || call.function_call.callee_expr.ends_with("_rpc")
-                    || (call.function_call.callee_expr.contains(".") && rust.uses.iter().any(|u| u.path.contains("tonic")));
+                    || (call.function_call.callee_expr.contains(".")
+                        && rust.uses.iter().any(|u| u.path.contains("tonic")));
 
                 if !is_grpc_call {
                     continue;
@@ -127,7 +129,8 @@ impl Rule for RustGrpcNoDeadlineRule {
                     file_id: *file_id,
                     hunks: vec![PatchHunk {
                         range: PatchRange::InsertBeforeLine { line },
-                        replacement: "// TODO: Set gRPC deadline with request.set_timeout()".to_string(),
+                        replacement: "// TODO: Set gRPC deadline with request.set_timeout()"
+                            .to_string(),
                     }],
                 };
 
@@ -145,7 +148,7 @@ impl Rule for RustGrpcNoDeadlineRule {
                     column: None,
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("request.set_timeout(Duration::from_secs(30));".to_string()),
                     tags: vec![

@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -109,9 +109,9 @@ impl Rule for TypescriptMissingRateLimitingRule {
                 file_path: ts.path.clone(),
                 line: Some(line),
                 column: Some(column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                end_line: None,
+                end_column: None,
+                byte_range: None,
                 patch: Some(patch),
                 fix_preview: Some("Add express-rate-limit middleware".to_string()),
                 tags: vec!["security".into(), "rate-limiting".into(), "api".into()],

@@ -9,8 +9,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::unbounded_resource;
 use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::semantics::python::model::ImportInsertionType;
@@ -75,21 +75,26 @@ impl Rule for PythonNPlusOneQueriesRule {
             // Detect N+1 patterns using ORM semantics
             let patterns = detect_n_plus_one_patterns(&py.orm_queries);
             // Use third_party_from_import since we're adding ORM imports like "from sqlalchemy.orm import selectinload"
-            let import_line = py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
+            let import_line =
+                py.import_insertion_line_for(ImportInsertionType::third_party_from_import());
 
             for pattern in patterns {
                 let query = &pattern.inner_access;
-                
+
                 // Skip findings with Unknown ORM type - we can't generate meaningful patches
                 // and these are likely false positives (e.g., non-ORM code that looks similar)
                 if query.orm_kind == OrmKind::Unknown {
                     continue;
                 }
-                
+
                 let title = format!(
                     "N+1 query: {} query inside {}",
                     query.orm_kind.as_str(),
-                    if query.in_loop { "loop" } else { "comprehension" }
+                    if query.in_loop {
+                        "loop"
+                    } else {
+                        "comprehension"
+                    }
                 );
 
                 let description = format!(
@@ -109,7 +114,11 @@ impl Rule for PythonNPlusOneQueriesRule {
                     description: Some(description),
                     kind: FindingKind::PerformanceSmell,
                     severity: Severity::High,
-                    confidence: if query.in_loop || query.in_comprehension { 0.85 } else { 0.65 },
+                    confidence: if query.in_loop || query.in_comprehension {
+                        0.85
+                    } else {
+                        0.65
+                    },
                     dimension: Dimension::Performance,
                     file_id: *file_id,
                     file_path: py.path.clone(),
@@ -117,7 +126,7 @@ impl Rule for PythonNPlusOneQueriesRule {
                     column: Some(query.column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -143,15 +152,9 @@ fn get_fix_suggestion(orm_kind: OrmKind) -> &'static str {
         OrmKind::Django => {
             "Use select_related() for foreign keys or prefetch_related() for many-to-many relationships."
         }
-        OrmKind::Tortoise => {
-            "Use prefetch_related() to eagerly load related objects."
-        }
-        OrmKind::SqlModel => {
-            "Use SQLAlchemy's joinedload() or selectinload() options."
-        }
-        OrmKind::Peewee => {
-            "Use prefetch() or join() to eagerly load related objects."
-        }
+        OrmKind::Tortoise => "Use prefetch_related() to eagerly load related objects.",
+        OrmKind::SqlModel => "Use SQLAlchemy's joinedload() or selectinload() options.",
+        OrmKind::Peewee => "Use prefetch() or join() to eagerly load related objects.",
         OrmKind::Unknown => {
             "Use your ORM's eager loading mechanism to fetch related data in a single query."
         }
@@ -160,18 +163,16 @@ fn get_fix_suggestion(orm_kind: OrmKind) -> &'static str {
 
 fn get_fix_preview(orm_kind: OrmKind) -> String {
     match orm_kind {
-        OrmKind::SqlAlchemy => {
-            r#"# Before (N+1):
+        OrmKind::SqlAlchemy => r#"# Before (N+1):
 for user in session.query(User).all():
     print(user.posts)  # Executes a query for each user
 
 # After (eager loading):
 from sqlalchemy.orm import joinedload
 for user in session.query(User).options(joinedload(User.posts)).all():
-    print(user.posts)  # No additional queries"#.to_string()
-        }
-        OrmKind::Django => {
-            r#"# Before (N+1):
+    print(user.posts)  # No additional queries"#
+            .to_string(),
+        OrmKind::Django => r#"# Before (N+1):
 for user in User.objects.all():
     print(user.profile)  # Executes a query for each user
 
@@ -181,31 +182,30 @@ for user in User.objects.select_related('profile').all():
 
 # For many-to-many:
 for user in User.objects.prefetch_related('groups').all():
-    print(user.groups.all())  # No additional queries"#.to_string()
-        }
-        OrmKind::Tortoise => {
-            r#"# Before (N+1):
+    print(user.groups.all())  # No additional queries"#
+            .to_string(),
+        OrmKind::Tortoise => r#"# Before (N+1):
 async for user in User.all():
     posts = await user.posts  # Executes a query for each user
 
 # After (eager loading):
 async for user in User.all().prefetch_related('posts'):
-    posts = user.posts  # No additional queries"#.to_string()
-        }
+    posts = user.posts  # No additional queries"#
+            .to_string(),
         OrmKind::SqlModel | OrmKind::Unknown => {
             r#"# Use eager loading to fetch related data in a single query
-# instead of executing queries inside loops"#.to_string()
+# instead of executing queries inside loops"#
+                .to_string()
         }
-        OrmKind::Peewee => {
-            r#"# Before (N+1):
+        OrmKind::Peewee => r#"# Before (N+1):
 for user in User.select():
     print(user.posts)  # Executes a query for each user
 
 # After (eager loading):
 query = User.select().join(Post).switch(User)
 for user in prefetch(query, Post.select()):
-    print(user.posts)  # No additional queries"#.to_string()
-        }
+    print(user.posts)  # No additional queries"#
+            .to_string(),
     }
 }
 
@@ -218,7 +218,7 @@ fn generate_eager_loading_patch(
     if let Some(ref outer_query) = query.outer_query {
         return generate_outer_query_patch(outer_query, query, file_id, import_insertion_line);
     }
-    
+
     // Fallback: generate a comment-based suggestion
     generate_fallback_patch(query, file_id, import_insertion_line)
 }
@@ -231,23 +231,31 @@ fn generate_outer_query_patch(
     import_insertion_line: u32,
 ) -> FilePatch {
     let mut hunks = Vec::new();
-    
+
     // Determine the relationship field to eager load
     // Use the inner query's model name or a placeholder
-    let relationship_field = inner_query.model_name.as_deref()
+    let relationship_field = inner_query
+        .model_name
+        .as_deref()
         .map(|m| m.to_lowercase())
         .unwrap_or_else(|| "related_field".to_string());
-    
+
     // Generate the transformed query based on ORM type
     let (import_line, transformed_query) = match outer_query.orm_kind {
         OrmKind::Django => {
             let original = &outer_query.query_text;
             // Insert .select_related() or .prefetch_related() before .all() or at the end
             let transformed = if original.contains(".all()") {
-                original.replace(".all()", &format!(".select_related('{relationship_field}').all()"))
+                original.replace(
+                    ".all()",
+                    &format!(".select_related('{relationship_field}').all()"),
+                )
             } else if original.contains(".filter(") {
                 // Insert before .filter()
-                original.replace(".filter(", &format!(".select_related('{relationship_field}').filter("))
+                original.replace(
+                    ".filter(",
+                    &format!(".select_related('{relationship_field}').filter("),
+                )
             } else {
                 // Append to the query
                 format!("{}.select_related('{}')", original, relationship_field)
@@ -260,18 +268,30 @@ fn generate_outer_query_patch(
             // Insert .options() before .all() or .first()
             let model = outer_query.model_name.as_deref().unwrap_or("Model");
             let transformed = if original.contains(".all()") {
-                original.replace(".all()", &format!(".options(selectinload({model}.{relationship_field})).all()"))
+                original.replace(
+                    ".all()",
+                    &format!(".options(selectinload({model}.{relationship_field})).all()"),
+                )
             } else if original.contains(".first()") {
-                original.replace(".first()", &format!(".options(selectinload({model}.{relationship_field})).first()"))
+                original.replace(
+                    ".first()",
+                    &format!(".options(selectinload({model}.{relationship_field})).first()"),
+                )
             } else {
-                format!("{}.options(selectinload({}.{}))", original, model, relationship_field)
+                format!(
+                    "{}.options(selectinload({}.{}))",
+                    original, model, relationship_field
+                )
             };
             (import, transformed)
         }
         OrmKind::Tortoise => {
             let original = &outer_query.query_text;
             let transformed = if original.contains(".all()") {
-                original.replace(".all()", &format!(".all().prefetch_related('{relationship_field}')"))
+                original.replace(
+                    ".all()",
+                    &format!(".all().prefetch_related('{relationship_field}')"),
+                )
             } else {
                 format!("{}.prefetch_related('{}')", original, relationship_field)
             };
@@ -295,15 +315,17 @@ fn generate_outer_query_patch(
             return generate_fallback_patch(inner_query, file_id, import_insertion_line);
         }
     };
-    
+
     // Add import if needed
     if !import_line.is_empty() {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+            range: PatchRange::InsertBeforeLine {
+                line: import_insertion_line,
+            },
             replacement: import_line.to_string(),
         });
     }
-    
+
     // Use ReplaceBytes to directly transform the outer query
     // This provides an actual code fix rather than just a comment
     hunks.push(PatchHunk {
@@ -314,10 +336,7 @@ fn generate_outer_query_patch(
         replacement: transformed_query.clone(),
     });
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 /// Generate a fallback patch with comment-based suggestions
@@ -354,9 +373,9 @@ fn generate_fallback_patch(
         }
         OrmKind::SqlModel => {
             let import = "from sqlalchemy.orm import selectinload\n";
-            let transform =
-                "# Fix N+1: Add eager loading to the select statement:\n\
-                 # select(Model).options(selectinload(Model.relationship))\n".to_string();
+            let transform = "# Fix N+1: Add eager loading to the select statement:\n\
+                 # select(Model).options(selectinload(Model.relationship))\n"
+                .to_string();
             (import, transform)
         }
         OrmKind::Peewee => {
@@ -369,32 +388,28 @@ fn generate_fallback_patch(
             (import, transform)
         }
         OrmKind::Unknown => {
-            let transform =
-                "# Fix N+1: Add eager loading to avoid N+1 queries\n".to_string();
+            let transform = "# Fix N+1: Add eager loading to avoid N+1 queries\n".to_string();
             ("", transform)
         }
     };
 
     let mut hunks = Vec::new();
-    
+
     if !import_line.is_empty() {
         hunks.push(PatchHunk {
-            range: PatchRange::InsertBeforeLine { line: import_insertion_line },
+            range: PatchRange::InsertBeforeLine {
+                line: import_insertion_line,
+            },
             replacement: import_line.to_string(),
         });
     }
-    
+
     hunks.push(PatchHunk {
-        range: PatchRange::InsertBeforeLine {
-            line: query.line,
-        },
+        range: PatchRange::InsertBeforeLine { line: query.line },
         replacement: transformation,
     });
 
-    FilePatch {
-        file_id,
-        hunks,
-    }
+    FilePatch { file_id, hunks }
 }
 
 #[cfg(test)]
@@ -459,7 +474,7 @@ def get_user_posts():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect the N+1 pattern
         assert!(!findings.is_empty(), "Should detect N+1 query in loop");
         assert_eq!(findings[0].rule_id, "python.n_plus_one_queries");
@@ -482,7 +497,7 @@ def get_user_posts(session: Session):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect the N+1 pattern
         assert!(!findings.is_empty(), "Should detect N+1 query in loop");
     }
@@ -502,9 +517,12 @@ def get_all_posts():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect the N+1 pattern in comprehension
-        assert!(!findings.is_empty(), "Should detect N+1 query in comprehension");
+        assert!(
+            !findings.is_empty(),
+            "Should detect N+1 query in comprehension"
+        );
     }
 
     #[tokio::test]
@@ -522,7 +540,7 @@ def get_users_with_posts():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag queries outside loops
         assert!(findings.is_empty(), "Should not flag queries outside loops");
     }
@@ -539,9 +557,12 @@ def get_users():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should not flag single queries outside loops
-        assert!(findings.is_empty(), "Should not flag single query outside loop");
+        assert!(
+            findings.is_empty(),
+            "Should not flag single query outside loop"
+        );
     }
 
     #[tokio::test]
@@ -574,7 +595,7 @@ for user in users:
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         if !findings.is_empty() {
             let finding = &findings[0];
             assert_eq!(finding.rule_id, "python.n_plus_one_queries");
@@ -625,9 +646,12 @@ async def watch_pods():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should NOT flag Kubernetes code as N+1 - no ORM imports present
-        assert!(findings.is_empty(), "Should not flag non-ORM code (Kubernetes client)");
+        assert!(
+            findings.is_empty(),
+            "Should not flag non-ORM code (Kubernetes client)"
+        );
     }
 
     #[tokio::test]
@@ -648,9 +672,12 @@ def fetch_all_users():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should NOT flag HTTP client code as N+1 - no ORM imports present
-        assert!(findings.is_empty(), "Should not flag non-ORM code (HTTP client)");
+        assert!(
+            findings.is_empty(),
+            "Should not flag non-ORM code (HTTP client)"
+        );
     }
 
     #[tokio::test]
@@ -671,9 +698,12 @@ async def process_items():
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should NOT flag asyncio code as N+1 - no ORM imports present
-        assert!(findings.is_empty(), "Should not flag non-ORM code (asyncio)");
+        assert!(
+            findings.is_empty(),
+            "Should not flag non-ORM code (asyncio)"
+        );
     }
 
     #[tokio::test]
@@ -695,8 +725,11 @@ def get_user_posts(session: Session):
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
+
         // Should detect N+1 pattern when ORM imports are present
-        assert!(!findings.is_empty(), "Should detect N+1 when ORM imports are present");
+        assert!(
+            !findings.is_empty(),
+            "Should detect N+1 when ORM imports are present"
+        );
     }
 }

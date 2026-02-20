@@ -182,174 +182,337 @@ impl FrameworkDetector {
 
         match known {
             // Web frameworks
-            KnownLibrary::FastAPI => Some(
-                DetectedFramework::new("FastAPI", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Flask => Some(
-                DetectedFramework::new("Flask", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Django => Some(
-                DetectedFramework::new("Django", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Gin => Some(
-                DetectedFramework::new("Gin", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Echo => Some(
-                DetectedFramework::new("Echo", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Chi => Some(
-                DetectedFramework::new("Chi", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Axum => Some(
-                DetectedFramework::new("Axum", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::ActixWeb => Some(
-                DetectedFramework::new("Actix-web", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Rocket => Some(
-                DetectedFramework::new("Rocket", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Express => Some(
-                DetectedFramework::new("Express", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::NestJS => Some(
-                DetectedFramework::new("NestJS", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Fastify => Some(
-                DetectedFramework::new("Fastify", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Koa => Some(
-                DetectedFramework::new("Koa", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
-            KnownLibrary::SpringMVC | KnownLibrary::SpringWebFlux => Some(
-                DetectedFramework::new("Spring", FrameworkCategory::Web, &import.module_path, &self.language),
-            ),
+            KnownLibrary::FastAPI => Some(DetectedFramework::new(
+                "FastAPI",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Flask => Some(DetectedFramework::new(
+                "Flask",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Django => Some(DetectedFramework::new(
+                "Django",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Gin => Some(DetectedFramework::new(
+                "Gin",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Echo => Some(DetectedFramework::new(
+                "Echo",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Chi => Some(DetectedFramework::new(
+                "Chi",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Axum => Some(DetectedFramework::new(
+                "Axum",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::ActixWeb => Some(DetectedFramework::new(
+                "Actix-web",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Rocket => Some(DetectedFramework::new(
+                "Rocket",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Express => Some(DetectedFramework::new(
+                "Express",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::NestJS => Some(DetectedFramework::new(
+                "NestJS",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Fastify => Some(DetectedFramework::new(
+                "Fastify",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Koa => Some(DetectedFramework::new(
+                "Koa",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::SpringMVC | KnownLibrary::SpringWebFlux => Some(DetectedFramework::new(
+                "Spring",
+                FrameworkCategory::Web,
+                &import.module_path,
+                &self.language,
+            )),
 
             // Database/ORM
-            KnownLibrary::Sqlalchemy => Some(
-                DetectedFramework::new("SQLAlchemy", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::DjangoORM => Some(
-                DetectedFramework::new("Django ORM", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Gorm => Some(
-                DetectedFramework::new("GORM", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::GoSqlx => Some(
-                DetectedFramework::new("sqlx", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Diesel => Some(
-                DetectedFramework::new("Diesel", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::RustSqlx => Some(
-                DetectedFramework::new("sqlx", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::SeaOrm => Some(
-                DetectedFramework::new("SeaORM", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Prisma => Some(
-                DetectedFramework::new("Prisma", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::TypeORM => Some(
-                DetectedFramework::new("TypeORM", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Knex => Some(
-                DetectedFramework::new("Knex", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Sequelize => Some(
-                DetectedFramework::new("Sequelize", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::JpaHibernate => Some(
-                DetectedFramework::new("JPA/Hibernate", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::SpringData => Some(
-                DetectedFramework::new("Spring Data", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Jooq => Some(
-                DetectedFramework::new("jOOQ", FrameworkCategory::Database, &import.module_path, &self.language),
-            ),
+            KnownLibrary::Sqlalchemy => Some(DetectedFramework::new(
+                "SQLAlchemy",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::DjangoORM => Some(DetectedFramework::new(
+                "Django ORM",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Gorm => Some(DetectedFramework::new(
+                "GORM",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::GoSqlx => Some(DetectedFramework::new(
+                "sqlx",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Diesel => Some(DetectedFramework::new(
+                "Diesel",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::RustSqlx => Some(DetectedFramework::new(
+                "sqlx",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::SeaOrm => Some(DetectedFramework::new(
+                "SeaORM",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Prisma => Some(DetectedFramework::new(
+                "Prisma",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::TypeORM => Some(DetectedFramework::new(
+                "TypeORM",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Knex => Some(DetectedFramework::new(
+                "Knex",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Sequelize => Some(DetectedFramework::new(
+                "Sequelize",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::JpaHibernate => Some(DetectedFramework::new(
+                "JPA/Hibernate",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::SpringData => Some(DetectedFramework::new(
+                "Spring Data",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Jooq => Some(DetectedFramework::new(
+                "jOOQ",
+                FrameworkCategory::Database,
+                &import.module_path,
+                &self.language,
+            )),
 
             // HTTP clients
-            KnownLibrary::Requests => Some(
-                DetectedFramework::new("requests", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Httpx => Some(
-                DetectedFramework::new("httpx", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Aiohttp => Some(
-                DetectedFramework::new("aiohttp", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Reqwest => Some(
-                DetectedFramework::new("reqwest", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Axios => Some(
-                DetectedFramework::new("axios", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Fetch => Some(
-                DetectedFramework::new("fetch", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Got => Some(
-                DetectedFramework::new("got", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::OkHttp => Some(
-                DetectedFramework::new("OkHttp", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::RestTemplate => Some(
-                DetectedFramework::new("RestTemplate", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
-            KnownLibrary::WebClient => Some(
-                DetectedFramework::new("WebClient", FrameworkCategory::HttpClient, &import.module_path, &self.language),
-            ),
+            KnownLibrary::Requests => Some(DetectedFramework::new(
+                "requests",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Httpx => Some(DetectedFramework::new(
+                "httpx",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Aiohttp => Some(DetectedFramework::new(
+                "aiohttp",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Reqwest => Some(DetectedFramework::new(
+                "reqwest",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Axios => Some(DetectedFramework::new(
+                "axios",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Fetch => Some(DetectedFramework::new(
+                "fetch",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Got => Some(DetectedFramework::new(
+                "got",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::OkHttp => Some(DetectedFramework::new(
+                "OkHttp",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::RestTemplate => Some(DetectedFramework::new(
+                "RestTemplate",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::WebClient => Some(DetectedFramework::new(
+                "WebClient",
+                FrameworkCategory::HttpClient,
+                &import.module_path,
+                &self.language,
+            )),
 
             // Async runtimes
-            KnownLibrary::Asyncio => Some(
-                DetectedFramework::new("asyncio", FrameworkCategory::AsyncRuntime, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Tokio => Some(
-                DetectedFramework::new("Tokio", FrameworkCategory::AsyncRuntime, &import.module_path, &self.language),
-            ),
-            KnownLibrary::AsyncStd => Some(
-                DetectedFramework::new("async-std", FrameworkCategory::AsyncRuntime, &import.module_path, &self.language),
-            ),
-            KnownLibrary::ProjectReactor => Some(
-                DetectedFramework::new("Project Reactor", FrameworkCategory::AsyncRuntime, &import.module_path, &self.language),
-            ),
+            KnownLibrary::Asyncio => Some(DetectedFramework::new(
+                "asyncio",
+                FrameworkCategory::AsyncRuntime,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Tokio => Some(DetectedFramework::new(
+                "Tokio",
+                FrameworkCategory::AsyncRuntime,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::AsyncStd => Some(DetectedFramework::new(
+                "async-std",
+                FrameworkCategory::AsyncRuntime,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::ProjectReactor => Some(DetectedFramework::new(
+                "Project Reactor",
+                FrameworkCategory::AsyncRuntime,
+                &import.module_path,
+                &self.language,
+            )),
 
             // Cache/Redis
-            KnownLibrary::PythonRedis | KnownLibrary::GoRedis | KnownLibrary::RustRedis | KnownLibrary::IORedis | KnownLibrary::JavaRedis => Some(
-                DetectedFramework::new("Redis", FrameworkCategory::Cache, &import.module_path, &self.language),
-            ),
+            KnownLibrary::PythonRedis
+            | KnownLibrary::GoRedis
+            | KnownLibrary::RustRedis
+            | KnownLibrary::IORedis
+            | KnownLibrary::JavaRedis => Some(DetectedFramework::new(
+                "Redis",
+                FrameworkCategory::Cache,
+                &import.module_path,
+                &self.language,
+            )),
 
             // Logging
-            KnownLibrary::PythonLogging => Some(
-                DetectedFramework::new("logging", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Structlog => Some(
-                DetectedFramework::new("structlog", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Zap => Some(
-                DetectedFramework::new("zap", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Zerolog => Some(
-                DetectedFramework::new("zerolog", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Tracing => Some(
-                DetectedFramework::new("tracing", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Winston => Some(
-                DetectedFramework::new("winston", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Pino => Some(
-                DetectedFramework::new("pino", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
-            KnownLibrary::Slf4j => Some(
-                DetectedFramework::new("SLF4J", FrameworkCategory::Logging, &import.module_path, &self.language),
-            ),
+            KnownLibrary::PythonLogging => Some(DetectedFramework::new(
+                "logging",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Structlog => Some(DetectedFramework::new(
+                "structlog",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Zap => Some(DetectedFramework::new(
+                "zap",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Zerolog => Some(DetectedFramework::new(
+                "zerolog",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Tracing => Some(DetectedFramework::new(
+                "tracing",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Winston => Some(DetectedFramework::new(
+                "winston",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Pino => Some(DetectedFramework::new(
+                "pino",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
+            KnownLibrary::Slf4j => Some(DetectedFramework::new(
+                "SLF4J",
+                FrameworkCategory::Logging,
+                &import.module_path,
+                &self.language,
+            )),
 
             // Resilience
-            KnownLibrary::Tenacity | KnownLibrary::Stamina | KnownLibrary::GoRetry | KnownLibrary::Resilience4j => Some(
-                DetectedFramework::new("Resilience", FrameworkCategory::Other, &import.module_path, &self.language),
-            ),
+            KnownLibrary::Tenacity
+            | KnownLibrary::Stamina
+            | KnownLibrary::GoRetry
+            | KnownLibrary::Resilience4j => Some(DetectedFramework::new(
+                "Resilience",
+                FrameworkCategory::Other,
+                &import.module_path,
+                &self.language,
+            )),
 
             _ => None,
         }
@@ -358,11 +521,28 @@ impl FrameworkDetector {
     /// Mark the primary framework in each category
     fn mark_primary_frameworks(&self, profile: &mut FrameworkProfile) {
         // For web frameworks, prefer full frameworks over micro-frameworks
-        let web_priority = ["Django", "NestJS", "Spring", "FastAPI", "Express", "Axum", "Actix-web"];
+        let web_priority = [
+            "Django",
+            "NestJS",
+            "Spring",
+            "FastAPI",
+            "Express",
+            "Axum",
+            "Actix-web",
+        ];
         self.mark_priority_framework(profile, FrameworkCategory::Web, &web_priority);
 
         // For databases, prefer ORMs over raw drivers
-        let db_priority = ["SQLAlchemy", "Django ORM", "Prisma", "TypeORM", "JPA/Hibernate", "GORM", "Diesel", "SeaORM"];
+        let db_priority = [
+            "SQLAlchemy",
+            "Django ORM",
+            "Prisma",
+            "TypeORM",
+            "JPA/Hibernate",
+            "GORM",
+            "Diesel",
+            "SeaORM",
+        ];
         self.mark_priority_framework(profile, FrameworkCategory::Database, &db_priority);
 
         // For HTTP clients, prefer async over sync
@@ -402,8 +582,8 @@ impl FrameworkDetector {
 mod tests {
     use super::*;
     use crate::parse::ast::FileId;
-    use crate::semantics::common::imports::{ImportBuilder, ImportStyle};
     use crate::semantics::common::CommonLocation;
+    use crate::semantics::common::imports::{ImportBuilder, ImportStyle};
 
     fn make_location() -> CommonLocation {
         CommonLocation {
@@ -453,10 +633,7 @@ mod tests {
     #[test]
     fn detect_primary_framework() {
         let detector = FrameworkDetector::new("python");
-        let imports = vec![
-            make_import("flask"),
-            make_import("fastapi"),
-        ];
+        let imports = vec![make_import("flask"), make_import("fastapi")];
         let profile = detector.detect_from_imports(&imports);
 
         // FastAPI should be marked as primary over Flask

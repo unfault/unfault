@@ -8,8 +8,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -56,7 +56,7 @@ impl Rule for TypescriptLargeResponseMemoryRule {
             // Check for patterns that load entire responses
             for call in &ts.calls {
                 let callee_lower = call.callee.to_lowercase();
-                
+
                 // Detect full-body loading patterns
                 let is_memory_load = callee_lower.ends_with(".json()")
                     || callee_lower.ends_with(".text()")
@@ -101,7 +101,7 @@ impl Rule for TypescriptLargeResponseMemoryRule {
                     column: Some(column),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some("Use streaming for large responses".to_string()),
                     tags: vec!["performance".into(), "memory".into(), "streaming".into()],

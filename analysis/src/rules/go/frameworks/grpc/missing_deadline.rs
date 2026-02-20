@@ -8,9 +8,9 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
+use crate::rules::Rule;
 use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::rules::Rule;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
@@ -50,9 +50,10 @@ impl Rule for GrpcMissingDeadlineRule {
             };
 
             // Check if gRPC is imported
-            let has_grpc = go_sem.imports.iter().any(|imp| {
-                imp.path.contains("google.golang.org/grpc")
-            });
+            let has_grpc = go_sem
+                .imports
+                .iter()
+                .any(|imp| imp.path.contains("google.golang.org/grpc"));
 
             if !has_grpc {
                 continue;
@@ -76,10 +77,7 @@ impl Rule for GrpcMissingDeadlineRule {
                 if is_grpc_call && !has_deadline_handling {
                     let line = call.function_call.location.line;
 
-                    let title = format!(
-                        "gRPC client call at line {} lacks deadline",
-                        line
-                    );
+                    let title = format!("gRPC client call at line {} lacks deadline", line);
 
                     let description = format!(
                         "gRPC client call at line {} lacks deadline. Use context.WithTimeout() \
@@ -102,9 +100,9 @@ impl Rule for GrpcMissingDeadlineRule {
                         file_path: go_sem.path.clone(),
                         line: Some(line),
                         column: Some(1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some("// Add deadline to gRPC call".to_string()),
                         tags: vec![
@@ -138,7 +136,8 @@ fn generate_deadline_patch(file_id: FileId, line: u32) -> FilePatch {
 //     }
 //     return err
 // }
-"#.to_string();
+"#
+    .to_string();
 
     FilePatch {
         file_id,

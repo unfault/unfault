@@ -16,7 +16,10 @@ use super::url_parser::extract_url_from_call;
 /// This function analyzes the semantics of a source file and extracts
 /// all detectable runtime dependencies such as HTTP calls, database
 /// connections, and other network operations.
-pub fn extract_dependencies(file_id: FileId, semantics: &SourceSemantics) -> Vec<RuntimeDependency> {
+pub fn extract_dependencies(
+    file_id: FileId,
+    semantics: &SourceSemantics,
+) -> Vec<RuntimeDependency> {
     let mut dependencies = Vec::new();
 
     match semantics {
@@ -84,7 +87,10 @@ fn extract_python_dependencies(
         // The actual connection string is usually configured elsewhere
         let mut dep = RuntimeDependency::new(
             DependencyProtocol::Other("database".to_string()),
-            format!("[ORM query: {}]", orm_query.model_name.as_deref().unwrap_or("unknown")),
+            format!(
+                "[ORM query: {}]",
+                orm_query.model_name.as_deref().unwrap_or("unknown")
+            ),
             source,
         );
 
@@ -171,11 +177,8 @@ fn extract_go_call_dependency(
                 block_type: BlockType::Unknown,
             };
 
-            let mut dep = RuntimeDependency::new(
-                DependencyProtocol::Redis,
-                extracted.raw_value,
-                source,
-            );
+            let mut dep =
+                RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
             dep = dep.with_metadata("library", "go-redis");
             return Some(dep);
         }
@@ -193,11 +196,8 @@ fn extract_go_call_dependency(
                 block_type: BlockType::Unknown,
             };
 
-            let mut dep = RuntimeDependency::new(
-                DependencyProtocol::Grpc,
-                extracted.raw_value,
-                source,
-            );
+            let mut dep =
+                RuntimeDependency::new(DependencyProtocol::Grpc, extracted.raw_value, source);
             dep = dep.with_metadata("library", "grpc-go");
             return Some(dep);
         }
@@ -234,7 +234,10 @@ fn extract_rust_call_dependency(
     // Reqwest HTTP client - reqwest::get("url") or client.get("url")
     let is_reqwest = callee.contains("reqwest")
         || (call.method_name.as_ref().map_or(false, |m| {
-            matches!(m.as_str(), "get" | "post" | "put" | "delete" | "patch" | "head")
+            matches!(
+                m.as_str(),
+                "get" | "post" | "put" | "delete" | "patch" | "head"
+            )
         }));
 
     if is_reqwest {
@@ -296,7 +299,8 @@ fn extract_rust_call_dependency(
                 block_type: determine_block_type(&call.function_name),
             };
 
-            let mut dep = RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
+            let mut dep =
+                RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
             dep = dep.with_metadata("library", "redis");
             return Some(dep);
         }
@@ -314,7 +318,8 @@ fn extract_rust_call_dependency(
                 block_type: determine_block_type(&call.function_name),
             };
 
-            let mut dep = RuntimeDependency::new(DependencyProtocol::Grpc, extracted.raw_value, source);
+            let mut dep =
+                RuntimeDependency::new(DependencyProtocol::Grpc, extracted.raw_value, source);
             dep = dep.with_metadata("library", "tonic");
             return Some(dep);
         }
@@ -438,7 +443,8 @@ fn extract_typescript_call_dependency(
                 block_type: BlockType::Unknown,
             };
 
-            let mut dep = RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
+            let mut dep =
+                RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
             dep = dep.with_metadata("library", "ioredis");
             return Some(dep);
         }
@@ -468,7 +474,9 @@ fn format_ts_http_client(kind: &crate::semantics::typescript::http::HttpClientKi
 /// Determine block type from function name.
 fn determine_block_type(function_name: &Option<String>) -> BlockType {
     match function_name {
-        Some(name) if name.starts_with("lambda") || name.starts_with("<lambda") => BlockType::Lambda,
+        Some(name) if name.starts_with("lambda") || name.starts_with("<lambda") => {
+            BlockType::Lambda
+        }
         Some(_) => BlockType::Function,
         None => BlockType::Module,
     }

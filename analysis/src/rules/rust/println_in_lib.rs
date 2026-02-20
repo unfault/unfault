@@ -27,8 +27,8 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::finding::RuleFinding;
 use crate::rules::Rule;
+use crate::rules::finding::RuleFinding;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;
 use crate::types::finding::{
@@ -116,7 +116,7 @@ impl Rule for RustPrintlnInLibRule {
                 }
 
                 let line = macro_inv.location.range.start_line + 1;
-                
+
                 // Find the suggested alternative (for future use in patches)
                 let _suggestion = PRINT_MACROS
                     .iter()
@@ -124,7 +124,8 @@ impl Rule for RustPrintlnInLibRule {
                     .map(|(_, sug)| *sug)
                     .unwrap_or("tracing macros");
 
-                let is_binary_entrypoint_file = rust.path.ends_with("main.rs") || rust.path.ends_with("/main.rs");
+                let is_binary_entrypoint_file =
+                    rust.path.ends_with("main.rs") || rust.path.ends_with("/main.rs");
                 let title = if is_binary_entrypoint_file {
                     format!("{}! macro in application code", macro_inv.name)
                 } else {
@@ -170,13 +171,13 @@ impl Rule for RustPrintlnInLibRule {
 
                 // Determine severity - dbg! is worse than println
                 let severity = if macro_inv.name == "dbg" {
-                    Severity::High  // dbg! should never be in production
+                    Severity::High // dbg! should never be in production
                 } else {
                     Severity::Medium
                 };
 
                 let tracing_level = if macro_inv.name.starts_with('e') {
-                    "warn"  // eprintln -> warn
+                    "warn" // eprintln -> warn
                 } else if macro_inv.name == "dbg" {
                     "debug"
                 } else {
@@ -198,11 +199,7 @@ impl Rule for RustPrintlnInLibRule {
                     macro_inv.args.split(',').next().unwrap_or("value").trim()
                 );
 
-                let replacement = format!(
-                    "tracing::{}!({})",
-                    tracing_level,
-                    macro_inv.args
-                );
+                let replacement = format!("tracing::{}!({})", tracing_level, macro_inv.args);
 
                 let patch = FilePatch {
                     file_id: *file_id,
@@ -229,7 +226,7 @@ impl Rule for RustPrintlnInLibRule {
                     column: Some(macro_inv.location.range.start_col + 1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: Some(patch),
                     fix_preview: Some(fix_preview),
                     tags: vec![
@@ -251,8 +248,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::rust::parse_rust_file;
-    use crate::semantics::rust::build_rust_semantics;
     use crate::semantics::SourceSemantics;
+    use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {

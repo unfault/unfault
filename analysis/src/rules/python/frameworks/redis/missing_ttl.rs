@@ -130,7 +130,8 @@ impl Rule for RedisMissingTtlRule {
                         description: Some(
                             "Redis HSET operation detected. Hash keys don't have built-in TTL \
                              support. Call EXPIRE separately or use a different data structure \
-                             with TTL support.".to_string()
+                             with TTL support."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Low,
@@ -140,17 +141,12 @@ impl Rule for RedisMissingTtlRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_hash_ttl_fix_preview()),
-                        tags: vec![
-                            "python".into(),
-                            "redis".into(),
-                            "hash".into(),
-                            "ttl".into(),
-                        ],
+                        tags: vec!["python".into(), "redis".into(), "hash".into(), "ttl".into()],
                     });
                 }
 
@@ -167,7 +163,8 @@ impl Rule for RedisMissingTtlRule {
                             description: Some(
                                 "Django cache.set() without explicit timeout. While Django has \
                                  a default timeout, it's best practice to set explicit timeouts \
-                                 for cache entries.".to_string()
+                                 for cache entries."
+                                    .to_string(),
                             ),
                             kind: FindingKind::AntiPattern,
                             severity: Severity::Low,
@@ -177,9 +174,9 @@ impl Rule for RedisMissingTtlRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(generate_django_cache_fix_preview()),
                             tags: vec![
@@ -202,7 +199,8 @@ impl Rule for RedisMissingTtlRule {
                             title: "Cache set without timeout".to_string(),
                             description: Some(
                                 "Cache set operation without explicit timeout. Always specify \
-                                 a timeout to prevent unbounded cache growth.".to_string()
+                                 a timeout to prevent unbounded cache growth."
+                                    .to_string(),
                             ),
                             kind: FindingKind::AntiPattern,
                             severity: Severity::Low,
@@ -212,9 +210,9 @@ impl Rule for RedisMissingTtlRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(generate_flask_cache_fix_preview()),
                             tags: vec![
@@ -241,12 +239,15 @@ impl Rule for RedisMissingTtlRule {
 /// Transforms: `redis.set(key, value)` → `redis.set(key, value, ex=3600)`
 fn generate_set_ttl_patch(file_id: FileId, call: &PyCallSite) -> FilePatch {
     let args_trimmed = call.args_repr.trim_matches(|c| c == '(' || c == ')');
-    
+
     // Add ex=3600 (1 hour TTL) to the SET call
     let replacement = if args_trimmed.is_empty() || args_trimmed.trim().is_empty() {
         format!("{}(ex=3600)", call.function_call.callee_expr)
     } else {
-        format!("{}({}, ex=3600)", call.function_call.callee_expr, args_trimmed)
+        format!(
+            "{}({}, ex=3600)",
+            call.function_call.callee_expr, args_trimmed
+        )
     };
 
     let hunks = vec![PatchHunk {
@@ -300,7 +301,8 @@ async def set_with_ttl():
 # Environment-based TTL:
 import os
 DEFAULT_TTL = int(os.environ.get("REDIS_DEFAULT_TTL", 3600))
-r.set("key", "value", ex=DEFAULT_TTL)"#.to_string()
+r.set("key", "value", ex=DEFAULT_TTL)"#
+        .to_string()
 }
 
 /// Generate fix preview for Redis hash TTL.
@@ -338,7 +340,8 @@ r.set("key", json.dumps(data), ex=3600)
 import time
 r.zadd("data_set", {json.dumps(data): time.time()})
 # Periodically clean old entries:
-r.zremrangebyscore("data_set", 0, time.time() - 3600)"#.to_string()
+r.zremrangebyscore("data_set", 0, time.time() - 3600)"#
+        .to_string()
 }
 
 /// Generate fix preview for Django cache.
@@ -381,7 +384,8 @@ def my_view(request):
 # For template fragment caching:
 # {% cache 3600 sidebar request.user.id %}
 #     ... expensive template fragment ...
-# {% endcache %}"#.to_string()
+# {% endcache %}"#
+        .to_string()
 }
 
 /// Generate fix preview for Flask cache.
@@ -426,7 +430,8 @@ cache.delete("key")
 cache.delete_memoized(get_user, user_id)
 
 # Clear all cache:
-cache.clear()"#.to_string()
+cache.clear()"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -515,32 +520,46 @@ r.set("key", "value", ex=3600)
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should not flag SET with ex= parameter
-        let set_findings: Vec<_> = findings.iter()
+        let set_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("Redis SET"))
             .collect();
-        assert!(set_findings.is_empty(), "Should not flag Redis SET with TTL");
+        assert!(
+            set_findings.is_empty(),
+            "Should not flag Redis SET with TTL"
+        );
     }
 
     #[tokio::test]
     async fn patch_adds_ex_parameter() {
         use crate::types::patch::apply_file_patch;
-        
+
         let rule = RedisMissingTtlRule::new();
         let src = "import redis\nr = redis.Redis()\nr.set(\"key\", \"value\")\n";
         let (file_id, sem) = parse_and_build_semantics(src);
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        let set_finding = findings.iter()
+
+        let set_finding = findings
+            .iter()
             .find(|f| f.title.contains("Redis SET"))
             .expect("Should have a Redis SET finding");
-        
-        let patch = set_finding.patch.as_ref().expect("Finding should have a patch");
+
+        let patch = set_finding
+            .patch
+            .as_ref()
+            .expect("Finding should have a patch");
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("ex=3600"), "Patched code should contain ex=3600");
-        assert!(patched.contains("r.set(\"key\", \"value\", ex=3600)"), "SET call should have TTL added");
+
+        assert!(
+            patched.contains("ex=3600"),
+            "Patched code should contain ex=3600"
+        );
+        assert!(
+            patched.contains("r.set(\"key\", \"value\", ex=3600)"),
+            "SET call should have TTL added"
+        );
     }
 
     #[tokio::test]
@@ -551,16 +570,24 @@ r.set("key", "value", ex=3600)
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        
-        let set_finding = findings.iter()
+
+        let set_finding = findings
+            .iter()
             .find(|f| f.title.contains("Redis SET"))
             .expect("Should have a Redis SET finding");
-        
-        let patch = set_finding.patch.as_ref().expect("Finding should have a patch");
-        
-        let has_replace_bytes = patch.hunks.iter().any(|h| {
-            matches!(h.range, PatchRange::ReplaceBytes { .. })
-        });
-        assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+
+        let patch = set_finding
+            .patch
+            .as_ref()
+            .expect("Finding should have a patch");
+
+        let has_replace_bytes = patch
+            .hunks
+            .iter()
+            .any(|h| matches!(h.range, PatchRange::ReplaceBytes { .. }));
+        assert!(
+            has_replace_bytes,
+            "Patch should use ReplaceBytes for actual code replacement"
+        );
     }
 }

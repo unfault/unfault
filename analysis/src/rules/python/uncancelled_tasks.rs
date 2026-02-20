@@ -4,11 +4,11 @@ use async_trait::async_trait;
 
 use crate::graph::CodeGraph;
 use crate::parse::ast::FileId;
-use crate::rules::applicability_defaults::timeout;
 use crate::rules::Rule;
+use crate::rules::applicability_defaults::timeout;
 use crate::rules::finding::RuleFinding;
-use crate::semantics::python::model::PyCallSite;
 use crate::semantics::SourceSemantics;
+use crate::semantics::python::model::PyCallSite;
 use crate::types::context::Dimension;
 use crate::types::finding::{FindingApplicability, FindingKind, Severity};
 use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
@@ -60,9 +60,10 @@ impl Rule for PythonUncancelledTasksRule {
             };
 
             // Check for asyncio imports
-            let has_asyncio = py.imports.iter().any(|imp| {
-                imp.module == "asyncio" || imp.module.starts_with("asyncio.")
-            });
+            let has_asyncio = py
+                .imports
+                .iter()
+                .any(|imp| imp.module == "asyncio" || imp.module.starts_with("asyncio."));
 
             if !has_asyncio {
                 continue;
@@ -73,15 +74,16 @@ impl Rule for PythonUncancelledTasksRule {
                 let callee = &call.function_call.callee_expr;
 
                 // Check for create_task without proper handling
-                if callee == "asyncio.create_task" 
+                if callee == "asyncio.create_task"
                     || callee.ends_with(".create_task")
                     || callee == "loop.create_task"
                 {
                     // Check if the task is assigned to a variable
                     // This is a heuristic - we can't fully track task lifecycle
-                    let is_fire_and_forget = !py.assignments.iter().any(|a| {
-                        a.value_repr.contains("create_task")
-                    });
+                    let is_fire_and_forget = !py
+                        .assignments
+                        .iter()
+                        .any(|a| a.value_repr.contains("create_task"));
 
                     if is_fire_and_forget {
                         findings.push(RuleFinding {
@@ -91,7 +93,8 @@ impl Rule for PythonUncancelledTasksRule {
                                 "asyncio.create_task() is called but the task is not stored \
                                  in a variable. This creates a 'fire-and-forget' task that \
                                  cannot be cancelled or awaited. Store the task reference and \
-                                 ensure proper cleanup.".to_string()
+                                 ensure proper cleanup."
+                                    .to_string(),
                             ),
                             kind: FindingKind::StabilityRisk,
                             severity: Severity::Medium,
@@ -101,9 +104,9 @@ impl Rule for PythonUncancelledTasksRule {
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
                             column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
                             patch: None,
                             fix_preview: Some(generate_task_management_fix_preview()),
                             tags: vec![
@@ -125,7 +128,8 @@ impl Rule for PythonUncancelledTasksRule {
                         description: Some(
                             "asyncio.ensure_future() is a legacy API. Use asyncio.create_task() \
                              for creating tasks from coroutines. ensure_future should only be \
-                             used when you need to handle both coroutines and futures.".to_string()
+                             used when you need to handle both coroutines and futures."
+                                .to_string(),
                         ),
                         kind: FindingKind::AntiPattern,
                         severity: Severity::Low,
@@ -135,16 +139,12 @@ impl Rule for PythonUncancelledTasksRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: Some(patch),
                         fix_preview: Some(generate_create_task_fix_preview()),
-                        tags: vec![
-                            "python".into(),
-                            "asyncio".into(),
-                            "deprecated".into(),
-                        ],
+                        tags: vec!["python".into(), "asyncio".into(), "deprecated".into()],
                     });
                 }
 
@@ -152,7 +152,8 @@ impl Rule for PythonUncancelledTasksRule {
                 // This is a common pattern that leads to orphaned tasks
                 if (callee == "asyncio.create_task" || callee.ends_with(".create_task"))
                     && py.calls.iter().any(|c| {
-                        c.function_call.callee_expr.contains("for") || c.function_call.callee_expr.contains("while")
+                        c.function_call.callee_expr.contains("for")
+                            || c.function_call.callee_expr.contains("while")
                     })
                 {
                     // Heuristic: if there's a loop and create_task, warn about task tracking
@@ -162,7 +163,8 @@ impl Rule for PythonUncancelledTasksRule {
                         description: Some(
                             "Tasks appear to be created in a loop. Ensure all tasks are \
                              collected and properly awaited or cancelled. Use a list to \
-                             track tasks and asyncio.gather() or TaskGroup to manage them.".to_string()
+                             track tasks and asyncio.gather() or TaskGroup to manage them."
+                                .to_string(),
                         ),
                         kind: FindingKind::StabilityRisk,
                         severity: Severity::Low,
@@ -172,9 +174,9 @@ impl Rule for PythonUncancelledTasksRule {
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
                         column: Some(call.function_call.location.column),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
                         patch: None,
                         fix_preview: Some(generate_loop_tasks_fix_preview()),
                         tags: vec![
@@ -189,21 +191,26 @@ impl Rule for PythonUncancelledTasksRule {
 
             // Check for missing task cancellation in shutdown handlers
             let has_shutdown_handler = py.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("signal") || c.function_call.callee_expr.contains("shutdown") || c.function_call.callee_expr.contains("cleanup")
+                c.function_call.callee_expr.contains("signal")
+                    || c.function_call.callee_expr.contains("shutdown")
+                    || c.function_call.callee_expr.contains("cleanup")
             });
 
             let has_task_cancel = py.calls.iter().any(|c| {
-                c.function_call.callee_expr.ends_with(".cancel") || c.function_call.callee_expr.contains("cancel_task")
+                c.function_call.callee_expr.ends_with(".cancel")
+                    || c.function_call.callee_expr.contains("cancel_task")
             });
 
             let has_all_tasks = py.calls.iter().any(|c| {
-                c.function_call.callee_expr == "asyncio.all_tasks" || c.function_call.callee_expr.ends_with(".all_tasks")
+                c.function_call.callee_expr == "asyncio.all_tasks"
+                    || c.function_call.callee_expr.ends_with(".all_tasks")
             });
 
             // If there's task creation but no cancellation pattern
-            let has_task_creation = py.calls.iter().any(|c| {
-                c.function_call.callee_expr.contains("create_task")
-            });
+            let has_task_creation = py
+                .calls
+                .iter()
+                .any(|c| c.function_call.callee_expr.contains("create_task"));
 
             if has_task_creation && !has_task_cancel && !has_all_tasks && !has_shutdown_handler {
                 findings.push(RuleFinding {
@@ -212,7 +219,8 @@ impl Rule for PythonUncancelledTasksRule {
                     description: Some(
                         "Tasks are created but there's no visible cancellation or cleanup \
                          pattern. Implement proper task lifecycle management to prevent \
-                         orphaned tasks during shutdown.".to_string()
+                         orphaned tasks during shutdown."
+                            .to_string(),
                     ),
                     kind: FindingKind::StabilityRisk,
                     severity: Severity::Low,
@@ -224,7 +232,7 @@ impl Rule for PythonUncancelledTasksRule {
                     column: Some(1),
                     end_line: None,
                     end_column: None,
-            byte_range: None,
+                    byte_range: None,
                     patch: None,
                     fix_preview: Some(generate_shutdown_fix_preview()),
                     tags: vec![
@@ -252,7 +260,7 @@ fn generate_ensure_future_to_create_task_patch(call: &PyCallSite, file_id: FileI
     } else {
         &call.args_repr
     };
-    
+
     // Replace ensure_future with create_task
     let replacement = format!("asyncio.create_task({})", args_trimmed);
 
@@ -307,7 +315,8 @@ finally:
     try:
         await task
     except asyncio.CancelledError:
-        pass"#.to_string()
+        pass"#
+        .to_string()
 }
 
 /// Generate fix preview for create_task vs ensure_future.
@@ -336,7 +345,8 @@ async def handle_awaitable(awaitable):
 # For coroutines, always use create_task:
 async def main():
     task = asyncio.create_task(my_coroutine())
-    await task"#.to_string()
+    await task"#
+        .to_string()
 }
 
 /// Generate fix preview for tasks in loops.
@@ -376,7 +386,8 @@ async def limited_process(item):
         return await process(item)
 
 tasks = [asyncio.create_task(limited_process(item)) for item in items]
-results = await asyncio.gather(*tasks)"#.to_string()
+results = await asyncio.gather(*tasks)"#
+        .to_string()
 }
 
 /// Generate fix preview for shutdown handling.
@@ -432,7 +443,8 @@ async def main():
         await shutdown()
 
 if __name__ == "__main__":
-    asyncio.run(main())"#.to_string()
+    asyncio.run(main())"#
+        .to_string()
 }
 
 #[cfg(test)]
@@ -511,12 +523,19 @@ task = asyncio.ensure_future(some_coroutine())
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let ensure_future_findings: Vec<_> = findings.iter()
+        let ensure_future_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("ensure_future"))
             .collect();
-        
-        assert!(!ensure_future_findings.is_empty(), "Should detect ensure_future");
-        assert!(ensure_future_findings[0].patch.is_some(), "Should have a patch");
+
+        assert!(
+            !ensure_future_findings.is_empty(),
+            "Should detect ensure_future"
+        );
+        assert!(
+            ensure_future_findings[0].patch.is_some(),
+            "Should have a patch"
+        );
     }
 
     #[tokio::test]
@@ -532,11 +551,15 @@ await task
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let ensure_future_findings: Vec<_> = findings.iter()
+        let ensure_future_findings: Vec<_> = findings
+            .iter()
             .filter(|f| f.title.contains("ensure_future"))
             .collect();
-        
-        assert!(ensure_future_findings.is_empty(), "Should not flag create_task");
+
+        assert!(
+            ensure_future_findings.is_empty(),
+            "Should not flag create_task"
+        );
     }
 
     // ==================== ensure_future Patch Tests ====================
@@ -549,17 +572,25 @@ await task
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let ensure_future_finding = findings.iter()
+        let ensure_future_finding = findings
+            .iter()
             .find(|f| f.title.contains("ensure_future"))
             .expect("Should detect ensure_future");
-        
-        let patch = ensure_future_finding.patch.as_ref().expect("Should have a patch");
+
+        let patch = ensure_future_finding
+            .patch
+            .as_ref()
+            .expect("Should have a patch");
         let patched = apply_file_patch(src, patch);
-        
-        assert!(patched.contains("asyncio.create_task(some_coroutine())"),
-            "Patched code should use asyncio.create_task()");
-        assert!(!patched.contains("ensure_future"),
-            "Patched code should not contain ensure_future");
+
+        assert!(
+            patched.contains("asyncio.create_task(some_coroutine())"),
+            "Patched code should use asyncio.create_task()"
+        );
+        assert!(
+            !patched.contains("ensure_future"),
+            "Patched code should not contain ensure_future"
+        );
     }
 
     #[tokio::test]
@@ -570,16 +601,24 @@ await task
         let semantics = vec![(file_id, sem)];
 
         let findings = rule.evaluate(&semantics, None).await;
-        let ensure_future_finding = findings.iter()
+        let ensure_future_finding = findings
+            .iter()
             .find(|f| f.title.contains("ensure_future"))
             .expect("Should detect ensure_future");
-        
-        let patch = ensure_future_finding.patch.as_ref().expect("Should have a patch");
-        
+
+        let patch = ensure_future_finding
+            .patch
+            .as_ref()
+            .expect("Should have a patch");
+
         // Verify that one hunk is ReplaceBytes (the actual fix)
-        let has_replace_bytes = patch.hunks.iter().any(|h| {
-            matches!(h.range, PatchRange::ReplaceBytes { .. })
-        });
-        assert!(has_replace_bytes, "Patch should use ReplaceBytes for actual code replacement");
+        let has_replace_bytes = patch
+            .hunks
+            .iter()
+            .any(|h| matches!(h.range, PatchRange::ReplaceBytes { .. }));
+        assert!(
+            has_replace_bytes,
+            "Patch should use ReplaceBytes for actual code replacement"
+        );
     }
 }
