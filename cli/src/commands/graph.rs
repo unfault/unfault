@@ -158,7 +158,7 @@ pub async fn execute_impact(args: ImpactArgs) -> Result<i32> {
     };
 
     // Query impact using rag retrieval
-    let impact = unfault_rag::retrieval::get_impact(&graph, &args.file_path, args.max_depth as usize);
+    let impact = unfault_core::graph::traversal::get_impact(&graph, &args.file_path, args.max_depth as usize);
 
     if impact.affected_files.is_empty() {
         eprintln!(
@@ -213,7 +213,7 @@ pub async fn execute_library(args: LibraryArgs) -> Result<i32> {
     };
 
     // Find all files that use this library via UsesLibrary edges
-    let deps = unfault_rag::retrieval::get_dependencies(&graph, &args.library_name);
+    let deps = unfault_core::graph::traversal::get_dependencies(&graph, &args.library_name);
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&deps)?);
@@ -260,7 +260,7 @@ pub async fn execute_deps(args: DepsArgs) -> Result<i32> {
         }
     };
 
-    let deps = unfault_rag::retrieval::get_dependencies(&graph, &args.file_path);
+    let deps = unfault_core::graph::traversal::get_dependencies(&graph, &args.file_path);
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&deps)?);
@@ -317,7 +317,7 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
         }
     };
 
-    let centrality = unfault_rag::retrieval::get_centrality(&graph, args.limit as usize);
+    let centrality = unfault_core::graph::traversal::get_centrality(&graph, args.limit as usize);
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&centrality)?);
@@ -362,7 +362,7 @@ pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
         }
     };
 
-    let overview = unfault_rag::retrieval::workspace_overview(&graph);
+    let overview = unfault_core::graph::traversal::workspace_overview(&graph);
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&overview)?);
@@ -422,7 +422,7 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
     };
 
     // Use flow extraction (BFS from function through call edges)
-    let flow = unfault_rag::retrieval::extract_flow(&graph, &function_name, args.max_depth as usize);
+    let flow = unfault_core::graph::traversal::extract_flow(&graph, &function_name, args.max_depth as usize);
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&flow)?);

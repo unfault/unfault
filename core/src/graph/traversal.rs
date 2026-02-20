@@ -1,15 +1,24 @@
-//! Graph-based query implementations.
+//! Graph traversal queries.
 //!
-//! These operate on the in-memory CodeGraph and do not require
-//! embeddings or vector search. They are the "fast path" in RAG.
+//! These operate on the in-memory [`CodeGraph`] and do not require
+//! embeddings or vector search. They provide structural analysis:
+//!
+//! - **Flow**: BFS forward on call edges from a target function
+//! - **Impact**: Reverse BFS on import/call edges to find dependents
+//! - **Dependencies**: Outgoing import/library edges from a target
+//! - **Centrality**: In-degree ranking of files by import count
+//! - **Enumerate**: Count/list entities by type (files, functions, routes, etc.)
+//! - **Overview**: Aggregate workspace structure from the graph
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use petgraph::visit::EdgeRef;
 use petgraph::Direction;
-use unfault_analysis::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 
-use crate::types::{EnumerateContext, FlowContext, FlowPathNode, GraphContext, WorkspaceContext};
+use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
+use crate::types::graph_query::{
+    EnumerateContext, FlowContext, FlowPathNode, GraphContext, WorkspaceContext,
+};
 
 /// Extract a call-flow starting from a target node name.
 ///
@@ -394,9 +403,9 @@ fn node_type_str(node: &GraphNode) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use unfault_analysis::graph::GraphEdgeKind;
-    use unfault_analysis::parse::ast::FileId;
-    use unfault_analysis::types::context::Language;
+    use crate::graph::GraphEdgeKind;
+    use crate::parse::ast::FileId;
+    use crate::types::context::Language;
 
     fn build_test_graph() -> CodeGraph {
         let mut graph = CodeGraph::new();

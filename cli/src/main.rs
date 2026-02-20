@@ -59,36 +59,6 @@ struct Cli {
 /// Available CLI commands
 #[derive(Subcommand)]
 enum Commands {
-    /// Ask questions about project health using RAG
-    Ask {
-        /// Natural language query about project health
-        #[arg(value_name = "QUERY")]
-        query: String,
-        /// Scope query to a specific workspace ID (auto-detected from current directory if not provided)
-        #[arg(long, short = 'w', value_name = "WORKSPACE_ID")]
-        workspace: Option<String>,
-        /// Workspace path to auto-detect workspace ID from (defaults to current directory)
-        #[arg(long, short = 'p', value_name = "PATH")]
-        path: Option<String>,
-        /// Maximum session contexts to retrieve (1-20)
-        #[arg(long, value_name = "COUNT", default_value = "5")]
-        max_sessions: i32,
-        /// Maximum finding contexts to retrieve (1-50)
-        #[arg(long, value_name = "COUNT", default_value = "10")]
-        max_findings: i32,
-        /// Minimum similarity threshold (0.0-1.0)
-        #[arg(long, value_name = "THRESHOLD", default_value = "0.5")]
-        threshold: f64,
-        /// Output as JSON
-        #[arg(long)]
-        json: bool,
-        /// Skip LLM and show raw context only
-        #[arg(long)]
-        no_llm: bool,
-        /// Enable verbose output
-        #[arg(long, short = 'v')]
-        verbose: bool,
-    },
     /// Manage CLI configuration
     Config {
         #[command(subcommand)]
@@ -373,37 +343,6 @@ async fn run_command(command: Commands) -> i32 {
     use unfault::exit_codes::*;
 
     match command {
-        Commands::Ask {
-            query,
-            workspace,
-            path,
-            max_sessions,
-            max_findings,
-            threshold,
-            json,
-            no_llm,
-            verbose,
-        } => {
-            let args = commands::ask::AskArgs {
-                query,
-                workspace_id: workspace,
-                workspace_path: path,
-                max_sessions: Some(max_sessions),
-                max_findings: Some(max_findings),
-                similarity_threshold: Some(threshold as f32),
-                json,
-                no_llm,
-                verbose,
-            };
-            init_logger(verbose);
-            match commands::ask::execute(args).await {
-                Ok(exit_code) => exit_code,
-                Err(e) => {
-                    eprintln!("Ask error: {}", e);
-                    EXIT_ERROR
-                }
-            }
-        }
         Commands::Config { command } => run_config_command(command),
         Commands::Graph { command } => run_graph_command(command).await,
         Commands::Lsp { verbose, stdio: _ } => {
