@@ -1,6 +1,6 @@
 [package]
 name = "unfault"
-version = "1.0.0-alpha.1"
+version = "0.7.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -47,8 +47,8 @@ urlencoding = "2"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # Local crates
-unfault-core = { path = "../core" }
-unfault-analysis = { path = "../analysis" }
+unfault-core = { path = "../core", version = "0" }
+unfault-analysis = { path = "../analysis", version = "0" }
 
 [dev-dependencies]
 tempfile = "3.8"

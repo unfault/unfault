@@ -15,7 +15,7 @@ name = "unfault_analysis"
 path = "src/lib.rs"
 
 [dependencies]
-unfault-core = { path = "../core" }
+unfault-core = { path = "../core", version = "0" }
 
 # From workspace
 serde.workspace = true
