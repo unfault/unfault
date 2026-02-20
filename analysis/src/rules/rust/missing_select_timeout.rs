@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! tokio::select! {
 //!     msg = rx.recv() => handle(msg),
 //!     _ = shutdown.recv() => return,
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! tokio::select! {
 //!     msg = rx.recv() => handle(msg),
 //!     _ = shutdown.recv() => return,

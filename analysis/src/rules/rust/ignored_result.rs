@@ -7,7 +7,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! fn process() {
 //!     let _ = file.write_all(b"data");  // Error silently ignored!
 //!     send_notification();  // Returns Result but we don't care?
@@ -15,7 +15,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! fn process() -> Result<(), Error> {
 //!     file.write_all(b"data")?;  // Error propagated
 //!     send_notification().ok();  // Explicitly ignoring with .ok()

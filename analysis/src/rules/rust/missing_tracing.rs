@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Missing instrumentation:
-//! ```rust
+//! ```rust,ignore
 //! pub async fn handle_request(req: Request) -> Response {
 //!     // No tracing!
 //!     process(req).await
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Good (with tracing):
-//! ```rust
+//! ```rust,ignore
 //! #[tracing::instrument]
 //! pub async fn handle_request(req: Request) -> Response {
 //!     tracing::info!("Processing request");

@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! fn process_tree(node: &Node) {
 //!     for child in &node.children {
 //!         process_tree(child);  // No visible base case
@@ -15,7 +15,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! fn process_tree(node: &Node, depth: usize) -> Result<(), Error> {
 //!     if depth > MAX_DEPTH {
 //!         return Err(Error::TooDeep);
@@ -34,7 +34,7 @@
 //! - `other.method()` - NOT recursive, just same method name on different type
 //!
 //! Example that should NOT be flagged:
-//! ```rust
+//! ```rust,ignore
 //! impl Container {
 //!     fn to_dict(&self) -> Dict {
 //!         for item in &self.items {

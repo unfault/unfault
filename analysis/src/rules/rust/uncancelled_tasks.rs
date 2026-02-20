@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! async fn run_server() {
 //!     let handle = tokio::spawn(background_work());
 //!     // Server stops, but background_work keeps running
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! async fn run_server() {
 //!     let handle = tokio::spawn(background_work());
 //!     // On shutdown:

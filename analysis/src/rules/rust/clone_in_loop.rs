@@ -7,7 +7,7 @@
 //! # Patterns Detected
 //!
 //! ## Pattern 1: Loop-invariant clone
-//! ```rust
+//! ```rust,ignore
 //! // Bad: Clone is the same every iteration
 //! for item in &items {
 //!     let data = expensive_data.clone();
@@ -22,7 +22,7 @@
 //! ```
 //!
 //! ## Pattern 2: Clone-to-consume (passing to consuming function)
-//! ```rust
+//! ```rust,ignore
 //! // Bad: Clone because value needed after consuming call
 //! for rf in findings {
 //!     let finding = Finding::from(rf.clone());  // clone() to pass to From

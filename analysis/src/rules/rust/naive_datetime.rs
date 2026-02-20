@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! use chrono::NaiveDateTime;
 //!
 //! fn get_timestamp() -> NaiveDateTime {
@@ -15,7 +15,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! use chrono::{DateTime, Utc};
 //!
 //! fn get_timestamp() -> DateTime<Utc> {

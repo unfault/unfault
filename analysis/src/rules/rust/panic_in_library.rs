@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! pub fn parse(input: &str) -> Config {
 //!     if input.is_empty() {
 //!         panic!("input cannot be empty");  // Will crash the application
@@ -16,7 +16,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! pub fn parse(input: &str) -> Result<Config, ParseError> {
 //!     if input.is_empty() {
 //!         return Err(ParseError::EmptyInput);

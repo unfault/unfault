@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! async fn process_data(data: &[u8]) {
 //!     let hash = sha256::digest(data);  // Blocks worker thread
 //!     let parsed = serde_json::from_slice::<Data>(data)?;  // CPU-bound
@@ -14,7 +14,7 @@
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! async fn process_data(data: Vec<u8>) {
 //!     let hash = tokio::task::spawn_blocking(move || {
 //!         sha256::digest(&data)

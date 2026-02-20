@@ -6,14 +6,14 @@
 //! # Examples
 //!
 //! Bad:
-//! ```rust
+//! ```rust,ignore
 //! fn process_order(order_id: u64) {
 //!     log::info!("Processing order {}", order_id);  // Unstructured
 //! }
 //! ```
 //!
 //! Good:
-//! ```rust
+//! ```rust,ignore
 //! #[tracing::instrument]
 //! fn process_order(order_id: u64) {
 //!     tracing::info!(order_id, "Processing order");  // Structured
