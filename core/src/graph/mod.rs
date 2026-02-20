@@ -906,6 +906,17 @@ fn find_import_source_file(cg: &CodeGraph, module_path: &str) -> Option<NodeInde
         return None;
     }
 
+    // Handle Rust use paths (crate::foo::bar, etc.)
+    if module_path.contains("::") {
+        let stripped = module_path.strip_prefix("crate::").unwrap_or(module_path);
+        for path in rust_path_candidates(stripped) {
+            if let Some(idx) = cg.find_file_by_path(&path) {
+                return Some(idx);
+            }
+        }
+        return None;
+    }
+
     // Try various path patterns for absolute imports
     let module_as_file = module_path.replace('.', "/");
     let possible_paths = [
@@ -964,10 +975,12 @@ fn add_import_edges(
 
         let possible_paths = if import.module_path.starts_with('.') {
             // Handle relative imports (Python-style: from .utils import foo)
-            // The module path starts with one or more dots indicating relative level
             resolve_relative_import(&file_path, &import.module_path)
+        } else if import.module_path.contains("::") {
+            // Handle Rust use paths (crate::foo::bar, super::foo, self::foo)
+            resolve_rust_use_path(&file_path, &import.module_path)
         } else {
-            // Absolute imports
+            // Absolute imports (Python / JS / TS / Go)
             let module_as_file = import.module_path.replace('.', "/");
             vec![
                 format!("{}.py", module_as_file),
@@ -1068,6 +1081,111 @@ fn resolve_relative_import(importing_file: &str, module_path: &str) -> Vec<Strin
         format!("{}.js", resolved_base),
         resolved_base,
     ]
+}
+
+/// Resolve a Rust `use` path to candidate file paths.
+///
+/// Handles `crate::`, `super::`, and `self::` prefixes. Because Rust `use` paths
+/// include the item name (e.g. `crate::parse::ast::FileId` where `FileId` is a
+/// struct inside `parse/ast.rs`), we try progressively shorter prefixes so that
+/// `parse/ast/FileId.rs` is tried first, then `parse/ast.rs` (which matches).
+fn resolve_rust_use_path(importing_file: &str, module_path: &str) -> Vec<String> {
+    if let Some(rest) = module_path.strip_prefix("crate::") {
+        rust_path_candidates(rest)
+    } else if module_path.starts_with("super::") {
+        let mut rest: &str = module_path;
+        let mut levels: usize = 0;
+        while let Some(after) = rest.strip_prefix("super::") {
+            levels += 1;
+            rest = after;
+        }
+        if rest == "super" {
+            levels += 1;
+            rest = "";
+        }
+
+        let importing_dir = importing_file
+            .rfind('/')
+            .map(|i| &importing_file[..i])
+            .unwrap_or("");
+        let is_mod_rs = importing_file.ends_with("/mod.rs") || importing_file == "mod.rs";
+        let extra = if is_mod_rs { 1 } else { 0 };
+
+        let mut base_dir = importing_dir.to_string();
+        for _ in 0..(levels + extra).saturating_sub(1) {
+            if let Some(last_slash) = base_dir.rfind('/') {
+                base_dir = base_dir[..last_slash].to_string();
+            } else {
+                base_dir = String::new();
+                break;
+            }
+        }
+
+        let segments: Vec<&str> = if rest.is_empty() {
+            vec![]
+        } else {
+            rest.split("::").collect()
+        };
+        let mut paths = Vec::new();
+        for len in (1..=segments.len()).rev() {
+            let module_as_path = segments[..len].join("/");
+            let resolved = if base_dir.is_empty() {
+                module_as_path
+            } else {
+                format!("{}/{}", base_dir, module_as_path)
+            };
+            paths.push(format!("{}.rs", resolved));
+            paths.push(format!("{}/mod.rs", resolved));
+        }
+        if segments.is_empty() && !base_dir.is_empty() {
+            paths.push(format!("{}.rs", base_dir));
+            paths.push(format!("{}/mod.rs", base_dir));
+        }
+        paths
+    } else if let Some(rest) = module_path.strip_prefix("self::") {
+        let importing_dir = importing_file
+            .rfind('/')
+            .map(|i| &importing_file[..i])
+            .unwrap_or("");
+        let segments: Vec<&str> = rest.split("::").collect();
+        let mut paths = Vec::new();
+        for len in (1..=segments.len()).rev() {
+            let module_as_path = segments[..len].join("/");
+            let resolved = if importing_dir.is_empty() {
+                module_as_path
+            } else {
+                format!("{}/{}", importing_dir, module_as_path)
+            };
+            paths.push(format!("{}.rs", resolved));
+            paths.push(format!("{}/mod.rs", resolved));
+        }
+        paths
+    } else {
+        // External crate or bare path — try as-is
+        rust_path_candidates(&module_path.replace("::", "/"))
+    }
+}
+
+/// Generate candidate file paths for a Rust module path (already stripped of
+/// `crate::`/`super::`/`self::` prefix). Tries progressively shorter prefixes
+/// so that item names at the end of the path (e.g. `FileId` in `parse/ast/FileId`)
+/// are stripped until the actual module file is found.
+fn rust_path_candidates(path: &str) -> Vec<String> {
+    let segments: Vec<&str> = if path.contains("::") {
+        path.split("::").collect()
+    } else {
+        path.split('/').collect()
+    };
+
+    let mut paths = Vec::new();
+    for len in (1..=segments.len()).rev() {
+        let module_as_file = segments[..len].join("/");
+        paths.push(format!("{}.rs", module_as_file));
+        paths.push(format!("{}/mod.rs", module_as_file));
+        paths.push(format!("src/{}.rs", module_as_file));
+        paths.push(format!("src/{}/mod.rs", module_as_file));
+    }
+    paths
 }
 
 /// Add function nodes from a file

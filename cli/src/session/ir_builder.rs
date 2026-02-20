@@ -40,7 +40,7 @@ use unfault_core::parse::ast::FileId;
 use unfault_core::parse::{go, python, rust as rust_parse, typescript};
 use unfault_core::semantics::go::model::GoFileSemantics;
 use unfault_core::semantics::python::model::PyFileSemantics;
-use unfault_core::semantics::rust::model::RustFileSemantics;
+use unfault_core::semantics::rust::{build_rust_semantics, model::RustFileSemantics};
 use unfault_core::semantics::typescript::model::TsFileSemantics;
 use unfault_core::semantics::SourceSemantics;
 use unfault_core::types::context::{Language, SourceFile};
@@ -193,7 +193,10 @@ pub fn build_ir(
                             return None;
                         }
                     };
-                    let sem = RustFileSemantics::from_parsed(&parsed);
+                    let sem = match build_rust_semantics(&parsed) {
+                        Ok(s) => s,
+                        Err(_) => RustFileSemantics::from_parsed(&parsed),
+                    };
                     SourceSemantics::Rust(sem)
                 }
                 Language::Typescript => {
@@ -422,7 +425,10 @@ pub fn build_ir_cached(
                             return None;
                         }
                     };
-                    let sem = RustFileSemantics::from_parsed(&parsed);
+                    let sem = match build_rust_semantics(&parsed) {
+                        Ok(s) => s,
+                        Err(_) => RustFileSemantics::from_parsed(&parsed),
+                    };
                     SourceSemantics::Rust(sem)
                 }
                 Language::Typescript => {

@@ -28,7 +28,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use unfault_core::semantics::SourceSemantics;
 
 /// Current cache format version. Bump this when semantics structure changes.
-const CACHE_VERSION: u32 = 1;
+const CACHE_VERSION: u32 = 3;
 
 /// Cache metadata stored in meta.json
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
