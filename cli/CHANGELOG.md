@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-04-16
+
+### Fixed
+
+- Applied `cargo fmt --all` across the workspace. No functional changes.
+- Release workflow: `publish` job now depends on `release` (which depends on
+  `build`), so crates.io is never published before binaries are confirmed good.
+
 ## [0.8.0] - 2026-04-16
 
 ### Added

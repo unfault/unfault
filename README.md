@@ -177,9 +177,9 @@ unfault config agent opencode
 ## Workspace
 
 ```
-core/      unfault-core     0.3.0   parsing, semantics, code graph
-analysis/  unfault-analysis 0.2.0   rules, profiles, world model
-cli/       unfault          0.8.0   commands, LSP, integrations
+core/      unfault-core     0.3.1   parsing, semantics, code graph
+analysis/  unfault-analysis 0.2.1   rules, profiles, world model
+cli/       unfault          0.8.1   commands, LSP, integrations
 ```
 
 ```bash
