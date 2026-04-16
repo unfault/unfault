@@ -29,6 +29,7 @@ pub mod ir;
 pub mod profiles;
 pub mod rules;
 pub mod session;
+pub mod sre;
 pub mod suppression;
 
 // Re-export commonly used types
@@ -47,3 +48,7 @@ pub use error::EngineError;
 pub use profiles::ProfileRegistry;
 pub use rules::Rule;
 pub use rules::registry::RuleRegistry;
+
+// Re-export SRE intelligence types
+pub use sre::ranker::{rank_files, top_n, RankedFile};
+pub use sre::{lookup_glossary, GlossaryEntry};

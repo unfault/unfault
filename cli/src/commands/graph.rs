@@ -337,29 +337,60 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
         }
     };
 
-    let centrality =
-        unfault_analysis::graph::traversal::get_centrality(&graph, args.limit as usize);
+    // When sort_by == "importance_score", use the composite Ranker.
+    // For all other sort metrics, fall back to the existing centrality query.
+    if args.sort_by == "importance_score" {
+        let ranked = unfault_analysis::sre::ranker::top_n(&graph, &[], args.limit as usize);
 
-    if args.json {
-        println!("{}", serde_json::to_string_pretty(&centrality)?);
-    } else {
-        println!(
-            "\n{} Most critical files (by import count):\n",
-            "📊".bright_blue()
-        );
-        if centrality.central_files.is_empty() {
-            println!("  No import relationships found.");
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&ranked)?);
         } else {
-            for (i, (path, score)) in centrality.central_files.iter().enumerate() {
-                println!(
-                    "  {}. {} (imported {} times)",
-                    i + 1,
-                    path.bright_blue(),
-                    (*score as i32).to_string().yellow()
-                );
+            println!(
+                "\n{} Most critical files (composite importance score):\n",
+                "📊".bright_blue()
+            );
+            if ranked.is_empty() {
+                println!("  No files found in graph.");
+            } else {
+                for (i, rf) in ranked.iter().enumerate() {
+                    println!(
+                        "  {}. {} (score: {:.2}  centrality: {:.2}  lib-risk: {:.2}  debt: {:.2})",
+                        i + 1,
+                        rf.file_path.bright_blue(),
+                        rf.importance_score,
+                        rf.centrality_score,
+                        rf.library_risk_score,
+                        rf.finding_density_score,
+                    );
+                }
             }
+            println!();
         }
-        println!();
+    } else {
+        let centrality =
+            unfault_analysis::graph::traversal::get_centrality(&graph, args.limit as usize);
+
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&centrality)?);
+        } else {
+            println!(
+                "\n{} Most critical files (by import count):\n",
+                "📊".bright_blue()
+            );
+            if centrality.central_files.is_empty() {
+                println!("  No import relationships found.");
+            } else {
+                for (i, (path, score)) in centrality.central_files.iter().enumerate() {
+                    println!(
+                        "  {}. {} (imported {} times)",
+                        i + 1,
+                        path.bright_blue(),
+                        (*score as i32).to_string().yellow()
+                    );
+                }
+            }
+            println!();
+        }
     }
 
     Ok(EXIT_SUCCESS)

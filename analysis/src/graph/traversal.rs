@@ -2,8 +2,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use petgraph::Direction;
 use petgraph::visit::EdgeRef;
+use petgraph::Direction;
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::graph_query::{
@@ -348,5 +348,7 @@ fn node_type_str(node: &GraphNode) -> &str {
         GraphNode::FastApiApp { .. } => "app",
         GraphNode::FastApiRoute { .. } => "route",
         GraphNode::FastApiMiddleware { .. } => "middleware",
+        GraphNode::Slo { .. } => "slo",
+        GraphNode::RemoteService { .. } => "remote_service",
     }
 }

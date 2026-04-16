@@ -12,12 +12,13 @@ pub use unfault_core::types::meta;
 pub use unfault_core::types::patch;
 pub use unfault_core::types::profile;
 pub use unfault_core::types::session_result;
+pub use unfault_core::types::sre_diagnostic;
 pub use unfault_core::types::workspace;
 
 // Re-export the flat items that types/mod.rs used to provide
 pub use dependency::{
-    BlockType, DependencyProtocol, DependencySource, RuntimeDependency, is_dynamic_uri,
+    is_dynamic_uri, BlockType, DependencyProtocol, DependencySource, RuntimeDependency,
 };
-pub use patch::{FilePatch, PatchHunk, PatchRange, apply_file_patch, make_unified_diff};
+pub use patch::{apply_file_patch, make_unified_diff, FilePatch, PatchHunk, PatchRange};
 pub use profile::{FilePredicate, FileQueryHint, Profile};
 pub use workspace::{AdvertisedProfile, MetaFile, MetaFileKind, WorkspaceDescriptor};

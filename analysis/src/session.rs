@@ -14,6 +14,7 @@ use crate::parse::{
 use crate::rules::finding::RuleFinding;
 use crate::rules::registry::RuleRegistry;
 use crate::semantics::{SourceSemantics, build_source_semantics};
+use crate::sre::synthesize;
 use crate::suppression::{filter_suppressed_findings, parse_suppressions};
 use crate::types::context::SessionContextInput;
 use crate::types::dependency::RuntimeDependency;
@@ -312,10 +313,24 @@ impl InternalSessionState {
             }
         }
 
+        // Pass 3: SRE synthesis — enrich findings with blast radius context.
+        // Only runs when the code graph is available (it always should be after
+        // build_code_graph_for_session, but we handle the absent case gracefully).
+        let all_findings_flat: Vec<Finding> = context_results
+            .iter()
+            .flat_map(|cr| cr.findings.iter().cloned())
+            .collect();
+        let system_hazards = if let Some(graph) = self.code_graph.as_ref() {
+            synthesize(&all_findings_flat, &sem_entries, graph)
+        } else {
+            Vec::new()
+        };
+
         Ok(ReviewSessionResult {
             meta: self.meta.clone(),
             contexts: context_results,
             runtime_dependencies: self.runtime_dependencies.clone(),
+            system_hazards,
         })
     }
 }

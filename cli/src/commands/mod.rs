@@ -14,5 +14,8 @@
 pub mod agent_skills;
 pub mod config;
 pub mod graph;
+pub mod info;
+pub mod integrations;
+pub mod lint;
 pub mod lsp;
 pub mod review;

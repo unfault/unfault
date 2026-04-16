@@ -20,9 +20,9 @@ pub mod traversal;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
+use petgraph::Direction;
 use serde::{Deserialize, Serialize};
 
 use crate::parse::ast::FileId;
@@ -36,6 +36,30 @@ use crate::semantics::rust::model::RustFileSemantics;
 use crate::semantics::typescript::model::{ExpressFileSummary, TsFileSemantics};
 use crate::semantics::{Import, SourceSemantics};
 use crate::types::context::Language;
+
+// Re-export NodeIndex so downstream crates don't need a direct petgraph dependency
+pub use petgraph::graph::NodeIndex as GraphNodeIndex;
+
+/// The observability provider that sourced an SLO definition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SloProvider {
+    /// Google Cloud Monitoring
+    Gcp,
+    /// Datadog
+    Datadog,
+    /// Dynatrace
+    Dynatrace,
+}
+
+impl std::fmt::Display for SloProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SloProvider::Gcp => write!(f, "GCP"),
+            SloProvider::Datadog => write!(f, "Datadog"),
+            SloProvider::Dynatrace => write!(f, "Dynatrace"),
+        }
+    }
+}
 
 /// Category of external modules for better organization
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -120,6 +144,54 @@ pub enum GraphNode {
         app_var_name: String,
         middleware_type: String,
     },
+
+    /// A remote service observed in distributed traces.
+    ///
+    /// `RemoteService` nodes are created by the `TraceEnricher` from OTEL/Cloud
+    /// Trace data. They represent services that the local codebase calls at
+    /// runtime, extending the World Model beyond the static code graph to
+    /// cross-service boundaries.
+    ///
+    /// They are linked to local HTTP-calling files via `RemoteCall` edges.
+    RemoteService {
+        /// Service name as it appears in trace spans (e.g. "inventory-service",
+        /// "payments.googleapis.com").
+        name: String,
+        /// Canonical endpoint seen in traces (e.g. "https://inventory-svc:8080").
+        /// May be empty if only a service name was available.
+        endpoint: String,
+        /// Number of RPC_CLIENT spans that called this service (confidence proxy).
+        observed_call_count: u32,
+        /// P99 latency in milliseconds observed in traces, if available.
+        p99_latency_ms: Option<f64>,
+    },
+
+    /// A Service Level Objective fetched from an observability provider.
+    ///
+    /// SLO nodes are the top tier of the Hierarchical World Model — Macro-Goals.
+    /// They are linked to HTTP route handlers via `MonitoredBy` edges.
+    Slo {
+        /// Provider-assigned unique ID.
+        id: String,
+        /// Human-readable name (e.g. "Checkout API availability").
+        name: String,
+        /// The observability platform this SLO comes from.
+        provider: SloProvider,
+        /// URL path pattern this SLO monitors (e.g. "/api/checkout/*").
+        path_pattern: String,
+        /// HTTP method if specific (e.g. "POST"), None for all.
+        http_method: Option<String>,
+        /// Target availability percentage (e.g. 99.9).
+        target_percent: f64,
+        /// Current evaluated percentage if available.
+        current_percent: Option<f64>,
+        /// Error budget remaining as percentage if available.
+        error_budget_remaining: Option<f64>,
+        /// Evaluation timeframe (e.g. "30d").
+        timeframe: String,
+        /// Direct link to the SLO in the provider's dashboard.
+        dashboard_url: Option<String>,
+    },
 }
 
 impl GraphNode {
@@ -132,7 +204,9 @@ impl GraphNode {
             GraphNode::FastApiApp { file_id, .. } => Some(*file_id),
             GraphNode::FastApiRoute { file_id, .. } => Some(*file_id),
             GraphNode::FastApiMiddleware { file_id, .. } => Some(*file_id),
-            GraphNode::ExternalModule { .. } => None,
+            GraphNode::ExternalModule { .. }
+            | GraphNode::Slo { .. }
+            | GraphNode::RemoteService { .. } => None,
         }
     }
 
@@ -150,6 +224,8 @@ impl GraphNode {
             GraphNode::FastApiMiddleware {
                 middleware_type, ..
             } => middleware_type.clone(),
+            GraphNode::Slo { name, provider, .. } => format!("SLO[{}]: {}", provider, name),
+            GraphNode::RemoteService { name, .. } => format!("remote:{}", name),
         }
     }
 
@@ -209,6 +285,20 @@ pub enum GraphEdgeKind {
 
     /// A FastAPI app "has" a middleware attached.
     FastApiAppHasMiddleware,
+
+    /// An HTTP route handler is monitored by an SLO.
+    /// Direction: Function (handler) → Slo node.
+    MonitoredBy,
+
+    /// A local file makes outbound calls to a remote service observed in traces.
+    ///
+    /// Direction: File (local caller) → RemoteService node.
+    ///
+    /// This edge type extends the World Model beyond static code boundaries.
+    /// A `RemoteCall` edge has the highest propagation weight (0.90) because
+    /// cross-service failures have no local recovery path — unlike local calls
+    /// which may have circuit breakers or fallbacks.
+    RemoteCall,
 }
 
 /// The main code graph structure.
@@ -585,6 +675,161 @@ impl CodeGraph {
                 module_to_file.entry(module_path).or_insert(node_idx);
             }
         }
+    }
+
+    // ── SLO integration ──────────────────────────────────────────────────
+
+    /// Add an SLO node to the graph and create `MonitoredBy` edges from the
+    /// provided route handler node indices to the SLO.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_slo(
+        &mut self,
+        id: String,
+        name: String,
+        provider: SloProvider,
+        path_pattern: String,
+        http_method: Option<String>,
+        target_percent: f64,
+        current_percent: Option<f64>,
+        error_budget_remaining: Option<f64>,
+        timeframe: String,
+        dashboard_url: Option<String>,
+        handler_indices: Vec<NodeIndex>,
+    ) -> NodeIndex {
+        let slo_idx = self.graph.add_node(GraphNode::Slo {
+            id,
+            name,
+            provider,
+            path_pattern,
+            http_method,
+            target_percent,
+            current_percent,
+            error_budget_remaining,
+            timeframe,
+            dashboard_url,
+        });
+
+        for handler_idx in handler_indices {
+            self.graph
+                .add_edge(handler_idx, slo_idx, GraphEdgeKind::MonitoredBy);
+        }
+
+        slo_idx
+    }
+
+    /// Return all HTTP route handler nodes in the graph.
+    pub fn get_http_route_handlers(&self) -> Vec<(NodeIndex, &str, Option<&str>)> {
+        self.graph
+            .node_indices()
+            .filter_map(|idx| {
+                if let GraphNode::Function {
+                    is_handler: true,
+                    http_path: Some(ref path),
+                    ref http_method,
+                    ..
+                } = self.graph[idx]
+                {
+                    Some((idx, path.as_str(), http_method.as_deref()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Get route information for a node.
+    pub fn get_route_info(&self, idx: NodeIndex) -> Option<(Option<String>, String, String)> {
+        match &self.graph[idx] {
+            GraphNode::Function {
+                name,
+                http_method,
+                http_path: Some(path),
+                ..
+            } => Some((http_method.clone(), path.clone(), name.clone())),
+            _ => None,
+        }
+    }
+
+    /// Return all SLO nodes in the graph.
+    pub fn get_slos(&self) -> Vec<NodeIndex> {
+        self.graph
+            .node_indices()
+            .filter(|&idx| matches!(self.graph[idx], GraphNode::Slo { .. }))
+            .collect()
+    }
+
+    /// For a given handler NodeIndex, return SLO nodes it is monitored by.
+    pub fn get_slos_for_handler(&self, handler_idx: NodeIndex) -> Vec<NodeIndex> {
+        self.graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .filter(|e| matches!(e.weight(), GraphEdgeKind::MonitoredBy))
+            .map(|e| e.target())
+            .collect()
+    }
+
+    // ── Remote service integration (OTEL / Cloud Trace) ──────────────────
+
+    /// Add or retrieve a `RemoteService` node for the given service name.
+    ///
+    /// If a node with the same `name` already exists, the call count is NOT
+    /// incremented (callers should update the node separately if needed).
+    /// Returns the `NodeIndex` of the node.
+    pub fn get_or_create_remote_service(
+        &mut self,
+        name: &str,
+        endpoint: &str,
+        observed_call_count: u32,
+        p99_latency_ms: Option<f64>,
+    ) -> NodeIndex {
+        // Check if we already have a RemoteService node with this name
+        for idx in self.graph.node_indices() {
+            if let GraphNode::RemoteService { name: n, .. } = &self.graph[idx] {
+                if n == name {
+                    return idx;
+                }
+            }
+        }
+        self.graph.add_node(GraphNode::RemoteService {
+            name: name.to_string(),
+            endpoint: endpoint.to_string(),
+            observed_call_count,
+            p99_latency_ms,
+        })
+    }
+
+    /// Create a `RemoteCall` edge from a file node to a `RemoteService` node.
+    ///
+    /// If the file path is not in the graph, the edge is not created (no-op).
+    /// Returns true if the edge was added.
+    pub fn add_remote_call_edge(
+        &mut self,
+        caller_file_path: &str,
+        remote_svc_idx: NodeIndex,
+    ) -> bool {
+        let Some(&file_idx) = self.path_to_file.get(caller_file_path) else {
+            return false;
+        };
+        // Avoid duplicate edges — return true only if a NEW edge was created
+        let already_exists = self
+            .graph
+            .edges_directed(file_idx, Direction::Outgoing)
+            .any(|e| {
+                e.target() == remote_svc_idx && matches!(e.weight(), GraphEdgeKind::RemoteCall)
+            });
+        if already_exists {
+            return false;
+        }
+        self.graph
+            .add_edge(file_idx, remote_svc_idx, GraphEdgeKind::RemoteCall);
+        true
+    }
+
+    /// Return all `RemoteService` nodes in the graph.
+    pub fn get_remote_services(&self) -> Vec<NodeIndex> {
+        self.graph
+            .node_indices()
+            .filter(|&idx| matches!(self.graph[idx], GraphNode::RemoteService { .. }))
+            .collect()
     }
 }
 
@@ -1621,8 +1866,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::SourceSemantics;
     use crate::semantics::python::model::PyFileSemantics;
+    use crate::semantics::SourceSemantics;
     use crate::types::context::{Language, SourceFile};
 
     /// Helper to parse Python source and build semantics with framework analysis
@@ -1913,14 +2158,12 @@ async def fetch_user(user_id):
         assert!(stats.function_count >= 2);
 
         // Functions should be in lookup
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "process_data".to_string()))
-        );
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "fetch_user".to_string()))
-        );
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "process_data".to_string())));
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "fetch_user".to_string())));
     }
 
     #[test]
@@ -2365,14 +2608,12 @@ def bar():
         // Verify lookups are restored
         assert!(cg.file_nodes.contains_key(&file_id));
         assert!(cg.path_to_file.contains_key("test.py"));
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "my_func".to_string()))
-        );
-        assert!(
-            cg.class_nodes
-                .contains_key(&(file_id, "MyClass".to_string()))
-        );
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "my_func".to_string())));
+        assert!(cg
+            .class_nodes
+            .contains_key(&(file_id, "MyClass".to_string())));
         assert!(cg.external_modules.contains_key("requests"));
     }
 
@@ -2476,14 +2717,12 @@ def main():
         let cg = build_code_graph(&sem_entries);
 
         // Both functions should exist
-        assert!(
-            cg.function_nodes
-                .contains_key(&(helper_id, "helper_func".to_string()))
-        );
-        assert!(
-            cg.function_nodes
-                .contains_key(&(main_id, "main".to_string()))
-        );
+        assert!(cg
+            .function_nodes
+            .contains_key(&(helper_id, "helper_func".to_string())));
+        assert!(cg
+            .function_nodes
+            .contains_key(&(main_id, "main".to_string())));
 
         // Check that there's an import edge from main.py to helpers.py
         let stats = cg.stats();
@@ -2755,14 +2994,12 @@ def main():
         let cg = build_code_graph(&sem_entries);
 
         // Verify both functions exist
-        assert!(
-            cg.function_nodes
-                .contains_key(&(utils_id, "add".to_string()))
-        );
-        assert!(
-            cg.function_nodes
-                .contains_key(&(app_id, "main".to_string()))
-        );
+        assert!(cg
+            .function_nodes
+            .contains_key(&(utils_id, "add".to_string())));
+        assert!(cg
+            .function_nodes
+            .contains_key(&(app_id, "main".to_string())));
 
         // Key assertion: There should be a Calls edge from main() to add()
         let stats = cg.stats();

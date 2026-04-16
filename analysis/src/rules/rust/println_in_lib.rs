@@ -124,15 +124,33 @@ impl Rule for RustPrintlnInLibRule {
                     .map(|(_, sug)| *sug)
                     .unwrap_or("tracing macros");
 
-                let is_binary_entrypoint_file =
-                    rust.path.ends_with("main.rs") || rust.path.ends_with("/main.rs");
-                let title = if is_binary_entrypoint_file {
+                // Determine if this file is part of a binary crate (not a library).
+                //
+                // Heuristics (any match = binary context):
+                //  - File is main.rs (the binary entry point)
+                //  - File is under src/bin/ (explicit binary target directory)
+                //  - File is under a `commands/`, `cli/`, or `bin/` directory
+                //    (strong convention for application-only code)
+                //
+                // In binary context, println!/eprintln! are still suboptimal but
+                // the framing changes from "library code" to "application code".
+                let path = &rust.path;
+                let is_binary_context = path.ends_with("main.rs")
+                    || path.ends_with("/main.rs")
+                    || path.contains("/src/bin/")
+                    || path.contains("\\src\\bin\\")
+                    || path.contains("/commands/")
+                    || path.contains("\\commands\\")
+                    || path.contains("/cli/")
+                    || path.contains("\\cli\\");
+
+                let title = if is_binary_context {
                     format!("{}! macro in application code", macro_inv.name)
                 } else {
                     format!("{}! macro in library code", macro_inv.name)
                 };
 
-                let description = if is_binary_entrypoint_file {
+                let description = if is_binary_context {
                     format!(
                         "`{}!` at line {} in function '{}' writes directly to stdout/stderr.\n\n\
                          **Why this hurts operability in services/CLIs:**\n\

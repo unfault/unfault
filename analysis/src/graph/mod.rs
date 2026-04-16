@@ -20,17 +20,41 @@ pub mod traversal;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
+use petgraph::Direction;
 use serde::{Deserialize, Serialize};
 
+// Re-export NodeIndex so downstream crates don't need a direct petgraph dependency
+pub use petgraph::graph::NodeIndex as GraphNodeIndex;
+
 use crate::parse::ast::FileId;
-use crate::semantics::SourceSemantics;
 use crate::semantics::common::CommonSemantics;
 use crate::semantics::python::fastapi::FastApiFileSummary;
 use crate::semantics::python::model::PyFileSemantics;
+use crate::semantics::SourceSemantics;
 use crate::types::context::Language;
+
+/// The observability provider that sourced an SLO definition.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum SloProvider {
+    /// Google Cloud Monitoring
+    Gcp,
+    /// Datadog
+    Datadog,
+    /// Dynatrace
+    Dynatrace,
+}
+
+impl std::fmt::Display for SloProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SloProvider::Gcp => write!(f, "GCP"),
+            SloProvider::Datadog => write!(f, "Datadog"),
+            SloProvider::Dynatrace => write!(f, "Dynatrace"),
+        }
+    }
+}
 
 /// Category of external modules for better organization
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -115,6 +139,42 @@ pub enum GraphNode {
         app_var_name: String,
         middleware_type: String,
     },
+
+    /// A Service Level Objective fetched from an observability provider.
+    ///
+    /// SLO nodes are the top tier of the Hierarchical World Model: they
+    /// represent the Macro-Goals that the system's code must satisfy.
+    /// They are linked to HTTP route handlers via `MonitoredBy` edges.
+    Slo {
+        /// Provider-assigned unique ID (e.g. GCP resource name).
+        id: String,
+        /// Human-readable name (e.g. "Checkout API availability").
+        name: String,
+        /// The observability platform this SLO comes from.
+        provider: SloProvider,
+        /// URL path pattern this SLO monitors (e.g. "/api/checkout/*").
+        path_pattern: String,
+        /// HTTP method if specific (e.g. "POST"), empty string for all.
+        http_method: Option<String>,
+        /// Target availability percentage (e.g. 99.9).
+        target_percent: f64,
+        /// Current evaluated percentage if available.
+        current_percent: Option<f64>,
+        /// Error budget remaining as percentage if available.
+        error_budget_remaining: Option<f64>,
+        /// Evaluation timeframe (e.g. "30d").
+        timeframe: String,
+        /// Direct link to the SLO in the provider's dashboard.
+        dashboard_url: Option<String>,
+    },
+
+    /// A remote service observed in distributed traces (OTEL / Cloud Trace).
+    RemoteService {
+        name: String,
+        endpoint: String,
+        observed_call_count: u32,
+        p99_latency_ms: Option<f64>,
+    },
 }
 
 impl GraphNode {
@@ -127,7 +187,9 @@ impl GraphNode {
             GraphNode::FastApiApp { file_id, .. } => Some(*file_id),
             GraphNode::FastApiRoute { file_id, .. } => Some(*file_id),
             GraphNode::FastApiMiddleware { file_id, .. } => Some(*file_id),
-            GraphNode::ExternalModule { .. } => None,
+            GraphNode::ExternalModule { .. }
+            | GraphNode::Slo { .. }
+            | GraphNode::RemoteService { .. } => None,
         }
     }
 
@@ -145,6 +207,10 @@ impl GraphNode {
             GraphNode::FastApiMiddleware {
                 middleware_type, ..
             } => middleware_type.clone(),
+            GraphNode::Slo { name, provider, .. } => {
+                format!("SLO[{}]: {}", provider, name)
+            }
+            GraphNode::RemoteService { name, .. } => format!("remote:{}", name),
         }
     }
 
@@ -186,6 +252,14 @@ pub enum GraphEdgeKind {
 
     /// A FastAPI app "has" a middleware attached.
     FastApiAppHasMiddleware,
+
+    /// An HTTP route handler is monitored by an SLO.
+    /// Direction: Function (handler) → Slo node.
+    MonitoredBy,
+
+    /// A local file makes outbound calls to a remote service observed in traces.
+    /// Direction: File → RemoteService node.
+    RemoteCall,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -445,6 +519,105 @@ impl CodeGraph {
             total_nodes: self.graph.node_count(),
             total_edges: self.graph.edge_count(),
         }
+    }
+
+    // ── SLO integration ────────────────────────────────────────────────────
+
+    /// Add an SLO node to the graph and create `MonitoredBy` edges from the
+    /// provided route handler node indices to the SLO.
+    ///
+    /// Returns the `NodeIndex` of the newly created SLO node.
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_slo(
+        &mut self,
+        id: String,
+        name: String,
+        provider: SloProvider,
+        path_pattern: String,
+        http_method: Option<String>,
+        target_percent: f64,
+        current_percent: Option<f64>,
+        error_budget_remaining: Option<f64>,
+        timeframe: String,
+        dashboard_url: Option<String>,
+        handler_indices: Vec<NodeIndex>,
+    ) -> NodeIndex {
+        let slo_idx = self.graph.add_node(GraphNode::Slo {
+            id,
+            name,
+            provider,
+            path_pattern,
+            http_method,
+            target_percent,
+            current_percent,
+            error_budget_remaining,
+            timeframe,
+            dashboard_url,
+        });
+
+        // Create MonitoredBy edges: handler → SLO
+        for handler_idx in handler_indices {
+            self.graph
+                .add_edge(handler_idx, slo_idx, GraphEdgeKind::MonitoredBy);
+        }
+
+        slo_idx
+    }
+
+    /// Return all HTTP route handler nodes in the graph.
+    ///
+    /// A "route handler" is a `Function` node where `is_handler == true`
+    /// and `http_path` is set. Returns `(NodeIndex, http_path, http_method)`.
+    pub fn get_http_route_handlers(&self) -> Vec<(NodeIndex, &str, Option<&str>)> {
+        self.graph
+            .node_indices()
+            .filter_map(|idx| {
+                if let GraphNode::Function {
+                    is_handler: true,
+                    http_path: Some(ref path),
+                    ref http_method,
+                    ..
+                } = self.graph[idx]
+                {
+                    Some((idx, path.as_str(), http_method.as_deref()))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    /// Get route information (http_method, http_path, function_name) for a node.
+    ///
+    /// Returns `None` if the node is not a Function handler.
+    pub fn get_route_info(&self, idx: NodeIndex) -> Option<(Option<String>, String, String)> {
+        match &self.graph[idx] {
+            GraphNode::Function {
+                name,
+                http_method,
+                http_path: Some(path),
+                ..
+            } => Some((http_method.clone(), path.clone(), name.clone())),
+            _ => None,
+        }
+    }
+
+    /// Return all SLO nodes in the graph.
+    pub fn get_slos(&self) -> Vec<NodeIndex> {
+        self.graph
+            .node_indices()
+            .filter(|&idx| matches!(self.graph[idx], GraphNode::Slo { .. }))
+            .collect()
+    }
+
+    /// For a given handler NodeIndex, return SLO nodes it is monitored by.
+    pub fn get_slos_for_handler(&self, handler_idx: NodeIndex) -> Vec<NodeIndex> {
+        use petgraph::visit::EdgeRef as _;
+        self.graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .filter(|e| matches!(e.weight(), GraphEdgeKind::MonitoredBy))
+            .map(|e| e.target())
+            .collect()
     }
 
     /// Rebuild all lookup indexes from the graph.
@@ -845,8 +1018,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::SourceSemantics;
     use crate::semantics::python::model::PyFileSemantics;
+    use crate::semantics::SourceSemantics;
     use crate::types::context::{Language, SourceFile};
 
     /// Helper to parse Python source and build semantics with framework analysis
@@ -1137,14 +1310,12 @@ async def fetch_user(user_id):
         assert!(stats.function_count >= 2);
 
         // Functions should be in lookup
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "process_data".to_string()))
-        );
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "fetch_user".to_string()))
-        );
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "process_data".to_string())));
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "fetch_user".to_string())));
     }
 
     #[test]

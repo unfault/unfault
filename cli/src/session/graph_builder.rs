@@ -9,14 +9,14 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
-use unfault_core::graph::{CodeGraph, GraphEdgeKind, GraphNode, build_code_graph};
+use unfault_core::graph::{build_code_graph, CodeGraph, GraphEdgeKind, GraphNode};
 use unfault_core::parse::ast::FileId;
 use unfault_core::parse::{go, python, rust as rust_parse, typescript};
-use unfault_core::semantics::SourceSemantics;
 use unfault_core::semantics::go::model::GoFileSemantics;
 use unfault_core::semantics::python::model::PyFileSemantics;
 use unfault_core::semantics::rust::{build_rust_semantics, model::RustFileSemantics};
 use unfault_core::semantics::typescript::model::TsFileSemantics;
+use unfault_core::semantics::SourceSemantics;
 use unfault_core::types::context::{Language, SourceFile};
 
 /// A serializable representation of the code graph for sending to the API.
@@ -437,7 +437,9 @@ fn get_file_path(
         | GraphNode::FastApiApp { file_id, .. }
         | GraphNode::FastApiRoute { file_id, .. }
         | GraphNode::FastApiMiddleware { file_id, .. } => file_id_to_path.get(file_id).cloned(),
-        GraphNode::ExternalModule { .. } => None,
+        GraphNode::ExternalModule { .. }
+        | GraphNode::Slo { .. }
+        | GraphNode::RemoteService { .. } => None,
     }
 }
 

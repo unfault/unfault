@@ -100,6 +100,42 @@ enum Commands {
         /// Show what fixes would be applied without actually applying them
         #[arg(long)]
         dry_run: bool,
+        /// Show all findings in full (same as unfault lint)
+        #[arg(long)]
+        all: bool,
+        /// Discard the enrichment cache and re-fetch SLOs and traces from providers
+        #[arg(long)]
+        refresh_cache: bool,
+        /// Skip SLO and trace fetching entirely — useful in CI or pre-commit hooks
+        #[arg(long)]
+        offline: bool,
+    },
+    /// Show all findings grouped by severity and rule — the detailed linter view
+    Lint {
+        /// Output format (text or json)
+        #[arg(long, value_name = "OUTPUT", default_value = "basic")]
+        output: OutputFormat,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+        /// Override the detected profile
+        #[arg(long, value_name = "PROFILE")]
+        profile: Option<String>,
+        /// Dimensions to analyze
+        #[arg(long, short = 'd', value_name = "DIMENSION")]
+        dimension: Vec<String>,
+        /// Auto-apply all suggested fixes
+        #[arg(long)]
+        fix: bool,
+        /// Show what fixes would be applied without actually applying them
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Show SRE glossary entry for a failure mode (e.g. SLO-001)
+    Info {
+        /// Glossary ID to look up (e.g. SLO-001, SLO-002)
+        #[arg(value_name = "ID")]
+        id: String,
     },
 }
 
@@ -278,12 +314,26 @@ enum ConfigCommands {
         #[command(subcommand)]
         command: LlmCommands,
     },
+    /// Inspect and verify observability integrations (SLOs, traces)
+    Integrations {
+        #[command(subcommand)]
+        command: IntegrationsCommands,
+    },
     /// Generate agent skill files for Claude Code or OpenCode
     Agent {
         /// Agent tool to configure skills for
         #[command(subcommand)]
         tool: AgentTool,
     },
+}
+
+/// Integrations subcommands
+#[derive(Subcommand)]
+enum IntegrationsCommands {
+    /// Show detected integrations and their credential status (no network calls)
+    Show,
+    /// Verify integrations by making live API calls to confirm auth works
+    Verify,
 }
 
 /// Agent tool targets for skill generation
@@ -372,8 +422,38 @@ async fn run_command(command: Commands) -> i32 {
     use unfault::exit_codes::*;
 
     match command {
-        Commands::Config { command } => run_config_command(command),
+        Commands::Config { command } => run_config_command(command).await,
         Commands::Graph { command } => run_graph_command(command).await,
+        Commands::Info { id } => commands::info::execute(&id),
+        Commands::Lint {
+            output,
+            verbose,
+            profile,
+            dimension,
+            fix,
+            dry_run,
+        } => {
+            init_logger(verbose);
+            let output_format = match output {
+                OutputFormat::Json => "json".to_string(),
+                _ => "text".to_string(),
+            };
+            let args = commands::lint::LintArgs {
+                output_format,
+                verbose,
+                profile,
+                dimensions: if dimension.is_empty() { None } else { Some(dimension) },
+                fix,
+                dry_run,
+            };
+            match commands::lint::execute(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Lint error: {}", e);
+                    EXIT_CONFIG_ERROR
+                }
+            }
+        }
         Commands::Lsp { verbose, stdio: _ } => {
             init_logger(verbose);
             // stdio flag is just for compatibility with language clients, we always use stdio
@@ -393,6 +473,9 @@ async fn run_command(command: Commands) -> i32 {
             dimension,
             fix,
             dry_run,
+            all,
+            refresh_cache,
+            offline,
         } => {
             init_logger(verbose);
             // Convert OutputFormat to string for backward compatibility
@@ -425,6 +508,9 @@ async fn run_command(command: Commands) -> i32 {
                 },
                 fix,
                 dry_run,
+                all,
+                refresh_cache,
+                offline,
             };
             match commands::review::execute(args).await {
                 Ok(exit_code) => exit_code,
@@ -437,7 +523,7 @@ async fn run_command(command: Commands) -> i32 {
     }
 }
 
-fn run_config_command(command: ConfigCommands) -> i32 {
+async fn run_config_command(command: ConfigCommands) -> i32 {
     use unfault::exit_codes::*;
 
     match command {
@@ -452,6 +538,7 @@ fn run_config_command(command: ConfigCommands) -> i32 {
             }
         }
         ConfigCommands::Llm { command } => run_llm_command(command),
+        ConfigCommands::Integrations { command } => run_integrations_command(command).await,
         ConfigCommands::Agent { tool } => {
             let (agent_tool, global, dry_run) = match tool {
                 AgentTool::Claude { global, dry_run } => {
@@ -509,6 +596,31 @@ fn run_llm_command(command: LlmCommands) -> i32 {
         Err(e) => {
             eprintln!("Config LLM error: {}", e);
             EXIT_CONFIG_ERROR
+        }
+    }
+}
+
+async fn run_integrations_command(command: IntegrationsCommands) -> i32 {
+    use unfault::exit_codes::*;
+
+    match command {
+        IntegrationsCommands::Show => {
+            match commands::integrations::execute_show() {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Integrations error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        IntegrationsCommands::Verify => {
+            match commands::integrations::execute_verify().await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Integrations verify error: {}", e);
+                    EXIT_ERROR
+                }
+            }
         }
     }
 }

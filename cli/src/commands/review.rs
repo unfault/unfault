@@ -33,10 +33,11 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use crate::exit_codes::*;
-use crate::output::IrFinding;
+use crate::fmt::{COL_WIDTH, truncate, word_wrap};
+use crate::output::{IrFinding, IrSystemHazard};
 use crate::session::{
     PatchApplier, ScanProgress, WorkspaceScanner, build_ir_cached, compute_workspace_id,
-    get_git_remote,
+    get_git_changed_files, get_git_remote,
 };
 
 /// Arguments for the review command
@@ -55,6 +56,12 @@ pub struct ReviewArgs {
     pub fix: bool,
     /// Show what fixes would be applied without actually applying them
     pub dry_run: bool,
+    /// Show all findings in full (delegates to lint-style output)
+    pub all: bool,
+    /// Discard the enrichment cache and re-fetch SLOs and traces from providers
+    pub refresh_cache: bool,
+    /// Skip SLO and trace fetching entirely (useful in CI or pre-commit hooks)
+    pub offline: bool,
 }
 
 /// Execute the review command
@@ -259,6 +266,15 @@ pub async fn execute(args: ReviewArgs) -> Result<i32> {
     .await
 }
 
+/// Raw result from the analysis pipeline, before any rendering.
+pub struct AnalysisResult {
+    pub response: crate::output::IrAnalyzeResponse,
+    pub context: ReviewOutputContext,
+    pub changed_files: Vec<String>,
+    pub applied_patches: usize,
+    pub finding_count: usize,
+}
+
 /// Execute review with client-side parsing (default mode).
 ///
 /// 1. Parse source files locally using tree-sitter
@@ -297,7 +313,7 @@ async fn execute_client_parse(
     };
     let parse_ms = parse_start.elapsed().as_millis() as u64;
 
-    let ir = build_result.ir;
+    let mut ir = build_result.ir;
     let cache_stats = build_result.cache_stats;
     let file_count = ir.file_count();
 
@@ -318,6 +334,162 @@ async fn execute_client_parse(
             cache_stats.misses,
             cache_stats.hit_rate()
         );
+    }
+
+    // Step 1b: Opportunistically enrich graph with SLOs + distributed traces.
+    // Skipped entirely when --offline is passed (CI, pre-commit, air-gapped).
+    // Both passes are best-effort — missing credentials or API failures don't
+    // abort the review.
+    //
+    // Results are cached at .unfault/cache/enrichment/ with a 5-minute TTL.
+    // On a cache hit the fetch round-trips to the cloud are skipped entirely;
+    // on a miss data is fetched, applied, and the cache is updated.
+    let fetch_ms: Option<u64>;
+    let mut fetch_from_cache = false;
+    if args.offline {
+        fetch_ms = None;
+    } else {
+        let fetch_start = Instant::now();
+        let mut any_fetch_attempted = false;
+
+        // Detect GCP credentials once — used for both SLO and trace providers.
+        let gcp_creds = crate::integration::gcp::GcpCredentials::from_env();
+        let project_id = gcp_creds
+            .as_ref()
+            .map(|c| c.project_id.clone())
+            .unwrap_or_default();
+
+        // Open the enrichment cache (workspace-local, 5-min TTL).
+        let cache = crate::enrichment_cache::EnrichmentCache::open(
+            current_dir,
+            crate::enrichment_cache::DEFAULT_TTL_SECS,
+        );
+
+        // Bust the cache when --refresh-cache is passed, then load as normal.
+        if args.refresh_cache && !project_id.is_empty() {
+            if let Ok(ref c) = cache {
+                c.invalidate(&project_id, workspace_label);
+            }
+        }
+
+        // Attempt a cache load when we have a project ID.
+        let cached = if !project_id.is_empty() {
+            cache.as_ref().ok().and_then(|c| c.load(&project_id, workspace_label))
+        } else {
+            None
+        };
+
+        if let Some(snapshot) = cached {
+            // ── Cache hit — apply without network calls ───────────────────
+            fetch_from_cache = true;
+            any_fetch_attempted = true;
+
+            if args.verbose {
+                eprintln!(
+                    "\n{} Enrichment cache hit ({}s old, TTL {}s)",
+                    "DEBUG".yellow(),
+                    snapshot.age_secs(),
+                    snapshot.ttl_secs,
+                );
+            }
+
+            apply_enrichment(
+                &mut ir.graph,
+                &snapshot.slos,
+                snapshot.trace_patterns
+                    .into_iter()
+                    .map(crate::trace::RemoteCallPattern::from)
+                    .collect(),
+                workspace_label,
+                args.verbose,
+            );
+        } else {
+            // ── Cache miss — fetch from providers ─────────────────────────
+            let mut fetched_slos: Vec<crate::slo::SloDefinition> = Vec::new();
+            let mut fetched_patterns: Vec<crate::trace::RemoteCallPattern> = Vec::new();
+
+            // ── SLO enrichment ────────────────────────────────────────────
+            let enricher = crate::slo::SloEnricher::new(args.verbose);
+            if enricher.any_provider_available() {
+                any_fetch_attempted = true;
+                pb.set_message("Fetching SLOs from observability provider...");
+                if args.verbose {
+                    let providers = enricher.available_providers();
+                    eprintln!("\n{} Fetching SLOs from: {}", "DEBUG".yellow(), providers.join(", "));
+                }
+                match enricher.fetch_all().await {
+                    Ok(fetch_result) => {
+                        if fetch_result.credentials_expired {
+                            eprintln!(
+                                "{} SLO credentials appear expired — run `unfault config integrations verify`",
+                                "warn:".yellow().bold()
+                            );
+                        }
+                        fetched_slos = fetch_result.slos;
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "{} Could not fetch SLOs: {} — run `unfault config integrations verify`",
+                            "warn:".yellow().bold(),
+                            e
+                        );
+                    }
+                }
+            }
+
+            // ── Trace enrichment (GCP Cloud Trace) ───────────────────────
+            if let Some(trace_provider) = crate::trace::GcpTraceProvider::from_env() {
+                any_fetch_attempted = true;
+                pb.set_message("Fetching distributed traces from Cloud Trace...");
+                if args.verbose {
+                    eprintln!("\n{} Fetching recent traces from GCP Cloud Trace", "DEBUG".yellow());
+                }
+
+                let http_client = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(20))
+                    .build()
+                    .unwrap_or_default();
+
+                match trace_provider.fetch_remote_calls(&http_client, 60, 200).await {
+                    Ok(patterns) => { fetched_patterns = patterns; }
+                    Err(e) => {
+                        eprintln!(
+                            "{} Could not fetch Cloud Trace data: {} — run `unfault config integrations verify`",
+                            "warn:".yellow().bold(),
+                            e
+                        );
+                    }
+                }
+            }
+
+            // Apply fetched data to the graph
+            if !fetched_slos.is_empty() || !fetched_patterns.is_empty() {
+                apply_enrichment(
+                    &mut ir.graph,
+                    &fetched_slos,
+                    fetched_patterns.clone(),
+                    workspace_label,
+                    args.verbose,
+                );
+            }
+
+            // Persist to cache for next run (best-effort, never fatal)
+            if any_fetch_attempted && !project_id.is_empty() {
+                if let Ok(c) = cache {
+                    let cached_patterns: Vec<_> = fetched_patterns
+                        .iter()
+                        .map(crate::enrichment_cache::CachedRemoteCallPattern::from)
+                        .collect();
+                    let _ = c.save(&project_id, workspace_label, fetched_slos, cached_patterns);
+                }
+            }
+        }
+
+        fetch_ms = if any_fetch_attempted {
+            Some(fetch_start.elapsed().as_millis() as u64)
+        } else {
+            None
+        };
     }
 
     // Step 2: Serialize IR to JSON
@@ -382,7 +554,7 @@ async fn execute_client_parse(
     }
 
     let analysis_start = Instant::now();
-    let response = match crate::analysis::analyze_ir_locally(ir_json, &profiles).await {
+    let response = match crate::analysis::analyze_ir_locally(ir_json, &profiles, Some(current_dir)).await {
         Ok(response) => response,
         Err(e) => {
             pb.finish_and_clear();
@@ -394,19 +566,13 @@ async fn execute_client_parse(
 
     pb.finish_and_clear();
 
-    // Calculate elapsed time
-    let elapsed = session_start.elapsed();
-    let elapsed_ms = elapsed.as_millis() as u64;
+    let elapsed_ms = session_start.elapsed().as_millis() as u64;
     let engine_ms = response.elapsed_ms as u64;
-
-    // Get cache hit rate for display context
-    let cache_hit_rate = cache_stats.hit_rate();
     let cache_rate_opt = if cache_stats.hits > 0 || cache_stats.misses > 0 {
-        Some(cache_hit_rate)
+        Some(cache_stats.hit_rate())
     } else {
         None
     };
-
     let finding_count = response.findings.len();
 
     if args.verbose {
@@ -418,15 +584,15 @@ async fn execute_client_parse(
         );
     }
 
-    // Handle fix/dry-run mode
     let applied_patches = if args.fix || args.dry_run {
         apply_ir_patches(args, current_dir, &response.findings)?
     } else {
         0
     };
 
-    // Display results
-    let display_context = ReviewOutputContext {
+    let changed_files = get_git_changed_files(current_dir);
+
+    let context = ReviewOutputContext {
         workspace_label: workspace_label.to_string(),
         languages: workspace_info.language_strings(),
         frameworks: workspace_info.framework_strings(),
@@ -435,14 +601,24 @@ async fn execute_client_parse(
         elapsed_ms,
         parse_ms,
         engine_ms,
+        fetch_ms,
+        fetch_from_cache,
         cache_hit_rate: cache_rate_opt,
         trace_id: trace_id.chars().take(8).collect(),
         profile: args.profile.clone(),
     };
 
-    display_ir_findings(args, &response.findings, applied_patches, &display_context);
+    let result = AnalysisResult {
+        response,
+        context,
+        changed_files,
+        applied_patches,
+        finding_count,
+    };
 
-    if finding_count > 0 {
+    display_ir_findings(args, &result);
+
+    if result.finding_count > 0 {
         Ok(EXIT_FINDINGS_FOUND)
     } else {
         Ok(EXIT_SUCCESS)
@@ -450,7 +626,7 @@ async fn execute_client_parse(
 }
 
 /// Apply patches from IR findings to local files.
-fn apply_ir_patches(
+pub fn apply_ir_patches(
     args: &ReviewArgs,
     workspace_path: &std::path::Path,
     findings: &[IrFinding],
@@ -505,18 +681,23 @@ fn apply_ir_patches(
 }
 
 /// Display context for IR analysis output.
-struct ReviewOutputContext {
-    workspace_label: String,
-    languages: Vec<String>,
-    frameworks: Vec<String>,
-    dimensions: Vec<String>,
-    file_count: usize,
-    elapsed_ms: u64,
-    parse_ms: u64,
-    engine_ms: u64,
-    cache_hit_rate: Option<f64>,
-    trace_id: String,
-    profile: Option<String>,
+pub struct ReviewOutputContext {
+    pub workspace_label: String,
+    pub languages: Vec<String>,
+    pub frameworks: Vec<String>,
+    pub dimensions: Vec<String>,
+    pub file_count: usize,
+    pub elapsed_ms: u64,
+    pub parse_ms: u64,
+    pub engine_ms: u64,
+    /// Time spent on enrichment (SLO + trace). None if no providers available.
+    /// Shown separately so users can distinguish tool latency from cloud API latency.
+    pub fetch_ms: Option<u64>,
+    /// Whether the enrichment data came from the local cache rather than live fetches.
+    pub fetch_from_cache: bool,
+    pub cache_hit_rate: Option<f64>,
+    pub trace_id: String,
+    pub profile: Option<String>,
 }
 
 /// Severity breakdown for the summary line.
@@ -643,59 +824,63 @@ fn wrap_text(s: &str, first_line_max: usize, continuation_indent: &str) -> Vec<S
     lines
 }
 
-fn render_session_overview(context: &ReviewOutputContext) {
-    // Line 1: Header with workspace name and total time
-    println!(
-        "{} Analyzing {}... {}",
-        "→".cyan().bold(),
-        context.workspace_label.bright_white(),
-        format!("{}ms", context.elapsed_ms).dimmed()
-    );
+/// Quiet single-line footer printed after findings.
+///
+/// All context information in one compact dimmed line — workspace, languages,
+/// file count, timing, trace ID. Not a header competing for attention,
+/// just provenance for anyone who needs to know what ran.
+pub fn render_session_footer(context: &ReviewOutputContext) {
+    let file_word = if context.file_count == 1 { "file" } else { "files" };
+    let sep = "  ·  ".dimmed().to_string();
 
-    // Line 2: Languages
-    let langs = format_list(&context.languages, ", ");
-    println!("  {}: {}", "Languages".dimmed(), langs.cyan());
+    // ── Left pill: workspace name ─────────────────────────────────────────
+    let workspace = format!(" {} ", context.workspace_label)
+        .bright_white()
+        .bold()
+        .on_bright_black();
 
-    // Line 3: Frameworks
-    let frameworks = format_list(&context.frameworks, ", ");
-    println!("  {}: {}", "Frameworks".dimmed(), frameworks.cyan());
-
-    // Line 4: Dimensions
-    let dims = format_list(&context.dimensions, " · ");
-    println!("  {}: {}", "Dimensions".dimmed(), dims.cyan());
-
-    // Line 5: Profile (if overridden)
-    if let Some(profile) = &context.profile {
-        println!("  {}: {}", "Profile".dimmed(), profile.cyan());
+    // ── Centre: stack ─────────────────────────────────────────────────────
+    let mut stack: Vec<String> = Vec::new();
+    if !context.languages.is_empty() {
+        stack.push(context.languages.join(", ").cyan().to_string());
     }
-
-    // Line 6: Files reviewed with timing
-    let file_word = if context.file_count == 1 {
-        "file"
-    } else {
-        "files"
-    };
-    println!(
-        "  {}: {} {} · parse {}ms · engine {}ms",
-        "Reviewed".dimmed(),
-        context.file_count.to_string().bright_green(),
-        file_word,
-        context.parse_ms,
-        context.engine_ms
+    if !context.frameworks.is_empty() {
+        stack.push(context.frameworks.join(", ").cyan().dimmed().to_string());
+    }
+    stack.push(
+        format!("{} {}", context.file_count, file_word)
+            .white()
+            .to_string(),
     );
+    let centre = stack.join(&sep);
 
-    // Line 7: Cache and trace info
-    let cache_str = match context.cache_hit_rate {
-        Some(rate) => format!("{:.0}%", rate),
-        None => "—".to_string(),
-    };
-    println!(
-        "  {}: {}  {}: {}",
-        "Cache".dimmed(),
-        cache_str.dimmed(),
-        "Trace".dimmed(),
-        context.trace_id.dimmed()
-    );
+    // ── Right bracket: timing breakdown ──────────────────────────────────
+    // Show parse + engine + fetch (when present) separately so users can
+    // see where time was actually spent. Total is omitted — it's the sum.
+    let mut timing_parts: Vec<String> = Vec::new();
+    timing_parts.push(format!("parse {}ms", context.parse_ms).dimmed().to_string());
+    timing_parts.push(format!("engine {}ms", context.engine_ms).dimmed().to_string());
+    if let Some(fetch) = context.fetch_ms {
+        if context.fetch_from_cache {
+            timing_parts.push("cached".green().dimmed().to_string());
+        } else {
+            timing_parts.push(
+                format!("fetch {}ms", fetch)
+                    .yellow()
+                    .dimmed()
+                    .to_string()
+            );
+        }
+    }
+    let timing = timing_parts.join("  ".dimmed().to_string().as_str());
+    let right = format!("[ {} ]", timing);
+
+    println!("{}  {}   {}", workspace, centre, right);
+}
+
+// Keep old name as alias so any external callers aren't broken
+pub fn render_session_overview(context: &ReviewOutputContext) {
+    render_session_footer(context);
 }
 
 fn format_list(values: &[String], separator: &str) -> String {
@@ -706,163 +891,385 @@ fn format_list(values: &[String], separator: &str) -> String {
     }
 }
 
-fn display_ir_findings(
-    args: &ReviewArgs,
-    findings: &[IrFinding],
-    applied_patches: usize,
-    context: &ReviewOutputContext,
-) {
-    let total_findings = findings.len();
+fn display_ir_findings(args: &ReviewArgs, result: &AnalysisResult) {
+    let findings = &result.response.findings;
+    let hazards = &result.response.system_hazards;
+    let changed_files = &result.changed_files;
+    let context = &result.context;
 
     if args.output_format == "json" {
         let output = serde_json::json!({
-            "findings_count": total_findings,
+            "findings_count": result.finding_count,
             "findings": findings,
-            "patches_applied": applied_patches,
+            "system_hazards": hazards,
+            "patches_applied": result.applied_patches,
         });
         println!("{}", serde_json::to_string_pretty(&output).unwrap());
         return;
     }
 
-    // Text output
-    println!();
-
-    render_session_overview(context);
-
-    if total_findings == 0 {
-        println!(
-            "{} No issues found! Your code looks good.",
-            "✓".bright_green().bold()
-        );
+    if result.finding_count == 0 && hazards.is_empty() {
+        println!("{} No issues found! Your code looks good.", "✓".bright_green().bold());
+        render_session_footer(context);
         return;
     }
 
-    // Blank line before the summary (matches landing page)
     println!();
 
-    // Summary line with issue count and fix hint on the right
-    let fix_hint = if !args.fix && !args.dry_run {
-        format!("{}", "run with --fix to apply patches".dimmed())
-    } else {
-        String::new()
+    // SRE Hazards — always shown first, uncapped when --all is set.
+    if !hazards.is_empty() {
+        render_sre_hazards_section(hazards, args.all);
+    }
+
+    // Diff-aware: show changed-file top-N when git diff is available.
+    let file_matches = |fp: &str| -> bool {
+        changed_files.iter().any(|c| {
+            fp == c.as_str()
+                || fp.ends_with(&format!("/{}", c))
+                || c.ends_with(&format!("/{}", fp))
+        })
     };
 
-    // Find terminal width for right-alignment (default to 80)
-    let found_text = format!(
-        "{} Found {} issue{}",
-        "⚠",
-        total_findings,
-        if total_findings == 1 { "" } else { "s" }
-    );
+    if !changed_files.is_empty() {
+        display_changed_files_section(findings, changed_files, &file_matches);
 
-    if fix_hint.is_empty() {
-        println!(
-            "{} Found {} issue{}",
-            "⚠".yellow().bold(),
-            total_findings.to_string().bright_yellow(),
-            if total_findings == 1 { "" } else { "s" }
-        );
-    } else {
-        // Print summary with fix hint on the right
-        let padding = 50_usize.saturating_sub(found_text.len());
-        println!(
-            "{} Found {} issue{}{:>width$}{}",
-            "⚠".yellow().bold(),
-            total_findings.to_string().bright_yellow(),
-            if total_findings == 1 { "" } else { "s" },
-            "",
-            fix_hint,
-            width = padding
-        );
+        let unchanged: Vec<&IrFinding> = findings
+            .iter()
+            .filter(|f| !file_matches(&f.file_path))
+            .collect();
+
+        if !unchanged.is_empty() {
+            println!("── {} ──", "Existing issues (unchanged files)".dimmed());
+            println!();
+            let summary = compute_severity_summary(
+                &unchanged.iter().map(|f| (*f).clone()).collect::<Vec<_>>(),
+            );
+            println!("  {}", format_severity_breakdown(&summary));
+            println!();
+            println!("  {}", "Run unfault lint for per-line details.".dimmed());
+        }
     }
 
-    // Severity breakdown line (like landing page: "4 high · 10 medium · 5 low")
-    let summary = compute_severity_summary(findings);
-    println!("{}", format_severity_breakdown(&summary));
+    render_session_footer(context);
+    // No diff and not --all: hazards only, no findings noise.
+}
 
-    if applied_patches > 0 {
-        let verb = if args.dry_run {
-            "Would apply"
-        } else {
-            "Applied"
-        };
-        println!(
-            "  {} {} {} patch{}",
-            if args.dry_run {
-                "→".cyan().bold()
-            } else {
-                "✓".green().bold()
-            },
-            verb,
-            applied_patches.to_string().bright_green(),
-            if applied_patches == 1 { "" } else { "es" }
-        );
-    }
 
+
+/// Render SRE hazards — always surfaced at the top of the output.
+///
+/// When `all` is true, every hazard is shown with no cap.
+fn render_sre_hazards_section(hazards: &[IrSystemHazard], all: bool) {
+    println!("{}", "Worth looking out for".bold().bright_white());
     println!();
 
-    if args.output_mode == "full" {
-        for finding in findings {
-            display_ir_finding(finding);
-        }
-    } else {
-        // Basic mode: grouped display (matches landing page style)
-        display_ir_findings_grouped(findings);
+    let cap = if all { hazards.len() } else { 3 };
+    for hazard in hazards.iter().take(cap) {
+        render_system_hazard(hazard);
+    }
+    if !all && hazards.len() > cap {
+        println!(
+            "  {} {} more hazard{} — run {}",
+            "…".dimmed(),
+            hazards.len() - cap,
+            if hazards.len() - cap == 1 { "" } else { "s" },
+            "unfault review --all".cyan()
+        );
+        println!();
     }
 }
 
-/// Display a single IR finding (full mode).
-fn display_ir_finding(finding: &IrFinding) {
-    let severity_color = match finding.severity.as_str() {
-        "critical" | "Critical" => "red",
-        "high" | "High" => "red",
-        "medium" | "Medium" => "yellow",
-        "low" | "Low" => "blue",
-        _ => "white",
-    };
+/// Render the changed-files section: top N findings by severity + overflow count.
+fn display_changed_files_section(
+    findings: &[IrFinding],
+    changed_files: &[String],
+    file_matches: &dyn Fn(&str) -> bool,
+) {
+    println!("── {} ({} changed) ──", "Changed files".bold(), changed_files.len());
+    println!();
 
-    let severity_icon = match finding.severity.to_lowercase().as_str() {
-        "critical" => "🔴",
-        "high" => "🟠",
-        "medium" => "🟡",
-        "low" => "🔵",
-        _ => "⚪",
-    };
+    let changed_findings: Vec<&IrFinding> = findings
+        .iter()
+        .filter(|f| file_matches(&f.file_path))
+        .collect();
 
-    println!(
-        "{} {} [{}]",
-        severity_icon,
-        finding.rule_id.bold(),
-        finding.severity.color(severity_color)
-    );
-
-    println!("   {}", finding.message.dimmed());
-    println!(
-        "   File: {}:{}:{}",
-        finding.file_path.cyan(),
-        finding.line,
-        finding.column
-    );
-
-    if let Some(patch) = &finding.patch {
+    if changed_findings.is_empty() {
+        println!("  {} No issues introduced in changed files.", "✓".bright_green().bold());
         println!();
-        println!("   {}", "Suggested fix:".green().bold());
-        for line in patch.lines() {
-            if line.starts_with('+') && !line.starts_with("+++") {
-                println!("   {}", line.green());
-            } else if line.starts_with('-') && !line.starts_with("---") {
-                println!("   {}", line.red());
+        return;
+    }
+
+    // Sort by severity (worst first), then file path + line for stability.
+    let sev_order = |s: &str| -> u8 {
+        match s.to_lowercase().as_str() {
+            "critical" => 0,
+            "high"     => 1,
+            "medium"   => 2,
+            "low"      => 3,
+            _          => 4,
+        }
+    };
+    let mut sorted = changed_findings.clone();
+    sorted.sort_by(|a, b| {
+        sev_order(&a.severity)
+            .cmp(&sev_order(&b.severity))
+            .then(a.file_path.cmp(&b.file_path))
+            .then(a.line.cmp(&b.line))
+    });
+
+    let show_n = 5;
+    for finding in sorted.iter().take(show_n) {
+        render_plain_finding(finding);
+    }
+    let remaining = sorted.len().saturating_sub(show_n);
+    if remaining > 0 {
+        println!(
+            "  {} {} more issue{} — run {}",
+            "…".dimmed(),
+            remaining,
+            if remaining == 1 { "" } else { "s" },
+            "unfault review --all".cyan()
+        );
+    }
+    println!();
+}
+
+/// Render a SystemHazard with full SRE context, respecting 80-column width.
+fn render_system_hazard(hazard: &IrSystemHazard) {
+    let sev_icon = severity_icon(&hazard.effective_severity);
+    let indent = "     ";
+
+    // ── Line 1: severity  file:line  ·  aka ─────────────────────────────────
+    //
+    // "  🟡  app-a/main.py:12  ·  The Slow Death"
+    //
+    // The file:line is the developer's "you are here". The aka names the
+    // hazard category. No glossary ID — the user doesn't need to read it here.
+    let path_line = format!("{}:{}", hazard.file_path, hazard.line);
+    let aka_sep = "·".dimmed();
+    let icon_prefix_width = 6usize; // "  🟡  "
+    let aka_width = 2 + hazard.aka.len(); // " · " + aka
+    let path_budget = COL_WIDTH
+        .saturating_sub(icon_prefix_width)
+        .saturating_sub(aka_width);
+    let path_display = if path_line.len() > path_budget {
+        format!(
+            "…{}",
+            &path_line[path_line.len().saturating_sub(path_budget.saturating_sub(1))..]
+        )
+    } else {
+        path_line.clone()
+    };
+    println!(
+        "  {}  {}  {} {}",
+        sev_icon,
+        path_display.cyan(),
+        aka_sep,
+        hazard.aka.bright_white().bold(),
+    );
+
+    // ── Line 2: finding title — the specific code observation ──────────────
+    //
+    // "     FastAPI app `app` has no request timeout middleware"
+    //
+    // This is the bridge from code to system: what exactly was found.
+    // Shown only when we have it; the one_line_impact is the fallback.
+    let code_observation = if !hazard.finding_title.is_empty() {
+        hazard.finding_title.clone()
+    } else {
+        // Strip the "Propagation risk N% — reaches SLO '...'. " prefix if present
+        if hazard.anchored_to_slo {
+            hazard.one_line_impact
+                .find("'. ")
+                .map(|pos| hazard.one_line_impact[pos + 3..].to_string())
+                .unwrap_or_else(|| hazard.one_line_impact.clone())
+        } else {
+            hazard.one_line_impact.clone()
+        }
+    };
+    for line in word_wrap(&code_observation, indent, indent, COL_WIDTH) {
+        println!("{}", line.dimmed());
+    }
+
+    // ── Line 3: system view — what is at stake ──────────────────────────────
+    //
+    // "     ↳ puts  App B Availability SLO  at risk  (100%)"
+    //   or
+    // "     ↳ propagates to  main.py  (entrypoint)"
+    //
+    // This is the zoom-out: code decision → system consequence.
+    // Only shown when the World Model found a meaningful anchor.
+    if hazard.aggregate_risk > 0.0 {
+        if let Some(ref goal) = hazard.macro_goal {
+            let anchor = goal.rsplit('/').next().unwrap_or(goal);
+            if hazard.anchored_to_slo {
+                println!(
+                    "{}{}  {}  {}",
+                    indent,
+                    "↳ puts".dimmed(),
+                    anchor.bright_white().bold(),
+                    format!("at risk  ({:.0}%)", hazard.aggregate_risk).yellow(),
+                );
             } else {
-                println!("   {}", line.dimmed());
+                println!(
+                    "{}{}  {}  {}",
+                    indent,
+                    "↳ propagates to".dimmed(),
+                    anchor.white(),
+                    "(entrypoint)".dimmed(),
+                );
             }
         }
     }
+
+    // ── Line 4: what the hazard means in plain language ─────────────────────
+    //
+    // The one_line_impact hazard sentence — stripped of any World Model prefix.
+    // Skipped if the finding title already covers this ground (when they're
+    // essentially the same sentence), otherwise adds the systemic framing.
+    let hazard_sentence = if hazard.anchored_to_slo {
+        hazard.one_line_impact
+            .find("'. ")
+            .map(|pos| hazard.one_line_impact[pos + 3..].to_string())
+            .unwrap_or_else(|| hazard.one_line_impact.clone())
+    } else {
+        hazard.one_line_impact.clone()
+    };
+    // Only print if it adds something beyond the finding title
+    if !hazard_sentence.is_empty() && hazard_sentence != code_observation {
+        for line in word_wrap(&hazard_sentence, indent, indent, COL_WIDTH) {
+            println!("{}", line.dimmed());
+        }
+    }
+
+    // ── Lines 5-6: tradeoff — the why, stripped of gain/risk labels ─────────
+    //
+    // "     + no timeout overhead at call time"
+    // "     - one slow upstream saturates the pool for every concurrent request"
+    //
+    // Labels removed — the +/- signs carry the valence. Text is trimmed to
+    // remove the redundant "Simplicity: " / "Systemic availability: " prefixes
+    // since the hazard sentence above already names the failure mode.
+    if !hazard.tradeoff_gain.is_empty() {
+        println!("     {}", "Tradeoff".bright_white());
+        print_tradeoff_category_line(indent, &hazard.tradeoff_gain, COL_WIDTH);
+        print_tradeoff_category_line(indent, &hazard.tradeoff_risk, COL_WIDTH);
+    }
+
     println!();
+}
+
+/// Render a tradeoff line using the category label as the left-column anchor.
+///
+/// Input format: "Category: sentence about the tradeoff."
+/// e.g. "Simplicity: no timeout means less code..."
+///      "Systemic metastability: synchronized retries..."
+///
+/// Output:
+///   "     simplicity        no timeout means less code..."
+///   "     systemic metastab synchronized retries with no..."  (truncated label)
+///
+/// The category label is left-aligned in a fixed-width column (dimmed),
+/// the sentence text wraps in the remaining space (plain dimmed white).
+/// No +/- sigils — the category names carry the meaning directly.
+fn print_tradeoff_category_line(indent: &str, s: &str, col: usize) {
+    // "↳ " prefix before the label — 2 visible chars
+    const ARROW: &str = "↳ ";
+    const LABEL_COL: usize = 22; // fixed label column width (chars)
+    // Total left margin for continuation lines:
+    //   indent(5) + "↳ "(2) + label(22) + "  "(2) = 31 chars
+    const ARROW_LEN: usize = 2;
+
+    // Split at the first ": " to get label + body
+    let (label_raw, body) = if let Some(pos) = s.find(": ") {
+        let prefix = &s[..pos];
+        let word_count = prefix.split_whitespace().count();
+        if word_count <= 4 && !prefix.contains('.') && !prefix.contains(',') {
+            (prefix, &s[pos + 2..])
+        } else {
+            ("", s)
+        }
+    } else {
+        ("", s)
+    };
+
+    // Title-case: capitalize first letter of each word
+    let label_titled: String = label_raw
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    // Pad to fixed column width for alignment
+    let label_padded = if label_titled.len() > LABEL_COL {
+        label_titled[..LABEL_COL].to_string()
+    } else {
+        format!("{:<width$}", label_titled, width = LABEL_COL)
+    };
+
+    // Continuation lines align under the body (past indent + arrow + label + gap)
+    let cont_indent = format!("{}{}{}", indent, " ".repeat(ARROW_LEN + LABEL_COL), "  ");
+    let first_prefix = format!("{}{}{}  ", indent, ARROW, label_padded);
+
+    let lines = word_wrap(body, &first_prefix, &cont_indent, col);
+    for (i, line) in lines.iter().enumerate() {
+        if i == 0 {
+            let body_part = line.strip_prefix(&first_prefix).unwrap_or(line);
+            println!(
+                "{}{}{}  {}",
+                indent,
+                ARROW.dimmed(),
+                label_padded.bright_white(),
+                body_part.dimmed(),
+            );
+        } else {
+            println!("{}", line.dimmed());
+        }
+    }
+}
+
+/// Render a plain finding in compact one-line form, respecting 80-column width.
+fn render_plain_finding(finding: &IrFinding) {
+    let icon = severity_icon(&finding.severity);
+    let title = if !finding.title.is_empty() { finding.title.as_str() } else { finding.rule_id.as_str() };
+
+    // Visible prefix: "  " + icon(2) + "  " = 6 chars, then "path:line  ".
+    let icon_prefix_width = 6usize;
+    let path_line = format!("{}:{}", finding.file_path, finding.line);
+    // separator between path:line and title = 2 chars ("  ")
+    let title_budget = COL_WIDTH
+        .saturating_sub(icon_prefix_width)
+        .saturating_sub(path_line.len())
+        .saturating_sub(2);
+    let title_display = truncate(title, title_budget);
+
+    println!(
+        "  {}  {}  {}",
+        icon,
+        path_line.cyan(),
+        title_display.dimmed()
+    );
+}
+
+fn severity_icon(severity: &str) -> &'static str {
+    match severity.to_lowercase().as_str() {
+        "critical" => "🔴",
+        "high"     => "🟠",
+        "medium"   => "🟡",
+        "low"      => "🔵",
+        _          => "⚪",
+    }
 }
 
 /// Display IR findings grouped by severity and rule_id (basic mode).
 /// Format matches the landing page TerminalDemo.
-fn display_ir_findings_grouped(findings: &[IrFinding]) {
+pub fn display_ir_findings_grouped(findings: &[IrFinding]) {
     use std::collections::BTreeMap;
 
     let severity_order = |s: &str| -> u8 {
@@ -956,4 +1363,112 @@ fn display_ir_findings_grouped(findings: &[IrFinding]) {
             }
         }
     }
+}
+
+// ── Enrichment helpers ────────────────────────────────────────────────────────
+
+/// Apply SLOs and trace patterns to the code graph.
+///
+/// Extracted so both the cache-hit and cache-miss paths share identical logic.
+fn apply_enrichment(
+    graph: &mut unfault_core::CodeGraph,
+    slos: &[crate::slo::SloDefinition],
+    trace_patterns: Vec<crate::trace::RemoteCallPattern>,
+    workspace_label: &str,
+    verbose: bool,
+) {
+    // SLO enrichment
+    if !slos.is_empty() {
+        let enricher = crate::slo::SloEnricher::new(verbose);
+        match enricher.enrich_graph(graph, slos) {
+            Ok(added) => {
+                if verbose || added > 0 {
+                    eprintln!(
+                        "\n{} Linked {} SLO(s) to code graph as Macro-Goals",
+                        "✓".green(),
+                        added
+                    );
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("{} SLO enrichment failed: {}", "warn:".yellow().bold(), e);
+                }
+            }
+        }
+
+        // Service-level SLOs link to all routes of the matching local service
+        for slo in crate::slo::get_service_level_slos(slos) {
+            if slo.matches_local_service(workspace_label) {
+                enricher.link_service_slo_to_all_routes(graph, slo);
+            } else if verbose {
+                eprintln!("  Skipping SLO '{}' — belongs to a different service", slo.name);
+            }
+        }
+    }
+
+    // Trace enrichment
+    if !trace_patterns.is_empty() {
+        let http_caller_files = collect_http_caller_files(graph);
+        match crate::trace::enrich_graph(graph, &trace_patterns, &http_caller_files, verbose) {
+            Ok(result) => {
+                if verbose || result.edges_added > 0 {
+                    eprintln!(
+                        "\n{} Trace enrichment: {} remote service(s), {} cross-service edge(s)",
+                        "✓".green(),
+                        result.remote_services_added,
+                        result.edges_added,
+                    );
+                    if verbose && !result.linked_services.is_empty() {
+                        eprintln!("   Remote services: {}", result.linked_services.join(", "));
+                    }
+                }
+            }
+            Err(e) => {
+                if verbose {
+                    eprintln!("{} Trace enrichment failed: {}", "warn:".yellow().bold(), e);
+                }
+            }
+        }
+    }
+}
+
+// ── Graph enrichment helpers ──────────────────────────────────────────────────
+
+/// Collect file paths that make outbound HTTP/RPC calls, by inspecting
+/// `UsesLibrary` edges to `HttpClient`-category external modules.
+///
+/// These files are the candidates to link to `RemoteService` nodes via
+/// `RemoteCall` edges during trace enrichment.
+fn collect_http_caller_files(graph: &unfault_core::CodeGraph) -> Vec<String> {
+    use petgraph::Direction;
+    use petgraph::visit::EdgeRef as _;
+    use unfault_core::graph::{GraphEdgeKind, GraphNode, ModuleCategory};
+
+    let mut files: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for idx in graph.graph.node_indices() {
+        // Only look at HttpClient external modules
+        if !matches!(
+            &graph.graph[idx],
+            GraphNode::ExternalModule {
+                category: ModuleCategory::HttpClient,
+                ..
+            }
+        ) {
+            continue;
+        }
+
+        // Walk incoming UsesLibrary edges to find callers
+        for edge in graph.graph.edges_directed(idx, Direction::Incoming) {
+            if !matches!(edge.weight(), GraphEdgeKind::UsesLibrary) {
+                continue;
+            }
+            if let GraphNode::File { path, .. } = &graph.graph[edge.source()] {
+                files.insert(path.clone());
+            }
+        }
+    }
+
+    files.into_iter().collect()
 }

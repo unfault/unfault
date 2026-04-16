@@ -263,6 +263,52 @@ pub fn compute_workspace_id(
     None
 }
 
+/// Return relative paths of files changed since HEAD (staged + unstaged).
+///
+/// Runs:
+///   `git diff --name-only HEAD`  — staged and unstaged changes vs HEAD
+///   `git ls-files --others --exclude-standard` — untracked new files
+///
+/// Returns an empty `Vec` (not an error) if not inside a git repository or
+/// if git is not installed. The caller treats an empty list as "no diff info."
+pub fn get_git_changed_files(workspace_root: &Path) -> Vec<String> {
+    let mut changed: Vec<String> = Vec::new();
+
+    // 1) Staged + unstaged changes against HEAD.
+    if let Ok(output) = Command::new("git")
+        .args(["diff", "--name-only", "HEAD"])
+        .current_dir(workspace_root)
+        .output()
+    {
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let line = line.trim();
+                if !line.is_empty() {
+                    changed.push(line.to_string());
+                }
+            }
+        }
+    }
+
+    // 2) New untracked files (not yet committed or staged).
+    if let Ok(output) = Command::new("git")
+        .args(["ls-files", "--others", "--exclude-standard"])
+        .current_dir(workspace_root)
+        .output()
+    {
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let line = line.trim();
+                if !line.is_empty() && !changed.contains(&line.to_string()) {
+                    changed.push(line.to_string());
+                }
+            }
+        }
+    }
+
+    changed
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -4,13 +4,13 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use super::workspace_id::{
-    MetaFileInfo as WorkspaceIdMetaFile, WorkspaceIdSource, compute_workspace_id, get_git_remote,
+    compute_workspace_id, get_git_remote, MetaFileInfo as WorkspaceIdMetaFile, WorkspaceIdSource,
 };
-use super::workspace_settings::{LoadedSettings, WorkspaceSettings, load_settings};
+use super::workspace_settings::{load_settings, LoadedSettings, WorkspaceSettings};
 use unfault_core::types::context::RepoLayout as ProjectLayout;
 use unfault_core::types::workspace::{AdvertisedProfile, MetaFile, WorkspaceDescriptor};
 
@@ -893,12 +893,10 @@ mod tests {
 
         assert!(!descriptor.label.is_empty());
         assert!(!descriptor.profiles.is_empty());
-        assert!(
-            descriptor
-                .profiles
-                .iter()
-                .any(|p| p.id == "python_fastapi_backend")
-        );
+        assert!(descriptor
+            .profiles
+            .iter()
+            .any(|p| p.id == "python_fastapi_backend"));
     }
 
     #[test]
@@ -922,12 +920,10 @@ mod tests {
         let info = scanner.scan().unwrap();
         let descriptor = info.to_workspace_descriptor();
 
-        assert!(
-            descriptor
-                .profiles
-                .iter()
-                .any(|p| p.id == "python_generic_backend")
-        );
+        assert!(descriptor
+            .profiles
+            .iter()
+            .any(|p| p.id == "python_generic_backend"));
     }
 
     #[test]
@@ -978,21 +974,18 @@ mod tests {
 
         // Should only find main.py, not the ignored files
         assert_eq!(info.source_files.len(), 1);
-        assert!(
-            info.source_files
-                .iter()
-                .any(|(p, _)| p.ends_with("main.py"))
-        );
-        assert!(
-            info.source_files
-                .iter()
-                .all(|(p, _)| !p.ends_with("app.log"))
-        );
-        assert!(
-            info.source_files
-                .iter()
-                .all(|(p, _)| !p.ends_with("secret.py"))
-        );
+        assert!(info
+            .source_files
+            .iter()
+            .any(|(p, _)| p.ends_with("main.py")));
+        assert!(info
+            .source_files
+            .iter()
+            .all(|(p, _)| !p.ends_with("app.log")));
+        assert!(info
+            .source_files
+            .iter()
+            .all(|(p, _)| !p.ends_with("secret.py")));
     }
 
     #[test]
@@ -1016,15 +1009,13 @@ mod tests {
 
         // Should only find main.py, not the ignored files/dirs
         assert_eq!(info.source_files.len(), 1);
-        assert!(
-            info.source_files
-                .iter()
-                .any(|(p, _)| p.ends_with("main.py"))
-        );
-        assert!(
-            info.source_files
-                .iter()
-                .all(|(p, _)| !p.ends_with("temp.tmp"))
-        );
+        assert!(info
+            .source_files
+            .iter()
+            .any(|(p, _)| p.ends_with("main.py")));
+        assert!(info
+            .source_files
+            .iter()
+            .all(|(p, _)| !p.ends_with("temp.tmp")));
     }
 }

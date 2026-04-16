@@ -7,6 +7,134 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-04-16
+
+### Added
+
+- **Hierarchical World Model** — `unfault review` now reasons at three tiers: code
+  primitives (findings), sub-goals (call chains), and macro-goals (SLOs). Every hazard
+  shows a propagation path with an aggregate risk score and the business objective at stake.
+
+- **SLO integration** — GCP Cloud Monitoring, Datadog, and Dynatrace SLOs are fetched
+  automatically when credentials are present and linked to HTTP route handlers in the code
+  graph as `MonitoredBy` edges. Service-level SLOs are scoped to the local workspace by
+  matching the GCP service slug against the directory name, preventing sibling services from
+  appearing as false anchors.
+
+- **GCP Cloud Trace integration** — `RPC_CLIENT` spans (and outbound HTTP spans where `kind`
+  is absent, as on Cloud Run) are fetched from Cloud Trace v1 and injected as
+  `GraphNode::RemoteService` + `GraphEdgeKind::RemoteCall` edges. The World Model propagates
+  risk across service boundaries at weight 0.90 (higher than local calls, since there is no
+  local recovery path). Service name extraction handles Kubernetes FQDNs, Cloud Run URLs, and
+  gRPC `Sent.<Service>` span names.
+
+- **Enrichment cache** — SLO and trace data is cached at `.unfault/cache/enrichment/` with a
+  5-minute TTL. Warm runs show `cached` in the footer; the first cold run shows `fetch Xms`
+  so users can distinguish tool latency from cloud API latency. Pass `--refresh-cache` to
+  bust the cache on demand.
+
+- **`--offline` flag** — skips SLO and trace fetching entirely (no network calls, no
+  credential detection). Intended for CI pipelines and pre-commit hooks where cloud
+  credentials are absent or startup time is critical.
+
+- **`--refresh-cache` flag** — invalidates the enrichment cache and forces a live re-fetch
+  from all configured providers.
+
+- **Ranker** — `unfault graph critical --sort-by importance_score` now uses a composite
+  importance score: centrality × 0.5 + library risk (outbound HTTP/DB usage) × 0.3 +
+  finding density × 0.2. Scores and sub-components are shown in the output.
+
+- **Tradeoff awareness** — every hazard block now shows a `Tradeoff` section with two named
+  dimensions (e.g. `Simplicity` / `Systemic Availability`, `Local Availability` /
+  `Systemic Metastability`). The category label is the left-column anchor; the body text
+  is the explanatory sentence.
+
+- **SLO-006: The Cascade** — new failure mode for missing circuit breakers, mapped to
+  `*.missing_circuit_breaker` rule family.
+
+- **`unfault config integrations show`** — detects credential availability for GCP, Datadog,
+  and Dynatrace without making any network calls. Prints a status table with setup hints for
+  missing providers.
+
+- **`unfault config integrations verify`** — fires a lightweight API probe for each detected
+  integration to confirm credentials work end-to-end. Exits non-zero if any verified
+  integration fails — useful in CI. Error messages include provider-specific fix hints (e.g.
+  `gcloud auth application-default login`).
+
+- **`unfault config agent claude` / `opencode`** — generate per-command `SKILL.md` files so
+  Claude Code and OpenCode agents can use unfault natively (carried forward from the
+  previous unreleased entry).
+
+### Changed
+
+- **Review output redesigned** — the hazard block now reads as a zoom-out from code to
+  system: `file:line · Aka Name` (where you are) → finding title (what the code is missing)
+  → `↳ puts SLO at risk (100%)` (what breaks) → hazard sentence (why it matters) → Tradeoff
+  section (the engineering tension). The SLO name is rendered in bright white. The `↳`
+  character runs consistently through the block — once for the system consequence, twice for
+  the tradeoff dimensions.
+
+- **Footer replaces header** — session metadata (workspace, language, file count, timing
+  breakdown, cache status) moved from a multi-line header before findings to a single compact
+  line after them. The workspace name is rendered as a filled pill. Timing is broken down as
+  `parse Xms  engine Xms  fetch Xms` so the source of latency is visible. `fetch` is shown
+  in yellow (network, outside the tool's control); `cached` is shown in green.
+
+- **Silent failure fix** — expired GCP credentials and SLO/trace fetch errors now always
+  surface a `warn:` line pointing to `unfault config integrations verify`, regardless of
+  `--verbose`. Previously these failures were silently swallowed.
+
+- **Dependency updates** — 88 packages updated to latest compatible versions including
+  `clap 4.6`, `anstream 1.0`, `hyper 1.9`, `uuid 1.23`, `hashbrown 0.17`.
+
+### Fixed
+
+- `span_id: u64` in the Cloud Trace wire type caused a parse failure on real API responses,
+  where `spanId` is a decimal string. Changed to `String`.
+
+- Cloud Trace `ListTracesResponse` returned `{}` (no `traces` key) when no traces matched
+  the time window, causing a deserialization error. Fixed with `#[serde(default)]`.
+
+- `kind == RPC_CLIENT` filter dropped all spans from Cloud Run's OTEL exporter, which omits
+  `kind` entirely. Replaced with a two-tier strategy: explicit `RPC_CLIENT`/`CLIENT` kind,
+  then host-based inference (span's `/http/host` is external to the service).
+
+- `host_to_service_name` stripped `api.github.com` to `"api"` by taking the first DNS label.
+  Fixed with a public TLD allowlist.
+
+- World Model propagation returned `aggregate_risk: 0.0` for all single-file projects because
+  the BFS started from a `File` node and never reached the `MonitoredBy` edges on `Function`
+  nodes inside it. Fixed by traversing `Contains` edges (weight 0.0) in the forward pass.
+
+- Service-level SLOs from sibling services in the same GCP project were incorrectly linked
+  to the local codebase. Fixed by matching the GCP service slug from the SLO resource name
+  against the workspace directory name before linking.
+
+- `one_line_impact` prefixed hazard sentences with "Traced to cli.py, which has no callers —
+  a root of the call tree." The `↳` line in the renderer already surfaces this information;
+  the prefix was removed.
+
+### Internal
+
+- `cli/src/integration/` directory introduced: GCP auth, SLO, and trace providers are now
+  grouped by vendor (`integration/gcp/`, `integration/datadog/`, `integration/dynatrace/`)
+  rather than by feature (`slo/gcp.rs`, `trace/gcp.rs`).
+
+- `cli/src/enrichment_cache.rs` — new TTL-based file cache for enrichment snapshots.
+
+- `analysis/src/sre/ranker.rs` — composite importance scorer.
+
+- `analysis/src/sre/world_model.rs` — weighted BFS propagation engine across static +
+  runtime graph edges.
+
+- `core/src/graph/mod.rs` — `GraphNode::RemoteService`, `GraphNode::Slo`,
+  `GraphEdgeKind::RemoteCall`, `GraphEdgeKind::MonitoredBy`, `SloProvider` added to both
+  `unfault-core` and `unfault-analysis` graph types.
+
+- `unfault-core` bumped to `0.3.0`, `unfault-analysis` to `0.2.0`.
+
+## [0.7.0] - 2025-12-23
+
 ### Added
 
 - `unfault config agent claude` and `unfault config agent opencode` generate per-command

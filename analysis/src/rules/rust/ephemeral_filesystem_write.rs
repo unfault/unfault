@@ -53,17 +53,48 @@ impl Rule for RustEphemeralFilesystemWriteRule {
                 _ => continue,
             };
 
+            // Build a set of test function names for fast lookup.
+            let test_fn_names: std::collections::HashSet<&str> = rust
+                .functions
+                .iter()
+                .filter(|f| f.is_test || f.has_test_attribute)
+                .map(|f| f.name.as_str())
+                .collect();
+
+            // Track which (callee, line) pairs we've already emitted to prevent
+            // duplicates from nested call_expression nodes (e.g. fs::write(...).unwrap()).
+            let mut seen: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
+
             // Look for file write operations with ephemeral paths
             for call in &rust.calls {
+                // Skip test code — ephemeral writes in tests are expected.
+                if let Some(ref fn_name) = call.function_name {
+                    if test_fn_names.contains(fn_name.as_str()) {
+                        continue;
+                    }
+                }
+
+                // Only match the direct write call, not chained method calls whose
+                // callee_expr string happens to contain the write function name.
+                // A direct call has a callee_expr that IS the function path (no receiver).
+                if call.is_method_call {
+                    continue;
+                }
+
                 let callee_lower = call.function_call.callee_expr.to_lowercase();
 
-                let is_write_op = callee_lower.contains("file::create")
-                    || callee_lower.contains("write_all")
-                    || callee_lower.contains("openoptions")
-                    || callee_lower.contains("fs::write")
-                    || callee_lower.contains("fs::copy")
-                    || callee_lower.contains("create_dir")
-                    || callee_lower.contains("rename");
+                let is_write_op = callee_lower == "file::create"
+                    || callee_lower == "write_all"
+                    || callee_lower == "openoptions"
+                    || callee_lower == "fs::write"
+                    || callee_lower == "std::fs::write"
+                    || callee_lower == "fs::copy"
+                    || callee_lower == "std::fs::copy"
+                    || callee_lower == "create_dir"
+                    || callee_lower == "fs::create_dir"
+                    || callee_lower == "fs::create_dir_all"
+                    || callee_lower == "rename"
+                    || callee_lower == "fs::rename";
 
                 if !is_write_op {
                     continue;
@@ -85,6 +116,11 @@ impl Rule for RustEphemeralFilesystemWriteRule {
                 }
 
                 let line = call.function_call.location.line;
+
+                // Deduplicate: skip if we've already emitted for this (callee, line).
+                if !seen.insert((callee_lower.clone(), line)) {
+                    continue;
+                }
 
                 let title = "Writing to ephemeral filesystem".to_string();
 

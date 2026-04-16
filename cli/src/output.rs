@@ -15,6 +15,9 @@ use tower_lsp::lsp_types::Range;
 pub struct IrAnalyzeResponse {
     /// Findings from rule evaluation
     pub findings: Vec<IrFinding>,
+    /// System-level hazards from the SRE synthesis pass
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub system_hazards: Vec<IrSystemHazard>,
     /// Number of files analyzed
     pub file_count: i32,
     /// Analysis time in milliseconds
@@ -22,6 +25,57 @@ pub struct IrAnalyzeResponse {
     /// Graph statistics (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub graph_stats: Option<IrGraphStats>,
+}
+
+/// CLI display-layer representation of a SystemHazard.
+///
+/// All fields are `String` for simple serialization and rendering.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IrSystemHazard {
+    /// e.g. "SLO-001"
+    pub glossary_id: String,
+    /// e.g. "The Slow Death"
+    pub aka: String,
+    /// File where the root symptom was found
+    pub file_path: String,
+    /// Line number of the root symptom (0 if unknown)
+    pub line: u32,
+    /// Effective severity after blast-radius upgrade (e.g. "Critical")
+    pub effective_severity: String,
+    /// One-sentence systemic impact description
+    pub one_line_impact: String,
+    /// Chain from symptom file to nearest entrypoint
+    pub destruction_path: Vec<String>,
+    /// ID of the root Finding this hazard enriches
+    pub finding_id: String,
+
+    // ── World Model fields ────────────────────────────────────────────────
+    /// World Model aggregate risk score [0.0–100.0].
+    /// Represents propagation probability as a percentage.
+    #[serde(default)]
+    pub aggregate_risk: f64,
+
+    /// Macro-Goal anchor: SLO name (if SLO-enriched) or entrypoint file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macro_goal: Option<String>,
+
+    /// True if macro_goal is an SLO, false if an inferred entrypoint.
+    #[serde(default)]
+    pub anchored_to_slo: bool,
+
+    // ── Tradeoff fields ───────────────────────────────────────────────────
+    /// What the pattern provides when it works correctly.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tradeoff_gain: String,
+
+    /// What the pattern risks at the system level.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub tradeoff_risk: String,
+
+    /// Human-readable title of the root finding (e.g. "Missing request timeout").
+    /// Used as context line before the tradeoff block.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub finding_title: String,
 }
 
 /// A single finding from IR analysis.
