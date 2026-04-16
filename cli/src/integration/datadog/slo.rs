@@ -54,10 +54,16 @@ impl DatadogSloProvider {
             anyhow::bail!("Datadog API error: {} — {}", status, body);
         }
 
-        let response: DatadogSloListResponse =
-            resp.json().await.context("Failed to parse Datadog SLO response")?;
+        let response: DatadogSloListResponse = resp
+            .json()
+            .await
+            .context("Failed to parse Datadog SLO response")?;
 
-        Ok(response.data.into_iter().map(|s| self.convert_slo(s)).collect())
+        Ok(response
+            .data
+            .into_iter()
+            .map(|s| self.convert_slo(s))
+            .collect())
     }
 
     fn convert_slo(&self, slo: DatadogSlo) -> SloDefinition {
@@ -67,9 +73,10 @@ impl DatadogSloProvider {
                 .map(|p| p.to_string())
         });
 
-        let http_method = slo.tags.iter().find_map(|tag| {
-            tag.strip_prefix("method:").map(|m| m.to_uppercase())
-        });
+        let http_method = slo
+            .tags
+            .iter()
+            .find_map(|tag| tag.strip_prefix("method:").map(|m| m.to_uppercase()));
 
         let primary_threshold = slo
             .thresholds
@@ -141,6 +148,9 @@ mod tests {
     fn is_available_checks_both_keys() {
         let has_api_key = env::var("DD_API_KEY").is_ok();
         let has_app_key = env::var("DD_APP_KEY").is_ok();
-        assert_eq!(DatadogSloProvider::is_available(), has_api_key && has_app_key);
+        assert_eq!(
+            DatadogSloProvider::is_available(),
+            has_api_key && has_app_key
+        );
     }
 }

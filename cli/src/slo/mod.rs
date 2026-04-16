@@ -116,9 +116,7 @@ impl SloEnricher {
                 }
                 Err(e) => {
                     let msg = e.to_string();
-                    if msg.contains("expired")
-                        || msg.contains("gcloud auth")
-                        || msg.contains("401")
+                    if msg.contains("expired") || msg.contains("gcloud auth") || msg.contains("401")
                     {
                         result.credentials_expired = true;
                     }

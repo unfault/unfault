@@ -103,6 +103,7 @@ jobs:
 
   publish:
     name: Publish to crates.io
+    needs: release
     runs-on: ubuntu-24.04
     environment: release
     steps:

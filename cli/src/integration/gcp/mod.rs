@@ -90,16 +90,14 @@ pub fn find_credentials() -> Option<PathBuf> {
     }
 
     if let Ok(home) = env::var("HOME") {
-        let adc = PathBuf::from(home)
-            .join(".config/gcloud/application_default_credentials.json");
+        let adc = PathBuf::from(home).join(".config/gcloud/application_default_credentials.json");
         if adc.exists() {
             return Some(adc);
         }
     }
 
     if let Ok(appdata) = env::var("APPDATA") {
-        let adc = PathBuf::from(appdata)
-            .join("gcloud/application_default_credentials.json");
+        let adc = PathBuf::from(appdata).join("gcloud/application_default_credentials.json");
         if adc.exists() {
             return Some(adc);
         }

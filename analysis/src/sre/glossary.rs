@@ -41,8 +41,7 @@ fn init_glossary() -> HashMap<&'static str, GlossaryEntry> {
         GlossaryEntry {
             id: "SLO-001",
             aka: "The Slow Death",
-            hazard:
-                "A downstream dependency slows down and your service holds threads/connections \
+            hazard: "A downstream dependency slows down and your service holds threads/connections \
                      until it saturates and dies.",
             mechanics: "Without a timeout, every in-flight request waits forever for the slow \
                         dependency. Worker threads pile up, the connection pool exhausts, and the \

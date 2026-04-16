@@ -122,15 +122,12 @@ impl GcpTraceProvider {
         let mut page_token: Option<String> = None;
 
         loop {
-            let mut req = client
-                .get(&url)
-                .bearer_auth(token)
-                .query(&[
-                    ("view", "COMPLETE"),
-                    ("pageSize", &page_size.to_string()),
-                    ("startTime", &start_time),
-                    ("endTime", &end_time),
-                ]);
+            let mut req = client.get(&url).bearer_auth(token).query(&[
+                ("view", "COMPLETE"),
+                ("pageSize", &page_size.to_string()),
+                ("startTime", &start_time),
+                ("endTime", &end_time),
+            ]);
 
             if let Some(ref tok) = page_token {
                 req = req.query(&[("pageToken", tok.as_str())]);
@@ -151,8 +148,10 @@ impl GcpTraceProvider {
                 anyhow::bail!("Cloud Trace ListTraces error: {} — {}", status, body);
             }
 
-            let response: ListTracesResponse =
-                resp.json().await.context("Failed to parse Cloud Trace response")?;
+            let response: ListTracesResponse = resp
+                .json()
+                .await
+                .context("Failed to parse Cloud Trace response")?;
 
             all_traces.extend(response.traces.unwrap_or_default());
 
@@ -311,12 +310,20 @@ fn extract_remote_call_patterns(traces: Vec<TraceV1>) -> Vec<RemoteCallPattern> 
 
 fn infer_remote_service_name(span: &TraceSpanV1) -> String {
     // 1. `peer.service` — standard OTEL attribute (Cloud Trace stores as label)
-    if let Some(svc) = span.labels.get("peer.service").or_else(|| span.labels.get("peer_service")) {
+    if let Some(svc) = span
+        .labels
+        .get("peer.service")
+        .or_else(|| span.labels.get("peer_service"))
+    {
         return svc.clone();
     }
 
     // 2. `/http/host` — Cloud Trace conventional label for HTTP host
-    if let Some(host) = span.labels.get("/http/host").or_else(|| span.labels.get("http.host")) {
+    if let Some(host) = span
+        .labels
+        .get("/http/host")
+        .or_else(|| span.labels.get("http.host"))
+    {
         return host_to_service_name(host);
     }
 
@@ -343,16 +350,16 @@ fn infer_remote_service_name(span: &TraceSpanV1) -> String {
     if name.starts_with("grpc.") || name.contains("grpc/") {
         // e.g. "grpc.Call/my.package.MyService/Method"
         if let Some(parts) = name.split('/').nth(1) {
-            return parts
-                .split('.')
-                .next_back()
-                .unwrap_or(parts)
-                .to_string();
+            return parts.split('.').next_back().unwrap_or(parts).to_string();
         }
     }
 
     // 5. URL-based fallback from labels
-    if let Some(url) = span.labels.get("/http/url").or_else(|| span.labels.get("http.url")) {
+    if let Some(url) = span
+        .labels
+        .get("/http/url")
+        .or_else(|| span.labels.get("http.url"))
+    {
         if let Some(host) = extract_host_from_url(url) {
             return host_to_service_name(&host);
         }
@@ -381,10 +388,20 @@ fn host_to_service_name(host: &str) -> String {
     // 3. If it looks like a public internet hostname, keep it whole.
     //    Heuristic: has more than one label AND ends with a known public TLD.
     const PUBLIC_TLDS: &[&str] = &[
-        ".googleapis.com", ".google.com", ".github.com", ".github.io",
-        ".amazonaws.com", ".azure.com", ".cloudflare.com",
-        ".run.app",      // Cloud Run public URLs
-        ".com", ".io", ".dev", ".net", ".org", ".app",
+        ".googleapis.com",
+        ".google.com",
+        ".github.com",
+        ".github.io",
+        ".amazonaws.com",
+        ".azure.com",
+        ".cloudflare.com",
+        ".run.app", // Cloud Run public URLs
+        ".com",
+        ".io",
+        ".dev",
+        ".net",
+        ".org",
+        ".app",
     ];
     if PUBLIC_TLDS.iter().any(|tld| host.ends_with(tld)) {
         return host.to_string();
@@ -689,9 +706,15 @@ mod tests {
         parent: Option<&str>,
     ) -> TraceSpanV1 {
         let mut labels = HashMap::new();
-        if let Some(h) = host { labels.insert("/http/host".to_string(), h.to_string()); }
-        if let Some(u) = url { labels.insert("/http/url".to_string(), u.to_string()); }
-        if let Some(c) = component { labels.insert("/component".to_string(), c.to_string()); }
+        if let Some(h) = host {
+            labels.insert("/http/host".to_string(), h.to_string());
+        }
+        if let Some(u) = url {
+            labels.insert("/http/url".to_string(), u.to_string());
+        }
+        if let Some(c) = component {
+            labels.insert("/component".to_string(), c.to_string());
+        }
         TraceSpanV1 {
             span_id: id.to_string(),
             kind: kind.map(|s| s.to_string()),
@@ -737,7 +760,10 @@ mod tests {
     fn extract_remote_call_patterns_aggregates_by_explicit_kind() {
         let mut labels = HashMap::new();
         labels.insert("peer.service".to_string(), "inventory".to_string());
-        labels.insert("/http/url".to_string(), "https://inventory-svc:8080/check".to_string());
+        labels.insert(
+            "/http/url".to_string(),
+            "https://inventory-svc:8080/check".to_string(),
+        );
 
         let spans = vec![
             TraceSpanV1 {
@@ -760,7 +786,10 @@ mod tests {
             },
         ];
 
-        let traces = vec![TraceV1 { _trace_id: "abc".to_string(), spans }];
+        let traces = vec![TraceV1 {
+            _trace_id: "abc".to_string(),
+            spans,
+        }];
         let patterns = extract_remote_call_patterns(traces);
         assert_eq!(patterns.len(), 1);
         assert_eq!(patterns[0].remote_service_name, "inventory");
@@ -771,9 +800,25 @@ mod tests {
     #[test]
     fn extract_patterns_via_host_inference_excludes_own_service() {
         // AppServer span = this service's own inbound request
-        let inbound = make_span("1", None, "/", Some("my-service.run.app"), Some("https://my-service.run.app/"), Some("AppServer"), None);
+        let inbound = make_span(
+            "1",
+            None,
+            "/",
+            Some("my-service.run.app"),
+            Some("https://my-service.run.app/"),
+            Some("AppServer"),
+            None,
+        );
         // External call span — no kind, but host differs from AppServer
-        let outbound = make_span("2", None, "GET", Some("api.github.com"), Some("https://api.github.com/"), None, Some("1"));
+        let outbound = make_span(
+            "2",
+            None,
+            "GET",
+            Some("api.github.com"),
+            Some("https://api.github.com/"),
+            None,
+            Some("1"),
+        );
 
         let traces = vec![TraceV1 {
             _trace_id: "t1".to_string(),
@@ -789,8 +834,19 @@ mod tests {
     #[test]
     fn extract_patterns_does_not_emit_own_service_as_remote() {
         // Only inbound AppServer spans — no external calls
-        let inbound = make_span("1", None, "/", Some("my-service.run.app"), Some("https://my-service.run.app/"), Some("AppServer"), None);
-        let traces = vec![TraceV1 { _trace_id: "t2".to_string(), spans: vec![inbound] }];
+        let inbound = make_span(
+            "1",
+            None,
+            "/",
+            Some("my-service.run.app"),
+            Some("https://my-service.run.app/"),
+            Some("AppServer"),
+            None,
+        );
+        let traces = vec![TraceV1 {
+            _trace_id: "t2".to_string(),
+            spans: vec![inbound],
+        }];
         let patterns = extract_remote_call_patterns(traces);
         assert!(patterns.is_empty());
     }

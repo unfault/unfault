@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use crate::graph::traversal::{get_impact, workspace_overview};
 use crate::graph::CodeGraph;
+use crate::graph::traversal::{get_impact, workspace_overview};
 use crate::parse::ast::FileId;
 use crate::semantics::SourceSemantics;
 use crate::types::context::Dimension;

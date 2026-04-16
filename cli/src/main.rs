@@ -442,7 +442,11 @@ async fn run_command(command: Commands) -> i32 {
                 output_format,
                 verbose,
                 profile,
-                dimensions: if dimension.is_empty() { None } else { Some(dimension) },
+                dimensions: if dimension.is_empty() {
+                    None
+                } else {
+                    Some(dimension)
+                },
                 fix,
                 dry_run,
             };
@@ -604,24 +608,20 @@ async fn run_integrations_command(command: IntegrationsCommands) -> i32 {
     use unfault::exit_codes::*;
 
     match command {
-        IntegrationsCommands::Show => {
-            match commands::integrations::execute_show() {
-                Ok(exit_code) => exit_code,
-                Err(e) => {
-                    eprintln!("Integrations error: {}", e);
-                    EXIT_ERROR
-                }
+        IntegrationsCommands::Show => match commands::integrations::execute_show() {
+            Ok(exit_code) => exit_code,
+            Err(e) => {
+                eprintln!("Integrations error: {}", e);
+                EXIT_ERROR
             }
-        }
-        IntegrationsCommands::Verify => {
-            match commands::integrations::execute_verify().await {
-                Ok(exit_code) => exit_code,
-                Err(e) => {
-                    eprintln!("Integrations verify error: {}", e);
-                    EXIT_ERROR
-                }
+        },
+        IntegrationsCommands::Verify => match commands::integrations::execute_verify().await {
+            Ok(exit_code) => exit_code,
+            Err(e) => {
+                eprintln!("Integrations verify error: {}", e);
+                EXIT_ERROR
             }
-        }
+        },
     }
 }
 

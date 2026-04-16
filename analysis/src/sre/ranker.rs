@@ -36,8 +36,8 @@
 
 use std::collections::HashMap;
 
-use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use petgraph::visit::EdgeRef;
 use serde::{Deserialize, Serialize};
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode, ModuleCategory};

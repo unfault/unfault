@@ -170,8 +170,8 @@ fn find_file_for_function<'a>(
     graph: &CodeGraph,
     candidates: &'a [String],
 ) -> Option<&'a str> {
-    use petgraph::visit::EdgeRef;
     use petgraph::Direction;
+    use petgraph::visit::EdgeRef;
     use unfault_core::graph::{GraphEdgeKind, GraphNode};
 
     // Walk incoming Contains edges to find the parent file

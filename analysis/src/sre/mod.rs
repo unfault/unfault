@@ -23,7 +23,7 @@ pub mod ranker;
 pub mod synthesizer;
 pub mod world_model;
 
-pub use glossary::{lookup as lookup_glossary, GlossaryEntry};
-pub use ranker::{rank_files, top_n, RankedFile};
+pub use glossary::{GlossaryEntry, lookup as lookup_glossary};
+pub use ranker::{RankedFile, rank_files, top_n};
 pub use synthesizer::synthesize;
-pub use world_model::{compute_propagation, PropagationHop, PropagationPath};
+pub use world_model::{PropagationHop, PropagationPath, compute_propagation};

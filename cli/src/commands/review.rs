@@ -374,7 +374,10 @@ async fn execute_client_parse(
 
         // Attempt a cache load when we have a project ID.
         let cached = if !project_id.is_empty() {
-            cache.as_ref().ok().and_then(|c| c.load(&project_id, workspace_label))
+            cache
+                .as_ref()
+                .ok()
+                .and_then(|c| c.load(&project_id, workspace_label))
         } else {
             None
         };
@@ -396,7 +399,8 @@ async fn execute_client_parse(
             apply_enrichment(
                 &mut ir.graph,
                 &snapshot.slos,
-                snapshot.trace_patterns
+                snapshot
+                    .trace_patterns
                     .into_iter()
                     .map(crate::trace::RemoteCallPattern::from)
                     .collect(),
@@ -415,7 +419,11 @@ async fn execute_client_parse(
                 pb.set_message("Fetching SLOs from observability provider...");
                 if args.verbose {
                     let providers = enricher.available_providers();
-                    eprintln!("\n{} Fetching SLOs from: {}", "DEBUG".yellow(), providers.join(", "));
+                    eprintln!(
+                        "\n{} Fetching SLOs from: {}",
+                        "DEBUG".yellow(),
+                        providers.join(", ")
+                    );
                 }
                 match enricher.fetch_all().await {
                     Ok(fetch_result) => {
@@ -442,7 +450,10 @@ async fn execute_client_parse(
                 any_fetch_attempted = true;
                 pb.set_message("Fetching distributed traces from Cloud Trace...");
                 if args.verbose {
-                    eprintln!("\n{} Fetching recent traces from GCP Cloud Trace", "DEBUG".yellow());
+                    eprintln!(
+                        "\n{} Fetching recent traces from GCP Cloud Trace",
+                        "DEBUG".yellow()
+                    );
                 }
 
                 let http_client = reqwest::Client::builder()
@@ -450,8 +461,13 @@ async fn execute_client_parse(
                     .build()
                     .unwrap_or_default();
 
-                match trace_provider.fetch_remote_calls(&http_client, 60, 200).await {
-                    Ok(patterns) => { fetched_patterns = patterns; }
+                match trace_provider
+                    .fetch_remote_calls(&http_client, 60, 200)
+                    .await
+                {
+                    Ok(patterns) => {
+                        fetched_patterns = patterns;
+                    }
                     Err(e) => {
                         eprintln!(
                             "{} Could not fetch Cloud Trace data: {} — run `unfault config integrations verify`",
@@ -554,14 +570,15 @@ async fn execute_client_parse(
     }
 
     let analysis_start = Instant::now();
-    let response = match crate::analysis::analyze_ir_locally(ir_json, &profiles, Some(current_dir)).await {
-        Ok(response) => response,
-        Err(e) => {
-            pb.finish_and_clear();
-            eprintln!("{} Analysis failed: {}", "✗".red().bold(), e);
-            return Ok(EXIT_CONFIG_ERROR);
-        }
-    };
+    let response =
+        match crate::analysis::analyze_ir_locally(ir_json, &profiles, Some(current_dir)).await {
+            Ok(response) => response,
+            Err(e) => {
+                pb.finish_and_clear();
+                eprintln!("{} Analysis failed: {}", "✗".red().bold(), e);
+                return Ok(EXIT_CONFIG_ERROR);
+            }
+        };
     let _analysis_ms = analysis_start.elapsed().as_millis();
 
     pb.finish_and_clear();
@@ -830,7 +847,11 @@ fn wrap_text(s: &str, first_line_max: usize, continuation_indent: &str) -> Vec<S
 /// file count, timing, trace ID. Not a header competing for attention,
 /// just provenance for anyone who needs to know what ran.
 pub fn render_session_footer(context: &ReviewOutputContext) {
-    let file_word = if context.file_count == 1 { "file" } else { "files" };
+    let file_word = if context.file_count == 1 {
+        "file"
+    } else {
+        "files"
+    };
     let sep = "  ·  ".dimmed().to_string();
 
     // ── Left pill: workspace name ─────────────────────────────────────────
@@ -859,17 +880,16 @@ pub fn render_session_footer(context: &ReviewOutputContext) {
     // see where time was actually spent. Total is omitted — it's the sum.
     let mut timing_parts: Vec<String> = Vec::new();
     timing_parts.push(format!("parse {}ms", context.parse_ms).dimmed().to_string());
-    timing_parts.push(format!("engine {}ms", context.engine_ms).dimmed().to_string());
+    timing_parts.push(
+        format!("engine {}ms", context.engine_ms)
+            .dimmed()
+            .to_string(),
+    );
     if let Some(fetch) = context.fetch_ms {
         if context.fetch_from_cache {
             timing_parts.push("cached".green().dimmed().to_string());
         } else {
-            timing_parts.push(
-                format!("fetch {}ms", fetch)
-                    .yellow()
-                    .dimmed()
-                    .to_string()
-            );
+            timing_parts.push(format!("fetch {}ms", fetch).yellow().dimmed().to_string());
         }
     }
     let timing = timing_parts.join("  ".dimmed().to_string().as_str());
@@ -909,7 +929,10 @@ fn display_ir_findings(args: &ReviewArgs, result: &AnalysisResult) {
     }
 
     if result.finding_count == 0 && hazards.is_empty() {
-        println!("{} No issues found! Your code looks good.", "✓".bright_green().bold());
+        println!(
+            "{} No issues found! Your code looks good.",
+            "✓".bright_green().bold()
+        );
         render_session_footer(context);
         return;
     }
@@ -924,9 +947,7 @@ fn display_ir_findings(args: &ReviewArgs, result: &AnalysisResult) {
     // Diff-aware: show changed-file top-N when git diff is available.
     let file_matches = |fp: &str| -> bool {
         changed_files.iter().any(|c| {
-            fp == c.as_str()
-                || fp.ends_with(&format!("/{}", c))
-                || c.ends_with(&format!("/{}", fp))
+            fp == c.as_str() || fp.ends_with(&format!("/{}", c)) || c.ends_with(&format!("/{}", fp))
         })
     };
 
@@ -953,8 +974,6 @@ fn display_ir_findings(args: &ReviewArgs, result: &AnalysisResult) {
     render_session_footer(context);
     // No diff and not --all: hazards only, no findings noise.
 }
-
-
 
 /// Render SRE hazards — always surfaced at the top of the output.
 ///
@@ -985,7 +1004,11 @@ fn display_changed_files_section(
     changed_files: &[String],
     file_matches: &dyn Fn(&str) -> bool,
 ) {
-    println!("── {} ({} changed) ──", "Changed files".bold(), changed_files.len());
+    println!(
+        "── {} ({} changed) ──",
+        "Changed files".bold(),
+        changed_files.len()
+    );
     println!();
 
     let changed_findings: Vec<&IrFinding> = findings
@@ -994,7 +1017,10 @@ fn display_changed_files_section(
         .collect();
 
     if changed_findings.is_empty() {
-        println!("  {} No issues introduced in changed files.", "✓".bright_green().bold());
+        println!(
+            "  {} No issues introduced in changed files.",
+            "✓".bright_green().bold()
+        );
         println!();
         return;
     }
@@ -1003,10 +1029,10 @@ fn display_changed_files_section(
     let sev_order = |s: &str| -> u8 {
         match s.to_lowercase().as_str() {
             "critical" => 0,
-            "high"     => 1,
-            "medium"   => 2,
-            "low"      => 3,
-            _          => 4,
+            "high" => 1,
+            "medium" => 2,
+            "low" => 3,
+            _ => 4,
         }
     };
     let mut sorted = changed_findings.clone();
@@ -1055,7 +1081,9 @@ fn render_system_hazard(hazard: &IrSystemHazard) {
     let path_display = if path_line.len() > path_budget {
         format!(
             "…{}",
-            &path_line[path_line.len().saturating_sub(path_budget.saturating_sub(1))..]
+            &path_line[path_line
+                .len()
+                .saturating_sub(path_budget.saturating_sub(1))..]
         )
     } else {
         path_line.clone()
@@ -1079,7 +1107,8 @@ fn render_system_hazard(hazard: &IrSystemHazard) {
     } else {
         // Strip the "Propagation risk N% — reaches SLO '...'. " prefix if present
         if hazard.anchored_to_slo {
-            hazard.one_line_impact
+            hazard
+                .one_line_impact
                 .find("'. ")
                 .map(|pos| hazard.one_line_impact[pos + 3..].to_string())
                 .unwrap_or_else(|| hazard.one_line_impact.clone())
@@ -1128,7 +1157,8 @@ fn render_system_hazard(hazard: &IrSystemHazard) {
     // Skipped if the finding title already covers this ground (when they're
     // essentially the same sentence), otherwise adds the systemic framing.
     let hazard_sentence = if hazard.anchored_to_slo {
-        hazard.one_line_impact
+        hazard
+            .one_line_impact
             .find("'. ")
             .map(|pos| hazard.one_line_impact[pos + 3..].to_string())
             .unwrap_or_else(|| hazard.one_line_impact.clone())
@@ -1237,7 +1267,11 @@ fn print_tradeoff_category_line(indent: &str, s: &str, col: usize) {
 /// Render a plain finding in compact one-line form, respecting 80-column width.
 fn render_plain_finding(finding: &IrFinding) {
     let icon = severity_icon(&finding.severity);
-    let title = if !finding.title.is_empty() { finding.title.as_str() } else { finding.rule_id.as_str() };
+    let title = if !finding.title.is_empty() {
+        finding.title.as_str()
+    } else {
+        finding.rule_id.as_str()
+    };
 
     // Visible prefix: "  " + icon(2) + "  " = 6 chars, then "path:line  ".
     let icon_prefix_width = 6usize;
@@ -1260,10 +1294,10 @@ fn render_plain_finding(finding: &IrFinding) {
 fn severity_icon(severity: &str) -> &'static str {
     match severity.to_lowercase().as_str() {
         "critical" => "🔴",
-        "high"     => "🟠",
-        "medium"   => "🟡",
-        "low"      => "🔵",
-        _          => "⚪",
+        "high" => "🟠",
+        "medium" => "🟡",
+        "low" => "🔵",
+        _ => "⚪",
     }
 }
 
@@ -1402,7 +1436,10 @@ fn apply_enrichment(
             if slo.matches_local_service(workspace_label) {
                 enricher.link_service_slo_to_all_routes(graph, slo);
             } else if verbose {
-                eprintln!("  Skipping SLO '{}' — belongs to a different service", slo.name);
+                eprintln!(
+                    "  Skipping SLO '{}' — belongs to a different service",
+                    slo.name
+                );
             }
         }
     }

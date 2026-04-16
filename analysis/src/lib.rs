@@ -50,5 +50,5 @@ pub use rules::Rule;
 pub use rules::registry::RuleRegistry;
 
 // Re-export SRE intelligence types
-pub use sre::ranker::{rank_files, top_n, RankedFile};
-pub use sre::{lookup_glossary, GlossaryEntry};
+pub use sre::ranker::{RankedFile, rank_files, top_n};
+pub use sre::{GlossaryEntry, lookup_glossary};

@@ -42,10 +42,7 @@ impl DynatraceSloProvider {
 
         loop {
             let url = match &next_page_key {
-                Some(key) => format!(
-                    "{}/api/v2/slo?nextPageKey={}",
-                    self.environment_url, key
-                ),
+                Some(key) => format!("{}/api/v2/slo?nextPageKey={}", self.environment_url, key),
                 None => format!(
                     "{}/api/v2/slo?pageSize=100&evaluate=true",
                     self.environment_url
@@ -66,8 +63,10 @@ impl DynatraceSloProvider {
                 anyhow::bail!("Dynatrace API error: {} — {}", status, body);
             }
 
-            let response: DynatraceSloResponse =
-                resp.json().await.context("Failed to parse Dynatrace SLO response")?;
+            let response: DynatraceSloResponse = resp
+                .json()
+                .await
+                .context("Failed to parse Dynatrace SLO response")?;
 
             all_slos.extend(response.slo.into_iter().map(|s| self.convert_slo(s)));
 

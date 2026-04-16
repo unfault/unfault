@@ -91,8 +91,8 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use petgraph::visit::EdgeRef;
 use petgraph::Direction;
+use petgraph::visit::EdgeRef;
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::finding::Finding;

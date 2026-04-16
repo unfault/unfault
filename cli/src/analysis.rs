@@ -80,19 +80,18 @@ pub async fn analyze_ir_locally(
     };
 
     // Step 5b: Convert RuleFindings → Findings (needed for SRE synthesis).
-    let findings: Vec<Finding> = rule_findings
-        .into_iter()
-        .map(Finding::from)
-        .collect();
+    let findings: Vec<Finding> = rule_findings.into_iter().map(Finding::from).collect();
 
     // Step 5b: SRE synthesis (Pass 3) — enrich findings with blast radius.
-    let sem_entries: Vec<(unfault_analysis::FileId, std::sync::Arc<unfault_analysis::SourceSemantics>)> = ir
+    let sem_entries: Vec<(
+        unfault_analysis::FileId,
+        std::sync::Arc<unfault_analysis::SourceSemantics>,
+    )> = ir
         .semantics
         .iter()
         .map(|s| (s.file_id(), std::sync::Arc::new(s.clone())))
         .collect();
-    let system_hazards_raw =
-        unfault_analysis::sre::synthesize(&findings, &sem_entries, &ir.graph);
+    let system_hazards_raw = unfault_analysis::sre::synthesize(&findings, &sem_entries, &ir.graph);
 
     // Step 5c: Convert Findings → IrFindings.
     let ir_findings: Vec<IrFinding> = findings
@@ -138,23 +137,24 @@ pub async fn analyze_ir_locally(
                 .cloned()
                 .unwrap_or_default();
             IrSystemHazard {
-            glossary_id: h.glossary_id,
-            aka: h.aka,
-            file_path: h.file_path,
-            line: h.line.unwrap_or(0),
-            effective_severity: format!("{:?}", h.effective_severity),
-            one_line_impact: h.one_line_impact,
-            destruction_path: h.destruction_path,
-            finding_id: h.finding_id,
-            // World Model fields
-            aggregate_risk: h.propagation.aggregate_risk,
-            macro_goal: h.propagation.macro_goal,
-            anchored_to_slo: h.propagation.anchored_to_slo,
-            // Tradeoff fields
-            tradeoff_gain: h.tradeoff.gain,
-            tradeoff_risk: h.tradeoff.risk,
-            finding_title,
-        }})
+                glossary_id: h.glossary_id,
+                aka: h.aka,
+                file_path: h.file_path,
+                line: h.line.unwrap_or(0),
+                effective_severity: format!("{:?}", h.effective_severity),
+                one_line_impact: h.one_line_impact,
+                destruction_path: h.destruction_path,
+                finding_id: h.finding_id,
+                // World Model fields
+                aggregate_risk: h.propagation.aggregate_risk,
+                macro_goal: h.propagation.macro_goal,
+                anchored_to_slo: h.propagation.anchored_to_slo,
+                // Tradeoff fields
+                tradeoff_gain: h.tradeoff.gain,
+                tradeoff_risk: h.tradeoff.risk,
+                finding_title,
+            }
+        })
         .collect();
 
     // Build graph stats from the IR
@@ -208,11 +208,7 @@ fn apply_suppressions_from_disk(
         // unfault-ignore: rust.io_in_hot_path — deduplicated by source_cache above
         if let Ok(src) = std::fs::read_to_string(&full_path) {
             // Infer language from extension.
-            let lang = match full_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("")
-            {
+            let lang = match full_path.extension().and_then(|e| e.to_str()).unwrap_or("") {
                 "py" => Language::Python,
                 "rs" => Language::Rust,
                 "go" => Language::Go,

@@ -63,7 +63,8 @@ impl Rule for RustEphemeralFilesystemWriteRule {
 
             // Track which (callee, line) pairs we've already emitted to prevent
             // duplicates from nested call_expression nodes (e.g. fs::write(...).unwrap()).
-            let mut seen: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
+            let mut seen: std::collections::HashSet<(String, u32)> =
+                std::collections::HashSet::new();
 
             // Look for file write operations with ephemeral paths
             for call in &rust.calls {

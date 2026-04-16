@@ -81,11 +81,7 @@ impl SloDefinition {
         // GCP resource name: .../services/{slug}/serviceLevelObjectives/...
         let services_part = self.id.split("/services/").nth(1)?;
         let slug = services_part.split('/').next()?;
-        if slug.is_empty() {
-            None
-        } else {
-            Some(slug)
-        }
+        if slug.is_empty() { None } else { Some(slug) }
     }
 
     /// Check whether this SLO plausibly belongs to the given local service name.

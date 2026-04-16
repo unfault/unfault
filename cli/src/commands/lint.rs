@@ -212,7 +212,10 @@ fn display_lint_findings(args: &LintArgs, result: &AnalysisResult) {
     super::review::render_session_overview(&result.context);
 
     if result.finding_count == 0 {
-        println!("{} No issues found! Your code looks good.", "✓".bright_green().bold());
+        println!(
+            "{} No issues found! Your code looks good.",
+            "✓".bright_green().bold()
+        );
         return;
     }
 
@@ -226,7 +229,11 @@ fn display_lint_findings(args: &LintArgs, result: &AnalysisResult) {
     };
 
     let total = result.finding_count;
-    let found_text = format!("⚠ Found {} issue{}", total, if total == 1 { "" } else { "s" });
+    let found_text = format!(
+        "⚠ Found {} issue{}",
+        total,
+        if total == 1 { "" } else { "s" }
+    );
     if fix_hint.is_empty() {
         println!(
             "{} Found {} issue{}",
@@ -248,13 +255,25 @@ fn display_lint_findings(args: &LintArgs, result: &AnalysisResult) {
     }
 
     if result.applied_patches > 0 {
-        let verb = if args.dry_run { "Would apply" } else { "Applied" };
+        let verb = if args.dry_run {
+            "Would apply"
+        } else {
+            "Applied"
+        };
         println!(
             "  {} {} {} patch{}",
-            if args.dry_run { "→".cyan().bold() } else { "✓".green().bold() },
+            if args.dry_run {
+                "→".cyan().bold()
+            } else {
+                "✓".green().bold()
+            },
             verb,
             result.applied_patches.to_string().bright_green(),
-            if result.applied_patches == 1 { "" } else { "es" }
+            if result.applied_patches == 1 {
+                ""
+            } else {
+                "es"
+            }
         );
     }
 
@@ -310,10 +329,7 @@ impl LintScanState {
         }
         let mut lines = 0;
 
-        eprint!(
-            "→ Linting {}...\n",
-            self.workspace_label.bold()
-        );
+        eprint!("→ Linting {}...\n", self.workspace_label.bold());
         lines += 1;
 
         if !self.languages.is_empty() {
@@ -325,17 +341,18 @@ impl LintScanState {
             lines += 1;
         }
 
-        eprint!(
-            "  Dimensions: {}\n",
-            dimensions.join(", ").dimmed()
-        );
+        eprint!("  Dimensions: {}\n", dimensions.join(", ").dimmed());
         lines += 1;
 
         if self.file_count > 0 {
             eprint!(
                 "  Found {} matching source {}\n",
                 self.file_count.to_string().bright_green(),
-                if self.file_count == 1 { "file" } else { "files" }
+                if self.file_count == 1 {
+                    "file"
+                } else {
+                    "files"
+                }
             );
             lines += 1;
         }

@@ -53,7 +53,10 @@ impl GcpSloProvider {
 
         let mut all_slos = Vec::new();
         for service in self.list_services(client, &token).await? {
-            all_slos.extend(self.list_service_slos(client, &token, &service.name).await?);
+            all_slos.extend(
+                self.list_service_slos(client, &token, &service.name)
+                    .await?,
+            );
         }
         Ok(all_slos)
     }
@@ -79,8 +82,10 @@ impl GcpSloProvider {
             anyhow::bail!("GCP API error listing services: {} — {}", status, body);
         }
 
-        let response: GcpServicesResponse =
-            resp.json().await.context("Failed to parse services response")?;
+        let response: GcpServicesResponse = resp
+            .json()
+            .await
+            .context("Failed to parse services response")?;
         Ok(response.services.unwrap_or_default())
     }
 

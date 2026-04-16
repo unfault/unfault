@@ -353,7 +353,9 @@ fn print_table(rows: &[IntegrationRow]) {
             State::NotDetected => ("✗".red().to_string(), "not detected".dimmed().to_string()),
             State::Detected { detail } => (
                 "~".yellow().to_string(),
-                format!("credentials found  ({})", detail).dimmed().to_string(),
+                format!("credentials found  ({})", detail)
+                    .dimmed()
+                    .to_string(),
             ),
             State::VerifyOk { detail } => (
                 "✓".green().to_string(),
@@ -485,18 +487,26 @@ fn unix_to_rfc3339(secs: u64) -> String {
 fn parse_rfc3339_secs(s: &str) -> Option<u64> {
     let s = s.trim_end_matches('Z');
     let parts: Vec<&str> = s.split('T').collect();
-    if parts.len() != 2 { return None; }
+    if parts.len() != 2 {
+        return None;
+    }
     let d: Vec<u64> = parts[0].split('-').filter_map(|x| x.parse().ok()).collect();
     let t: Vec<u64> = parts[1].split(':').filter_map(|x| x.parse().ok()).collect();
-    if d.len() < 3 || t.len() < 3 { return None; }
+    if d.len() < 3 || t.len() < 3 {
+        return None;
+    }
     let mut days = 0u64;
-    for yr in 1970..d[0] { days += if is_leap(yr) { 366 } else { 365 }; }
+    for yr in 1970..d[0] {
+        days += if is_leap(yr) { 366 } else { 365 };
+    }
     let md: [u64; 12] = if is_leap(d[0]) {
-        [31,29,31,30,31,30,31,31,30,31,30,31]
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
-        [31,28,31,30,31,30,31,31,30,31,30,31]
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     };
-    for i in 0..(d[1] as usize - 1) { days += md[i]; }
+    for i in 0..(d[1] as usize - 1) {
+        days += md[i];
+    }
     days += d[2] - 1;
     Some(days * 86400 + t[0] * 3600 + t[1] * 60 + t[2])
 }
@@ -505,17 +515,25 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
     let mut y = 1970u64;
     loop {
         let yd = if is_leap(y) { 366 } else { 365 };
-        if days < yd { break; }
+        if days < yd {
+            break;
+        }
         days -= yd;
         y += 1;
     }
     let md: [u64; 12] = if is_leap(y) {
-        [31,29,31,30,31,30,31,31,30,31,30,31]
+        [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     } else {
-        [31,28,31,30,31,30,31,31,30,31,30,31]
+        [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     };
     let mut mo = 1u64;
-    for &m in &md { if days < m { break; } days -= m; mo += 1; }
+    for &m in &md {
+        if days < m {
+            break;
+        }
+        days -= m;
+        mo += 1;
+    }
     (y, mo, days + 1)
 }
 

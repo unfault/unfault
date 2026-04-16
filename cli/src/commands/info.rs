@@ -2,7 +2,7 @@
 use colored::Colorize;
 
 use crate::exit_codes::{EXIT_ERROR, EXIT_SUCCESS};
-use crate::fmt::{word_wrap, COL_WIDTH};
+use crate::fmt::{COL_WIDTH, word_wrap};
 
 /// Execute `unfault info <id>`.
 ///

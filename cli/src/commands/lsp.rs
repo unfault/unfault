@@ -396,7 +396,13 @@ impl UnfaultLsp {
         // Run analysis locally
         debug!("[LSP] Running local analysis...");
 
-        let response = match crate::analysis::analyze_ir_locally(ir_json, &profiles, Some(&project_root)).await {
+        let response = match crate::analysis::analyze_ir_locally(
+            ir_json,
+            &profiles,
+            Some(&project_root),
+        )
+        .await
+        {
             Ok(response) => response,
             Err(e) => {
                 debug!("[LSP] Analysis error: {:?}", e);
