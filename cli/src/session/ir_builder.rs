@@ -305,10 +305,15 @@ pub fn build_ir_cached(
     let cache = Arc::new(Mutex::new(cache));
     let cache_open_ms = cache_start.elapsed().as_millis();
 
-    // Determine files to process
+    // Determine files to process — test files are always excluded regardless
+    // of whether the caller supplied an explicit list or we discover them.
     let discover_start = Instant::now();
     let files = match file_paths {
-        Some(paths) => paths.to_vec(),
+        Some(paths) => paths
+            .iter()
+            .filter(|p| !is_test_file(p))
+            .cloned()
+            .collect(),
         None => discover_source_files(workspace_path)?,
     };
     let discover_ms = discover_start.elapsed().as_millis();
@@ -555,6 +560,9 @@ pub fn build_ir_cached(
 }
 
 /// Discover source files in a directory using ignore patterns.
+///
+/// Test files are automatically excluded — they consistently produce false
+/// positives when unfault traces cross-file references back to test callers.
 fn discover_source_files(workspace_path: &Path) -> Result<Vec<PathBuf>> {
     use ignore::WalkBuilder;
 
@@ -570,12 +578,72 @@ fn discover_source_files(workspace_path: &Path) -> Result<Vec<PathBuf>> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_file() && detect_language(path).is_some() {
+        if path.is_file() && detect_language(path).is_some() && !is_test_file(path) {
             files.push(path.to_path_buf());
         }
     }
 
     Ok(files)
+}
+
+/// Returns `true` if `path` looks like a test file for any supported language.
+///
+/// Patterns covered per language:
+/// - **Python**: `test_*.py`, `*_test.py`, `*_tests.py`, `conftest.py`,
+///   paths containing `/tests/` or `/test/`
+/// - **Go**: `*_test.go`, paths containing `/testdata/` or `/test/`
+/// - **TypeScript / JavaScript**: `*.test.{ts,tsx,js}`, `*.spec.{ts,tsx,js}`,
+///   paths containing `/__tests__/`, `/test/`, or `/tests/`
+/// - **Rust**: `test_*.rs`, `*_test.rs`, paths containing `/tests/`
+///   (in-file `#[cfg(test)]` blocks are already suppressed by the analysis layer)
+pub fn is_test_file(path: &Path) -> bool {
+    // Build a forward-slash path string for portable pattern matching.
+    let path_str = path.to_string_lossy();
+    let path_norm = path_str.replace('\\', "/");
+
+    let filename = path_norm.rsplit('/').next().unwrap_or(&path_norm);
+    let filename_lower = filename.to_lowercase();
+
+    // ── Python ──────────────────────────────────────────────────────────────
+    if filename_lower.ends_with(".py") {
+        return filename_lower.starts_with("test_")
+            || filename_lower.ends_with("_test.py")
+            || filename_lower.ends_with("_tests.py")
+            || filename_lower == "conftest.py"
+            || path_norm.contains("/tests/")
+            || path_norm.contains("/test/");
+    }
+
+    // ── Go ──────────────────────────────────────────────────────────────────
+    if filename_lower.ends_with(".go") {
+        return filename_lower.ends_with("_test.go")
+            || path_norm.contains("/testdata/")
+            || path_norm.contains("/test/");
+    }
+
+    // ── TypeScript / JavaScript ──────────────────────────────────────────────
+    if filename_lower.ends_with(".ts")
+        || filename_lower.ends_with(".tsx")
+        || filename_lower.ends_with(".js")
+        || filename_lower.ends_with(".jsx")
+        || filename_lower.ends_with(".mjs")
+        || filename_lower.ends_with(".cjs")
+    {
+        return filename_lower.contains(".test.")
+            || filename_lower.contains(".spec.")
+            || path_norm.contains("/__tests__/")
+            || path_norm.contains("/test/")
+            || path_norm.contains("/tests/");
+    }
+
+    // ── Rust ────────────────────────────────────────────────────────────────
+    if filename_lower.ends_with(".rs") {
+        return filename_lower.starts_with("test_")
+            || filename_lower.ends_with("_test.rs")
+            || path_norm.contains("/tests/");
+    }
+
+    false
 }
 
 /// Detect language from file extension.
@@ -595,6 +663,123 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    // ── is_test_file ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn is_test_file_python_prefix() {
+        assert!(is_test_file(Path::new("test_auth.py")));
+        assert!(is_test_file(Path::new("Test_Auth.py"))); // case-insensitive
+        assert!(is_test_file(Path::new("src/test_router.py")));
+    }
+
+    #[test]
+    fn is_test_file_python_suffix() {
+        assert!(is_test_file(Path::new("auth_test.py")));
+        assert!(is_test_file(Path::new("auth_tests.py")));
+    }
+
+    #[test]
+    fn is_test_file_python_conftest() {
+        assert!(is_test_file(Path::new("conftest.py")));
+        assert!(is_test_file(Path::new("src/conftest.py")));
+    }
+
+    #[test]
+    fn is_test_file_python_test_dir() {
+        assert!(is_test_file(Path::new("project/tests/auth.py")));
+        assert!(is_test_file(Path::new("src/test/helper.py")));
+    }
+
+    #[test]
+    fn is_test_file_python_regular_files_pass() {
+        assert!(!is_test_file(Path::new("router.py")));
+        assert!(!is_test_file(Path::new("testing_utils.py"))); // 'testing_' is not 'test_'
+        assert!(!is_test_file(Path::new("src/auth.py")));
+    }
+
+    #[test]
+    fn is_test_file_go_suffix() {
+        assert!(is_test_file(Path::new("handler_test.go")));
+        assert!(is_test_file(Path::new("src/handler_test.go")));
+    }
+
+    #[test]
+    fn is_test_file_go_testdata_dir() {
+        assert!(is_test_file(Path::new("project/testdata/fixture.go")));
+    }
+
+    #[test]
+    fn is_test_file_go_test_dir() {
+        assert!(is_test_file(Path::new("project/test/helper.go")));
+    }
+
+    #[test]
+    fn is_test_file_go_regular_files_pass() {
+        assert!(!is_test_file(Path::new("handler.go")));
+        assert!(!is_test_file(Path::new("testing.go"))); // common stdlib import file
+    }
+
+    #[test]
+    fn is_test_file_ts_dot_test() {
+        assert!(is_test_file(Path::new("handler.test.ts")));
+        assert!(is_test_file(Path::new("handler.test.tsx")));
+        assert!(is_test_file(Path::new("handler.test.js")));
+    }
+
+    #[test]
+    fn is_test_file_ts_dot_spec() {
+        assert!(is_test_file(Path::new("handler.spec.ts")));
+        assert!(is_test_file(Path::new("handler.spec.tsx")));
+        assert!(is_test_file(Path::new("handler.spec.js")));
+    }
+
+    #[test]
+    fn is_test_file_ts_tests_dirs() {
+        assert!(is_test_file(Path::new("src/__tests__/auth.ts")));
+        assert!(is_test_file(Path::new("src/test/auth.ts")));
+        assert!(is_test_file(Path::new("src/tests/auth.ts")));
+    }
+
+    #[test]
+    fn is_test_file_ts_regular_files_pass() {
+        assert!(!is_test_file(Path::new("handler.ts")));
+        assert!(!is_test_file(Path::new("src/router.tsx")));
+        // "testing-utils.ts" does NOT contain ".test." or ".spec."
+        assert!(!is_test_file(Path::new("testing-utils.ts")));
+    }
+
+    #[test]
+    fn is_test_file_rust_prefix() {
+        assert!(is_test_file(Path::new("test_auth.rs")));
+    }
+
+    #[test]
+    fn is_test_file_rust_suffix() {
+        assert!(is_test_file(Path::new("auth_test.rs")));
+    }
+
+    #[test]
+    fn is_test_file_rust_tests_dir() {
+        // Integration tests live in <crate>/tests/
+        assert!(is_test_file(Path::new("mylib/tests/integration.rs")));
+    }
+
+    #[test]
+    fn is_test_file_rust_regular_files_pass() {
+        assert!(!is_test_file(Path::new("handler.rs")));
+        assert!(!is_test_file(Path::new("src/router.rs")));
+        // src/lib.rs contains #[cfg(test)] but is not a test file
+        assert!(!is_test_file(Path::new("src/lib.rs")));
+    }
+
+    #[test]
+    fn is_test_file_non_source_files_pass() {
+        assert!(!is_test_file(Path::new("test_config.json")));
+        assert!(!is_test_file(Path::new("README.md")));
+    }
+
+    // ── detect_language ──────────────────────────────────────────────────────
 
     #[test]
     fn test_detect_language() {

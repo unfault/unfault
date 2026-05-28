@@ -109,6 +109,15 @@ enum Commands {
         /// Skip SLO and trace fetching entirely — useful in CI or pre-commit hooks
         #[arg(long)]
         offline: bool,
+        /// Analyze only files changed in a specific git commit (SHA, branch, tag, or HEAD~N).
+        /// Useful for incremental cache warming: only changed files are parsed, the rest
+        /// are served from cache. Can be combined with --files.
+        #[arg(long, value_name = "REF")]
+        commit: Option<String>,
+        /// Analyze only these specific files (can be repeated or space-separated).
+        /// Can be combined with --commit; duplicates are deduplicated automatically.
+        #[arg(long, value_name = "FILE", num_args = 1..)]
+        files: Vec<std::path::PathBuf>,
     },
     /// Show all findings grouped by severity and rule — the detailed linter view
     Lint {
@@ -130,6 +139,15 @@ enum Commands {
         /// Show what fixes would be applied without actually applying them
         #[arg(long)]
         dry_run: bool,
+        /// Analyze only files changed in a specific git commit (SHA, branch, tag, or HEAD~N).
+        /// Useful for incremental cache warming: only changed files are parsed, the rest
+        /// are served from cache. Can be combined with --files.
+        #[arg(long, value_name = "REF")]
+        commit: Option<String>,
+        /// Analyze only these specific files (can be repeated or space-separated).
+        /// Can be combined with --commit; duplicates are deduplicated automatically.
+        #[arg(long, value_name = "FILE", num_args = 1..)]
+        files: Vec<std::path::PathBuf>,
     },
     /// Show SRE glossary entry for a failure mode (e.g. SLO-001)
     Info {
@@ -432,6 +450,8 @@ async fn run_command(command: Commands) -> i32 {
             dimension,
             fix,
             dry_run,
+            commit,
+            files,
         } => {
             init_logger(verbose);
             let output_format = match output {
@@ -449,6 +469,8 @@ async fn run_command(command: Commands) -> i32 {
                 },
                 fix,
                 dry_run,
+                commit,
+                files,
             };
             match commands::lint::execute(args).await {
                 Ok(exit_code) => exit_code,
@@ -480,6 +502,8 @@ async fn run_command(command: Commands) -> i32 {
             all,
             refresh_cache,
             offline,
+            commit,
+            files,
         } => {
             init_logger(verbose);
             // Convert OutputFormat to string for backward compatibility
@@ -515,6 +539,8 @@ async fn run_command(command: Commands) -> i32 {
                 all,
                 refresh_cache,
                 offline,
+                commit,
+                files,
             };
             match commands::review::execute(args).await {
                 Ok(exit_code) => exit_code,

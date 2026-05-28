@@ -46,7 +46,7 @@ pub mod workspace_settings;
 
 pub use graph_builder::{SerializableGraph, build_local_graph};
 pub use header_extractor::{FileHeader, HeaderExtractor, HeaderExtractorConfig};
-pub use ir_builder::{IrBuildResult, build_ir, build_ir_cached};
+pub use ir_builder::{IrBuildResult, build_ir, build_ir_cached, is_test_file};
 pub use patch_applier::{PatchApplier, PatchStats};
 pub use semantics_cache::{CacheStats, SemanticsCache};
 pub use workspace::{
@@ -54,7 +54,7 @@ pub use workspace::{
 };
 pub use workspace_id::{
     MetaFileInfo, WorkspaceIdResult, WorkspaceIdSource, compute_workspace_id,
-    get_git_changed_files, get_git_remote, normalize_git_remote,
+    get_git_changed_files, get_git_commit_files, get_git_remote, normalize_git_remote,
 };
 pub use workspace_settings::{
     LoadedSettings, RuleSettings, SettingsSource, WorkspaceSettings, load_settings,

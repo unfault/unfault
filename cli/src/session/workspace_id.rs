@@ -9,7 +9,7 @@
 //! 3. Workspace label scoped to org (last resort)
 
 use sha2::{Digest, Sha256};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// Source used to compute workspace_id.
@@ -307,6 +307,54 @@ pub fn get_git_changed_files(workspace_root: &Path) -> Vec<String> {
     }
 
     changed
+}
+
+/// Return the absolute paths of source files touched by a specific git commit.
+///
+/// Runs `git diff-tree --no-commit-id -r --name-only <commit_ref>` which lists
+/// every file added, modified, or deleted in the given commit.  Deleted files
+/// are resolved but will simply not exist on disk; callers that pass the result
+/// to the IR builder will skip them silently (the file-read step returns an
+/// error that is treated as a cache miss / skip).
+///
+/// `commit_ref` can be any git revision accepted by `diff-tree`: a full SHA,
+/// short SHA, branch name, tag, or symbolic ref like `HEAD` or `HEAD~1`.
+///
+/// Returns an error string if git is not available or the ref is invalid.
+/// Returns an empty `Vec` when the commit touched no files (e.g. an empty
+/// merge commit).
+pub fn get_git_commit_files(
+    workspace_root: &Path,
+    commit_ref: &str,
+) -> Result<Vec<PathBuf>, String> {
+    let output = Command::new("git")
+        .args([
+            "diff-tree",
+            "--no-commit-id",
+            "-r",
+            "--name-only",
+            "--diff-filter=ACM", // Added, Copied, Modified — skip Deleted
+            commit_ref,
+        ])
+        .current_dir(workspace_root)
+        .output()
+        .map_err(|e| format!("Failed to run git: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!(
+            "git diff-tree failed for ref '{commit_ref}': {stderr}"
+        ));
+    }
+
+    let mut files = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let line = line.trim();
+        if !line.is_empty() {
+            files.push(workspace_root.join(line));
+        }
+    }
+    Ok(files)
 }
 
 #[cfg(test)]

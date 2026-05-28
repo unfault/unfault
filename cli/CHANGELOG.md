@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-05-28
+
+### Added
+
+- **Test file exclusion** — test files are now silently excluded from analysis at
+  parse time, eliminating false positives caused by unfault tracing cross-file
+  references back into test callers. Patterns covered per language:
+  - **Python:** `test_*.py`, `*_test.py`, `*_tests.py`, `conftest.py`, any file
+    under a `tests/` or `test/` directory.
+  - **Go:** `*_test.go`, files under `testdata/` or `test/` directories.
+  - **TypeScript / JavaScript:** `*.test.{ts,tsx,js}`, `*.spec.{ts,tsx,js}`,
+    files under `__tests__/`, `test/`, or `tests/` directories.
+  - **Rust:** `test_*.rs`, `*_test.rs`, files under a `tests/` directory
+    (in-file `#[cfg(test)]` blocks continue to be suppressed by the analysis
+    layer as before).
+
+- **`--commit <REF>` flag** (`review` and `lint`) — analyze only the files
+  touched by a specific git commit. Accepts any git revision: full SHA, short
+  SHA, branch name, tag, or symbolic ref (`HEAD`, `HEAD~2`, …). Only added and
+  modified files are included (deleted files are skipped). Ideal for incremental
+  cache warming in CI: parse just what changed, serve everything else from cache.
+
+- **`--files <FILE>...` flag** (`review` and `lint`) — restrict analysis to an
+  explicit list of files. Accepts one or more paths, can be repeated, and
+  composes with `--commit` (the two sets are unioned and deduplicated). Useful
+  for editor integrations or shell pipelines:
+  ```
+  unfault review --files src/auth.py src/router.py
+  git diff-tree --no-commit-id -r --name-only HEAD | xargs unfault review --files
+  ```
+
 ## [0.8.1] - 2026-04-16
 
 ### Fixed

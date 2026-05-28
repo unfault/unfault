@@ -37,7 +37,7 @@ use crate::fmt::{COL_WIDTH, truncate, word_wrap};
 use crate::output::{IrFinding, IrSystemHazard};
 use crate::session::{
     PatchApplier, ScanProgress, WorkspaceScanner, build_ir_cached, compute_workspace_id,
-    get_git_changed_files, get_git_remote,
+    get_git_changed_files, get_git_commit_files, get_git_remote,
 };
 
 /// Arguments for the review command
@@ -62,6 +62,12 @@ pub struct ReviewArgs {
     pub refresh_cache: bool,
     /// Skip SLO and trace fetching entirely (useful in CI or pre-commit hooks)
     pub offline: bool,
+    /// Analyze only files changed in this git commit ref (SHA, branch, HEAD~N, …).
+    /// When combined with `files`, both sets are unioned and deduplicated.
+    pub commit: Option<String>,
+    /// Analyze only these specific files.
+    /// When combined with `commit`, both sets are unioned and deduplicated.
+    pub files: Vec<std::path::PathBuf>,
 }
 
 /// Execute the review command
@@ -302,8 +308,52 @@ async fn execute_client_parse(
     // Step 1: Build IR locally (with caching)
     pb.set_message("Parsing source files locally...");
 
+    // Resolve the file list when --commit or --files are provided.
+    // If neither is set we pass None so build_ir_cached discovers all files.
+    let explicit_files: Option<Vec<std::path::PathBuf>> =
+        if args.commit.is_some() || !args.files.is_empty() {
+            let mut paths: Vec<std::path::PathBuf> = args.files.clone();
+
+            if let Some(ref commit_ref) = args.commit {
+                match get_git_commit_files(current_dir, commit_ref) {
+                    Ok(commit_paths) => paths.extend(commit_paths),
+                    Err(e) => {
+                        pb.finish_and_clear();
+                        eprintln!(
+                            "{} Could not resolve commit '{}': {}",
+                            "✗".red().bold(),
+                            commit_ref,
+                            e
+                        );
+                        return Ok(EXIT_INVALID_INPUT);
+                    }
+                }
+            }
+
+            // Deduplicate (preserving order) and canonicalize to absolute paths.
+            let mut seen = std::collections::HashSet::new();
+            let deduped = paths
+                .into_iter()
+                .map(|p| {
+                    if p.is_absolute() {
+                        p
+                    } else {
+                        current_dir.join(&p)
+                    }
+                })
+                .filter(|p| seen.insert(p.clone()))
+                .collect::<Vec<_>>();
+            Some(deduped)
+        } else {
+            None
+        };
+
     let parse_start = Instant::now();
-    let build_result = match build_ir_cached(current_dir, None, args.verbose) {
+    let build_result = match build_ir_cached(
+        current_dir,
+        explicit_files.as_deref(),
+        args.verbose,
+    ) {
         Ok(result) => result,
         Err(e) => {
             pb.finish_and_clear();
