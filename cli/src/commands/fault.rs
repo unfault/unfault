@@ -243,7 +243,12 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
     };
 
     // ── Resolve HTTP routes via the code graph ────────────────────────────────
-    let routes = resolve_routes(&workspace_path, &function_name, file_hint.as_deref(), args.verbose);
+    let routes = resolve_routes(
+        &workspace_path,
+        &function_name,
+        file_hint.as_deref(),
+        args.verbose,
+    );
 
     // ── Template selection ────────────────────────────────────────────────────
     let templates: Vec<FaultTemplate> = match &args.template {

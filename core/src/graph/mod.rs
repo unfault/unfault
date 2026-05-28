@@ -1111,8 +1111,7 @@ fn resolve_call_through_imports(
             for import in imports {
                 if import.imports_item(module_alias) {
                     // Build the submodule path: parent.module_alias
-                    let submodule_path =
-                        format!("{}.{}", import.module_path, module_alias);
+                    let submodule_path = format!("{}.{}", import.module_path, module_alias);
                     if let Some(source_file_idx) = find_import_source_file_with_context(
                         cg,
                         &submodule_path,
@@ -1687,7 +1686,9 @@ fn add_fastapi_nodes(
             .trim()
             .to_string();
         if let Some(ref prefix) = inc.prefix {
-            router_prefix.entry(var_name).or_insert_with(|| prefix.clone());
+            router_prefix
+                .entry(var_name)
+                .or_insert_with(|| prefix.clone());
         }
     }
 
@@ -1698,7 +1699,11 @@ fn add_fastapi_nodes(
             Some(prefix) => {
                 let p = prefix.trim_end_matches('/');
                 let s = route.path.trim_start_matches('/');
-                if s.is_empty() { p.to_string() } else { format!("{}/{}", p, s) }
+                if s.is_empty() {
+                    p.to_string()
+                } else {
+                    format!("{}/{}", p, s)
+                }
             }
             None => route.path.clone(),
         };

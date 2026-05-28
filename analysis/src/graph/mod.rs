@@ -985,7 +985,9 @@ fn add_fastapi_nodes(
             .trim()
             .to_string();
         if let Some(ref prefix) = inc.prefix {
-            router_prefix.entry(var_name).or_insert_with(|| prefix.clone());
+            router_prefix
+                .entry(var_name)
+                .or_insert_with(|| prefix.clone());
         }
     }
 

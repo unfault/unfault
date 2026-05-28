@@ -810,9 +810,7 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
                 render_level(depth - 1, by_depth, target, target_file, &child_prefix);
             } else {
                 // Leaf: next is the target itself.
-                let target_file_info = target_file
-                    .map(|p| format!(" ({})", p))
-                    .unwrap_or_default();
+                let target_file_info = target_file.map(|p| format!(" ({})", p)).unwrap_or_default();
                 println!(
                     "{}└─ {}{}  {}",
                     child_prefix,
@@ -847,8 +845,6 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
             "  ",
         );
     }
-
-
 
     println!();
     Ok(EXIT_SUCCESS)

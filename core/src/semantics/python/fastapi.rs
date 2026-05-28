@@ -289,8 +289,7 @@ fn extract_include_router_call(file: &ParsedFile, call_node: Node) -> Option<Fas
                     // keyword_argument means we've passed all positional args
                     "keyword_argument" => break,
                     _ => {
-                        first_expr =
-                            Some(child.utf8_text(source_bytes).unwrap_or("").to_string());
+                        first_expr = Some(child.utf8_text(source_bytes).unwrap_or("").to_string());
                         break;
                     }
                 }
