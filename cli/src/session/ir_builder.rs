@@ -309,11 +309,7 @@ pub fn build_ir_cached(
     // of whether the caller supplied an explicit list or we discover them.
     let discover_start = Instant::now();
     let files = match file_paths {
-        Some(paths) => paths
-            .iter()
-            .filter(|p| !is_test_file(p))
-            .cloned()
-            .collect(),
+        Some(paths) => paths.iter().filter(|p| !is_test_file(p)).cloned().collect(),
         None => discover_source_files(workspace_path)?,
     };
     let discover_ms = discover_start.elapsed().as_millis();

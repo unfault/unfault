@@ -19,7 +19,9 @@ use std::time::{Duration, Instant};
 
 use crate::exit_codes::*;
 use crate::output::IrFinding;
-use crate::session::{WorkspaceScanner, build_ir_cached, get_git_changed_files, get_git_commit_files};
+use crate::session::{
+    WorkspaceScanner, build_ir_cached, get_git_changed_files, get_git_commit_files,
+};
 
 use super::review::{AnalysisResult, ReviewOutputContext};
 
@@ -144,11 +146,8 @@ pub async fn execute(args: LintArgs) -> Result<i32> {
         };
 
     let parse_start = Instant::now();
-    let build_result = match build_ir_cached(
-        &current_dir,
-        explicit_files.as_deref(),
-        args.verbose,
-    ) {
+    let build_result = match build_ir_cached(&current_dir, explicit_files.as_deref(), args.verbose)
+    {
         Ok(r) => r,
         Err(e) => {
             pb.finish_and_clear();

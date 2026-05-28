@@ -349,11 +349,7 @@ async fn execute_client_parse(
         };
 
     let parse_start = Instant::now();
-    let build_result = match build_ir_cached(
-        current_dir,
-        explicit_files.as_deref(),
-        args.verbose,
-    ) {
+    let build_result = match build_ir_cached(current_dir, explicit_files.as_deref(), args.verbose) {
         Ok(result) => result,
         Err(e) => {
             pb.finish_and_clear();
