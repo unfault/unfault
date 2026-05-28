@@ -244,26 +244,79 @@ fn extract_flask_route_decorator(
             let app_var_name = object.utf8_text(source_bytes).ok()?.to_string();
             let method_name = attr.utf8_text(source_bytes).ok()?;
 
+            let args = child.child_by_field_name("arguments")?;
+
             let http_method = match method_name.to_lowercase().as_str() {
-                "get" => "GET",
-                "post" => "POST",
-                "put" => "PUT",
-                "delete" => "DELETE",
-                "patch" => "PATCH",
-                "options" => "OPTIONS",
-                "head" => "HEAD",
-                "route" => "GET",
+                "get" => "GET".to_string(),
+                "post" => "POST".to_string(),
+                "put" => "PUT".to_string(),
+                "delete" => "DELETE".to_string(),
+                "patch" => "PATCH".to_string(),
+                "options" => "OPTIONS".to_string(),
+                "head" => "HEAD".to_string(),
+                // @app.route() — inspect the `methods` kwarg to get the real method(s)
+                "route" => extract_route_methods(file, args),
                 _ => return None,
             };
 
-            let args = child.child_by_field_name("arguments")?;
             let path = extract_first_string_arg(file, args)?;
 
-            return Some((app_var_name, http_method.to_string(), path));
+            return Some((app_var_name, http_method, path));
         }
     }
 
     None
+}
+
+/// Extract HTTP methods from the `methods=[...]` keyword argument of `@app.route()`.
+/// Returns the single method if only one is listed, `"ANY"` if multiple are given,
+/// or `"GET"` as Flask's default when the kwarg is absent.
+fn extract_route_methods(file: &ParsedFile, args: Node) -> String {
+    let source_bytes = file.source.as_bytes();
+
+    let mut cursor = args.walk();
+    for child in args.children(&mut cursor) {
+        if child.kind() == "keyword_argument" {
+            let key = child.child_by_field_name("name");
+            let value = child.child_by_field_name("value");
+
+            let is_methods_kwarg = key
+                .and_then(|k| k.utf8_text(source_bytes).ok())
+                .map(|k| k == "methods")
+                .unwrap_or(false);
+
+            if !is_methods_kwarg {
+                continue;
+            }
+
+            // value should be a list literal like ['GET', 'POST']
+            if let Some(list_node) = value {
+                if list_node.kind() == "list" {
+                    let mut methods: Vec<String> = Vec::new();
+                    let mut list_cursor = list_node.walk();
+                    for item in list_node.children(&mut list_cursor) {
+                        if item.kind() == "string" {
+                            if let Ok(text) = item.utf8_text(source_bytes) {
+                                let method =
+                                    text.trim_matches(|c| c == '"' || c == '\'').to_uppercase();
+                                if !method.is_empty() {
+                                    methods.push(method);
+                                }
+                            }
+                        }
+                    }
+                    return match methods.len() {
+                        0 => "GET".to_string(),
+                        1 => methods.remove(0),
+                        _ => "ANY".to_string(),
+                    };
+                }
+            }
+        }
+    }
+
+    // No `methods` kwarg — Flask defaults to GET only
+    "GET".to_string()
 }
 
 fn collect_flask_error_handlers(file: &ParsedFile, node: Node, out: &mut Vec<FlaskErrorHandler>) {
@@ -497,6 +550,39 @@ def get_users():
         let summary = summary.unwrap();
         assert_eq!(summary.routes.len(), 1);
         assert_eq!(summary.routes[0].path, "/users");
+        // Multiple methods → "ANY"
+        assert_eq!(summary.routes[0].http_method, "ANY");
+    }
+
+    #[test]
+    fn detects_flask_route_single_method_kwarg() {
+        let src = r#"
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/submit', methods=['POST'])
+def submit():
+    return "ok"
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes[0].path, "/submit");
+        assert_eq!(summary.routes[0].http_method, "POST");
+    }
+
+    #[test]
+    fn detects_flask_route_default_get() {
+        let src = r#"
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/health')
+def health():
+    return "ok"
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes[0].http_method, "GET");
     }
 
     #[test]

@@ -271,18 +271,36 @@ fn python_flask_backend() -> Profile {
         .with_framework(Framework::Flask)
         .with_dimension(Dimension::Stability)
         .with_dimension(Dimension::Correctness)
+        .with_dimension(Dimension::Security)
+        .with_dimension(Dimension::Performance)
         .with_dimension(Dimension::Observability)
         .with_rules([
+            // Flask-specific security rules
+            "python.flask.hardcoded_secret_key",
+            "python.flask.session_timeout",
+            "python.flask.insecure_cookie_settings",
+            // HTTP client rules
             "python.http.missing_timeout",
             "python.http.missing_retry",
+            // Error handling
             "python.bare_except",
+            // Security
             "python.sql_injection",
+            // Correctness
             "python.naive_datetime",
             "python.db.missing_timeout",
-            // Phase 3 rules
+            // Stability & performance
             "python.global_mutable_state",
-            "python.missing_structured_logging",
             "python.regex_compile",
+            "python.unbounded_memory",
+            "python.large_response_memory",
+            // Observability
+            "python.missing_structured_logging",
+            "python.missing_correlation_id",
+            // Resilience
+            "python.resilience.missing_circuit_breaker",
+            "python.graceful_shutdown",
+            "python.unbounded_retry",
         ])
         .with_file_hint(
             FileQueryHint::new("flask_app")
@@ -292,6 +310,43 @@ fn python_flask_backend() -> Profile {
                 .include(FilePredicate::text_contains_any([
                     "from flask import Flask",
                     "Flask(__name__)",
+                ])),
+        )
+        .with_file_hint(
+            FileQueryHint::new("flask_routes")
+                .with_label("Flask routes")
+                .with_max_files(32)
+                .include(FilePredicate::language("python"))
+                .include(FilePredicate::text_contains_any([
+                    "@app.route(",
+                    "@app.get(",
+                    "@app.post(",
+                    "@app.put(",
+                    "@app.delete(",
+                    "@app.patch(",
+                    "@bp.route(",
+                ])),
+        )
+        .with_file_hint(
+            FileQueryHint::new("flask_blueprints")
+                .with_label("Flask blueprints")
+                .with_max_files(16)
+                .include(FilePredicate::language("python"))
+                .include(FilePredicate::text_contains_any([
+                    "Blueprint(",
+                    "from flask import Blueprint",
+                ])),
+        )
+        .with_file_hint(
+            FileQueryHint::new("flask_config")
+                .with_label("Flask configuration")
+                .with_max_files(8)
+                .include(FilePredicate::language("python"))
+                .include(FilePredicate::text_contains_any([
+                    "SECRET_KEY",
+                    "SESSION_COOKIE_",
+                    "PERMANENT_SESSION_LIFETIME",
+                    "app.config",
                 ])),
         )
         .with_file_hint(
@@ -314,6 +369,36 @@ fn python_flask_backend() -> Profile {
                 .include(FilePredicate::text_contains_any([
                     "import structlog",
                     "from loguru",
+                ])),
+        )
+        // Cross-file support: middleware for correlation_id, circuit_breaker rules
+        .with_file_hint(
+            FileQueryHint::new("python_middleware")
+                .with_label("Python middleware")
+                .with_max_files(16)
+                .include(FilePredicate::language("python"))
+                .include(FilePredicate::text_contains_any([
+                    "@app.before_request",
+                    "@app.after_request",
+                    "@app.teardown_appcontext",
+                    "correlation_id",
+                    "request_id",
+                    "X-Request-ID",
+                    "X-Correlation-ID",
+                ])),
+        )
+        // Cross-file support: resilience patterns
+        .with_file_hint(
+            FileQueryHint::new("python_resilience")
+                .with_label("Python resilience patterns")
+                .with_max_files(16)
+                .include(FilePredicate::language("python"))
+                .include(FilePredicate::text_contains_any([
+                    "circuit_breaker",
+                    "CircuitBreaker",
+                    "pybreaker",
+                    "tenacity",
+                    "backoff",
                 ])),
         )
 }
@@ -1600,6 +1685,63 @@ mod tests {
     fn python_fastapi_backend_has_file_hints() {
         let profile = python_fastapi_backend();
         assert!(!profile.file_hints.is_empty());
+    }
+
+    #[test]
+    fn python_flask_backend_has_correct_id() {
+        let profile = python_flask_backend();
+        assert_eq!(profile.id, "python_flask_backend");
+    }
+
+    #[test]
+    fn python_flask_backend_has_flask_specific_rules() {
+        let profile = python_flask_backend();
+        assert!(
+            profile
+                .rule_ids
+                .contains(&"python.flask.hardcoded_secret_key".to_string()),
+            "Flask profile should include hardcoded_secret_key rule"
+        );
+        assert!(
+            profile
+                .rule_ids
+                .contains(&"python.flask.session_timeout".to_string()),
+            "Flask profile should include session_timeout rule"
+        );
+        assert!(
+            profile
+                .rule_ids
+                .contains(&"python.flask.insecure_cookie_settings".to_string()),
+            "Flask profile should include insecure_cookie_settings rule"
+        );
+    }
+
+    #[test]
+    fn python_flask_backend_has_security_dimension() {
+        let profile = python_flask_backend();
+        assert!(
+            profile.dimensions.contains(&Dimension::Security),
+            "Flask profile should include Security dimension"
+        );
+    }
+
+    #[test]
+    fn python_flask_backend_has_file_hints() {
+        let profile = python_flask_backend();
+        assert!(!profile.file_hints.is_empty());
+        let hint_ids: Vec<&str> = profile.file_hints.iter().map(|h| h.id.as_str()).collect();
+        assert!(
+            hint_ids.contains(&"flask_routes"),
+            "Flask profile should have flask_routes file hint"
+        );
+        assert!(
+            hint_ids.contains(&"flask_blueprints"),
+            "Flask profile should have flask_blueprints file hint"
+        );
+        assert!(
+            hint_ids.contains(&"flask_config"),
+            "Flask profile should have flask_config file hint"
+        );
     }
 
     #[test]

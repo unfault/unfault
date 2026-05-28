@@ -210,6 +210,23 @@ pub fn sql_injection() -> FindingApplicability {
     }
 }
 
+pub fn session_cookie_security() -> FindingApplicability {
+    FindingApplicability {
+        investment_level: InvestmentLevel::Low,
+        min_stage: LifecycleStage::Prototype,
+        decision_level: DecisionLevel::Config,
+        benefits: vec![Benefit::Security],
+        prerequisites: vec![
+            "Set SESSION_COOKIE_SECURE = True (requires HTTPS)".to_string(),
+            "Set SESSION_COOKIE_HTTPONLY = True".to_string(),
+            "Set SESSION_COOKIE_SAMESITE = 'Lax' or 'Strict'".to_string(),
+        ],
+        notes: Some(
+            "Insecure cookie settings expose sessions to XSS and CSRF attacks; fix before any user-facing deployment.".to_string(),
+        ),
+    }
+}
+
 pub fn hardcoded_secrets() -> FindingApplicability {
     FindingApplicability {
         investment_level: InvestmentLevel::Low,

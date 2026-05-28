@@ -268,7 +268,7 @@ impl Rule for FlaskInsecureCookieSettingsRule {
     }
 
     fn applicability(&self) -> Option<FindingApplicability> {
-        Some(crate::rules::applicability_defaults::cors_policy())
+        Some(crate::rules::applicability_defaults::session_cookie_security())
     }
 }
 

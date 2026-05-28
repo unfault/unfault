@@ -520,12 +520,13 @@ impl FrameworkDetector {
 
     /// Mark the primary framework in each category
     fn mark_primary_frameworks(&self, profile: &mut FrameworkProfile) {
-        // For web frameworks, prefer full frameworks over micro-frameworks
+        // For web frameworks, use detection order to prefer more specific frameworks
         let web_priority = [
             "Django",
             "NestJS",
             "Spring",
             "FastAPI",
+            "Flask",
             "Express",
             "Axum",
             "Actix-web",
