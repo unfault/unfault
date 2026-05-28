@@ -1103,6 +1103,30 @@ fn resolve_call_through_imports(
                     }
                 }
             }
+
+            // Strategy 3: Submodule imported as an item.
+            // e.g., `from reliably_app.assistant import crud` then `crud.does_x()`
+            // Here `module_alias` = "crud" matches an item name in a `from X import crud` stmt.
+            // The actual file is `reliably_app/assistant/crud.py` (module_path + "." + item).
+            for import in imports {
+                if import.imports_item(module_alias) {
+                    // Build the submodule path: parent.module_alias
+                    let submodule_path =
+                        format!("{}.{}", import.module_path, module_alias);
+                    if let Some(source_file_idx) = find_import_source_file_with_context(
+                        cg,
+                        &submodule_path,
+                        importing_file_path,
+                    ) {
+                        if let GraphNode::File { file_id, .. } = &cg.graph[source_file_idx] {
+                            let callee_key = (*file_id, func_name.to_string());
+                            if let Some(&func_node) = cg.function_nodes.get(&callee_key) {
+                                return Some(func_node);
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -1650,12 +1674,39 @@ fn add_fastapi_nodes(
         app_nodes.insert(app.var_name.clone(), app_node);
     }
 
+    // Build a lookup: router var name → prefix, from include_router calls in this file.
+    // e.g. `web.include_router(router, prefix="/assistant")` → "router" → "/assistant"
+    let mut router_prefix: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    for inc in &fastapi.routers {
+        let var_name = inc
+            .router_expr
+            .split('.')
+            .next()
+            .unwrap_or(&inc.router_expr)
+            .trim()
+            .to_string();
+        if let Some(ref prefix) = inc.prefix {
+            router_prefix.entry(var_name).or_insert_with(|| prefix.clone());
+        }
+    }
+
     // Routes
     for route in &fastapi.routes {
+        // Resolve full path: prepend prefix when the router var has one registered.
+        let full_path = match router_prefix.get(&route.router_var) {
+            Some(prefix) => {
+                let p = prefix.trim_end_matches('/');
+                let s = route.path.trim_start_matches('/');
+                if s.is_empty() { p.to_string() } else { format!("{}/{}", p, s) }
+            }
+            None => route.path.clone(),
+        };
+
         let route_node = cg.graph.add_node(GraphNode::FastApiRoute {
             file_id,
             http_method: route.http_method.clone(),
-            path: route.path.clone(),
+            path: full_path.clone(),
         });
 
         // File contains route
@@ -1679,7 +1730,7 @@ fn add_fastapi_nodes(
             is_async: route.is_async,
             is_handler: true,
             http_method: Some(route.http_method.clone()),
-            http_path: Some(route.path.clone()),
+            http_path: Some(full_path.clone()),
         });
 
         // File contains function

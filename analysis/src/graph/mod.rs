@@ -970,12 +970,46 @@ fn add_fastapi_nodes(
         app_nodes.insert(app.var_name.clone(), app_node);
     }
 
+    // Build a lookup: router var name → prefix (from include_router calls in this file).
+    // e.g. `web.include_router(router, prefix="/assistant")` → "router" → "/assistant"
+    // When multiple include_router calls for the same router var exist (e.g. web + api with
+    // the same prefix), we just take the first prefix found.
+    let mut router_prefix: HashMap<String, String> = HashMap::new();
+    for inc in &fastapi.routers {
+        // router_expr is the first positional arg text, e.g. "router" or "users.router"
+        let var_name = inc
+            .router_expr
+            .split('.')
+            .next()
+            .unwrap_or(&inc.router_expr)
+            .trim()
+            .to_string();
+        if let Some(ref prefix) = inc.prefix {
+            router_prefix.entry(var_name).or_insert_with(|| prefix.clone());
+        }
+    }
+
     // Routes
     for route in &fastapi.routes {
+        // Resolve the full path by prepending any known prefix for this router variable.
+        let full_path = match router_prefix.get(&route.router_var) {
+            Some(prefix) => {
+                // Avoid double slashes: strip trailing slash from prefix, leading from path.
+                let p = prefix.trim_end_matches('/');
+                let s = route.path.trim_start_matches('/');
+                if s.is_empty() {
+                    p.to_string()
+                } else {
+                    format!("{}/{}", p, s)
+                }
+            }
+            None => route.path.clone(),
+        };
+
         let route_node = cg.graph.add_node(GraphNode::FastApiRoute {
             file_id,
             http_method: route.http_method.clone(),
-            path: route.path.clone(),
+            path: full_path.clone(),
         });
 
         // File contains route
@@ -988,6 +1022,24 @@ fn add_fastapi_nodes(
         for app_node in app_nodes.values() {
             cg.graph
                 .add_edge(*app_node, route_node, GraphEdgeKind::FastApiAppOwnsRoute);
+        }
+
+        // Back-fill http_method and http_path on the corresponding Function node
+        // (identified by handler_name in the same file) so that the Function node
+        // carries the full prefixed path too.
+        let handler_key = (file_id, route.handler_name.clone());
+        if let Some(&fn_idx) = cg.function_nodes.get(&handler_key) {
+            if let GraphNode::Function {
+                ref mut http_method,
+                ref mut http_path,
+                ref mut is_handler,
+                ..
+            } = cg.graph[fn_idx]
+            {
+                *is_handler = true;
+                *http_method = Some(route.http_method.clone());
+                *http_path = Some(full_path.clone());
+            }
         }
     }
 
@@ -1010,7 +1062,7 @@ fn add_fastapi_nodes(
         }
     }
 
-    let _ = py; // unused for now, but we'll likely need it later.
+    let _ = (py, router_prefix); // suppress unused warnings
 }
 
 #[cfg(test)]

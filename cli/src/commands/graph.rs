@@ -579,9 +579,9 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
     };
 
     // Parse function argument (file:function or just function_name)
-    let function_name = match args.function.split_once(':') {
-        Some((_file, func)) => func.to_string(),
-        None => args.function.clone(),
+    let (file_hint, function_name) = match args.function.split_once(':') {
+        Some((file, func)) => (Some(file.to_string()), func.to_string()),
+        None => (None, args.function.clone()),
     };
 
     if args.verbose {
@@ -600,11 +600,20 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         }
     };
 
-    let ctx = unfault_analysis::graph::traversal::get_callers(
-        &graph,
-        &function_name,
-        args.max_depth as usize,
-    );
+    let ctx = if let Some(ref hint) = file_hint {
+        unfault_analysis::graph::traversal::get_callers_in_file(
+            &graph,
+            &function_name,
+            hint,
+            args.max_depth as usize,
+        )
+    } else {
+        unfault_analysis::graph::traversal::get_callers(
+            &graph,
+            &function_name,
+            args.max_depth as usize,
+        )
+    };
 
     if args.json {
         println!("{}", serde_json::to_string_pretty(&ctx)?);
@@ -614,7 +623,99 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
     println!();
 
     if ctx.callers.is_empty() && ctx.routes.is_empty() {
-        println!("  {} No callers found for '{}'.", "ℹ".cyan(), function_name);
+        let not_in_graph = ctx.target_file.is_none();
+
+        if not_in_graph {
+            println!(
+                "  {} '{}' was not found in the code graph.",
+                "ℹ".cyan(),
+                function_name
+            );
+        } else {
+            println!(
+                "  {} '{}' is in the graph ({}) but no call edges were resolved.",
+                "ℹ".cyan(),
+                function_name,
+                ctx.target_file.as_deref().unwrap_or("").dimmed()
+            );
+            println!(
+                "  {}  Cross-file calls are not yet tracked — try targeting a route handler",
+                " ".dimmed()
+            );
+            println!("  {}  in the same file directly.", " ".dimmed());
+        }
+
+        let suggestions = unfault_analysis::graph::traversal::suggest_callers_candidates(
+            &graph,
+            &function_name,
+            ctx.target_file.as_deref(),
+        );
+
+        if !suggestions.is_empty() {
+            println!();
+            let has_handlers = suggestions.iter().any(|s| s.http_method.is_some());
+            if not_in_graph {
+                println!("  Did you mean one of these?");
+            } else if has_handlers {
+                let location = if suggestions.iter().any(|s| s.reason == "same_file_handler") {
+                    "same file"
+                } else {
+                    "same module"
+                };
+                println!(
+                    "  Route handlers in the {} — likely entry points for this function:",
+                    location
+                );
+            } else {
+                println!("  Most-called functions in the workspace:");
+            }
+            println!();
+
+            for s in &suggestions {
+                if let (Some(method), Some(path)) = (&s.http_method, &s.http_path) {
+                    let method_colored = match method.as_str() {
+                        "GET" => method.bright_green(),
+                        "POST" => method.bright_yellow(),
+                        "PUT" | "PATCH" => method.bright_cyan(),
+                        "DELETE" => method.bright_red(),
+                        _ => method.normal(),
+                    };
+                    println!(
+                        "    {} {}  {} {}",
+                        method_colored,
+                        path,
+                        "→".dimmed(),
+                        s.name.bright_white()
+                    );
+                    println!("      {}", s.file.dimmed());
+                } else {
+                    println!("    {}", s.name.bright_white());
+                    if !s.file.is_empty() {
+                        println!("      {}", s.file.dimmed());
+                    }
+                }
+                println!();
+            }
+
+            if not_in_graph {
+                println!(
+                    "  Use {} to target a specific file:",
+                    "file.py:function_name".bold()
+                );
+                if let Some(first) = suggestions.first() {
+                    println!("    unfault graph callers {}:{}", first.file, first.name);
+                }
+            } else if let Some(first) = suggestions.iter().find(|s| s.http_method.is_some()) {
+                println!(
+                    "  Run {} or {} on one of the handlers above:",
+                    "graph callers".bold(),
+                    "fault".bold()
+                );
+                println!("    unfault graph callers {}:{}", first.file, first.name);
+                println!("    unfault fault {}:{}", first.file, first.name);
+            }
+        }
+
         println!();
         return Ok(EXIT_SUCCESS);
     }
@@ -647,62 +748,107 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
     }
 
     // ── Call chain tree ───────────────────────────────────────────────────────
-    // Render callers sorted deepest-first (route → … → direct caller → target)
-    // Group by max depth so we can print a single linear chain when there is one.
+    // Build a parent → children map keyed on caller name.
+    // depth=1 callers are direct callers of the target; depth=2 call depth=1, etc.
+    // We render the tree top-down: deepest callers first, branching at each level.
+
+    use std::collections::HashMap;
+    use unfault_analysis::types::graph_query::CallerInfo;
+
     let max_depth = ctx.callers.iter().map(|c| c.depth).max().unwrap_or(0);
 
-    // Collect a representative chain: one node per depth level (deepest first).
-    let mut chain: Vec<&unfault_analysis::types::graph_query::CallerInfo> = Vec::new();
-    for depth in (1..=max_depth).rev() {
-        if let Some(node) = ctx.callers.iter().find(|c| c.depth == depth) {
-            chain.push(node);
+    // Group callers by depth for lookup.
+    let mut by_depth: HashMap<usize, Vec<&CallerInfo>> = HashMap::new();
+    for c in &ctx.callers {
+        by_depth.entry(c.depth).or_insert_with(Vec::new).push(c);
+    }
+
+    let _top_callers: &[&CallerInfo] = by_depth
+        .get(&max_depth)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[]);
+
+    // Render each top-level caller as a root, with depth-1 callers as their children, etc.
+    // We walk depth descending: max_depth → 1 → target.
+    // Since we don't track parent-child relationships explicitly, we show the structure
+    // as: all callers at depth N, then under them all callers at depth N-1, down to target.
+    // This is accurate for chains; for branching graphs it shows all branches.
+
+    fn render_level(
+        depth: usize,
+        by_depth: &HashMap<usize, Vec<&CallerInfo>>,
+        target: &str,
+        target_file: Option<&str>,
+        prefix: &str,
+    ) {
+        let nodes = by_depth.get(&depth).map(|v| v.as_slice()).unwrap_or(&[]);
+
+        for (i, node) in nodes.iter().enumerate() {
+            let is_last_at_level = i == nodes.len() - 1;
+            let connector = if is_last_at_level { "└─" } else { "├─" };
+            let file_info = node
+                .file
+                .as_deref()
+                .map(|p| format!(" ({})", p))
+                .unwrap_or_default();
+            println!(
+                "{}{} {}{}",
+                prefix,
+                connector.dimmed(),
+                node.name.bright_white(),
+                file_info.dimmed()
+            );
+
+            // Child prefix: extend with vertical bar if there are siblings below.
+            let child_prefix = if is_last_at_level {
+                format!("{}   ", prefix)
+            } else {
+                format!("{}│  ", prefix)
+            };
+
+            if depth > 1 {
+                render_level(depth - 1, by_depth, target, target_file, &child_prefix);
+            } else {
+                // Leaf: next is the target itself.
+                let target_file_info = target_file
+                    .map(|p| format!(" ({})", p))
+                    .unwrap_or_default();
+                println!(
+                    "{}└─ {}{}  {}",
+                    child_prefix,
+                    target.bright_blue().bold(),
+                    target_file_info.dimmed(),
+                    "← you are here".cyan().dimmed()
+                );
+            }
         }
     }
 
-    for (i, caller) in chain.iter().enumerate() {
-        let indent = "  ".repeat(i + 1);
-        let connector = if i == 0 { "└─" } else { "└─" };
-        let file_info = caller
-            .file
+    // If there are no intermediate depths — all callers are at depth 1 — render flat.
+    if max_depth == 0 {
+        // Only the target, no callers (shouldn't reach here but guard anyway).
+        let target_file_info = ctx
+            .target_file
             .as_deref()
             .map(|p| format!(" ({})", p))
             .unwrap_or_default();
         println!(
-            "{}{} {}{}",
-            indent,
-            connector.dimmed(),
-            caller.name.bright_white(),
-            file_info.dimmed()
+            "  └─ {}{}  {}",
+            ctx.target.bright_blue().bold(),
+            target_file_info.dimmed(),
+            "← you are here".cyan().dimmed()
+        );
+    } else {
+        render_level(
+            max_depth,
+            &by_depth,
+            &ctx.target,
+            ctx.target_file.as_deref(),
+            "  ",
         );
     }
 
-    // Target (you are here)
-    let you_indent = "  ".repeat(chain.len() + 1);
-    let target_file_info = ctx
-        .target_file
-        .as_deref()
-        .map(|p| format!(" ({})", p))
-        .unwrap_or_default();
-    println!(
-        "{}└─ {}{}  {}",
-        you_indent,
-        ctx.target.bright_blue().bold(),
-        target_file_info.dimmed(),
-        "← you are here".cyan().dimmed()
-    );
 
-    // If there were multiple callers at any depth, mention it.
-    let total_unique = ctx.callers.len();
-    let shown = chain.len();
-    if total_unique > shown {
-        println!();
-        println!(
-            "  {} {} total caller(s) found. Use {} for the full list.",
-            "ℹ".cyan(),
-            total_unique,
-            "--json".bold()
-        );
-    }
 
     println!();
     Ok(EXIT_SUCCESS)

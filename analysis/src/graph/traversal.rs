@@ -7,8 +7,8 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::graph_query::{
-    CallerInfo, CallersContext, EnumerateContext, FlowContext, FlowPathNode, GraphContext,
-    RouteInfo, WorkspaceContext,
+    CallerInfo, CallersContext, EnumerateContext, FlowContext, FlowPathNode, FunctionSuggestion,
+    GraphContext, RouteInfo, WorkspaceContext,
 };
 
 pub fn extract_flow(graph: &CodeGraph, target: &str, max_depth: usize) -> FlowContext {
@@ -296,7 +296,28 @@ pub fn workspace_overview(graph: &CodeGraph) -> WorkspaceContext {
 /// function that (transitively) calls it, and which HTTP routes those callers are
 /// reachable from.
 pub fn get_callers(graph: &CodeGraph, target: &str, max_depth: usize) -> CallersContext {
-    let start_indices = find_nodes_by_name(graph, target);
+    get_callers_impl(graph, target, None, max_depth)
+}
+
+/// Like `get_callers` but restricts the starting node search to a specific file.
+/// Use this when the caller supplies `file.py:function_name` to avoid matching
+/// same-named functions in other files.
+pub fn get_callers_in_file(
+    graph: &CodeGraph,
+    target: &str,
+    file_hint: &str,
+    max_depth: usize,
+) -> CallersContext {
+    get_callers_impl(graph, target, Some(file_hint), max_depth)
+}
+
+fn get_callers_impl(
+    graph: &CodeGraph,
+    target: &str,
+    file_hint: Option<&str>,
+    max_depth: usize,
+) -> CallersContext {
+    let start_indices = find_nodes_by_name_in_file(graph, target, file_hint);
     if start_indices.is_empty() {
         return CallersContext::default();
     }
@@ -430,28 +451,255 @@ pub fn get_callers(graph: &CodeGraph, target: &str, max_depth: usize) -> Callers
     }
 }
 
-fn find_nodes_by_name(graph: &CodeGraph, target: &str) -> Vec<petgraph::graph::NodeIndex> {
-    let lower_target = target.to_lowercase();
-    let mut results = Vec::new();
+/// Suggest candidate functions when a callers query returns no results.
+///
+/// Returns up to three lists:
+/// - Fuzzy name matches (token overlap with the queried name) when the function
+///   is not found in the graph at all.
+/// - HTTP route handlers in the same file as the found function, when the
+///   function exists but has no recorded call edges (cross-file calls are not
+///   yet resolved by the graph builder).
+/// - The most-called functions in the workspace as a fallback.
+pub fn suggest_callers_candidates(
+    graph: &CodeGraph,
+    target: &str,
+    target_file: Option<&str>,
+) -> Vec<FunctionSuggestion> {
+    let lower = target.to_lowercase();
+    // Split on common separators to get meaningful tokens.
+    let tokens: Vec<&str> = lower
+        .split(|c: char| c == '_' || c == '-' || c == '.')
+        .filter(|t| t.len() >= 3)
+        .collect();
 
-    if let Some(&idx) = graph.path_to_file.get(target) {
-        results.push(idx);
-        return results;
+    let mut suggestions: Vec<FunctionSuggestion> = Vec::new();
+
+    // ── Case 1: function not in graph → fuzzy name matches ────────────────────
+    if target_file.is_none() {
+        for idx in graph.graph.node_indices() {
+            let node = &graph.graph[idx];
+            let GraphNode::Function { name, .. } = node else {
+                continue;
+            };
+            let node_lower = name.to_lowercase();
+            // Score: how many query tokens appear in the function name.
+            let score = tokens.iter().filter(|t| node_lower.contains(**t)).count();
+            if score == 0 {
+                continue;
+            }
+            let file = node_file_path(graph, node).unwrap_or_default();
+            let (http_method, http_path) = if let GraphNode::Function {
+                http_method,
+                http_path,
+                ..
+            } = node
+            {
+                (http_method.clone(), http_path.clone())
+            } else {
+                (None, None)
+            };
+            suggestions.push(FunctionSuggestion {
+                name: name.clone(),
+                file,
+                http_method,
+                http_path,
+                reason: format!("fuzzy_match (score {})", score),
+            });
+        }
+        // Sort by score descending, then alphabetically.
+        suggestions.sort_by(|a, b| {
+            let sa: usize = a
+                .reason
+                .trim_start_matches("fuzzy_match (score ")
+                .trim_end_matches(')')
+                .parse()
+                .unwrap_or(0);
+            let sb: usize = b
+                .reason
+                .trim_start_matches("fuzzy_match (score ")
+                .trim_end_matches(')')
+                .parse()
+                .unwrap_or(0);
+            sb.cmp(&sa).then(a.name.cmp(&b.name))
+        });
+        suggestions.truncate(8);
+        return suggestions;
     }
+
+    // ── Case 2: function found but no call edges ───────────────────────────────
+    // Show HTTP handlers in the same file — these are the routes that likely
+    // call this function transitively but whose edges weren't resolved.
+    let file = target_file.unwrap_or("");
+
+    for idx in graph.graph.node_indices() {
+        let node = &graph.graph[idx];
+        if let GraphNode::Function {
+            name,
+            is_handler: true,
+            http_method: Some(method),
+            http_path: Some(path),
+            ..
+        } = node
+        {
+            let node_file = node_file_path(graph, node).unwrap_or_default();
+            if node_file == file {
+                suggestions.push(FunctionSuggestion {
+                    name: name.clone(),
+                    file: node_file,
+                    http_method: Some(method.clone()),
+                    http_path: Some(path.clone()),
+                    reason: "same_file_handler".into(),
+                });
+            }
+        }
+    }
+
+    // Also check FastApiRoute nodes contained in the same file.
+    for idx in graph.graph.node_indices() {
+        let node = &graph.graph[idx];
+        if let GraphNode::FastApiRoute {
+            file_id,
+            http_method,
+            path,
+        } = node
+        {
+            if let Some(&file_idx) = graph.file_nodes.get(file_id) {
+                if let GraphNode::File {
+                    path: ref file_path,
+                    ..
+                } = graph.graph[file_idx]
+                {
+                    if file_path == file {
+                        suggestions.push(FunctionSuggestion {
+                            name: format!("{} {}", http_method, path),
+                            file: file_path.clone(),
+                            http_method: Some(http_method.clone()),
+                            http_path: Some(path.clone()),
+                            reason: "same_file_handler".into(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Deduplicate: prefer the Function entry over the FastApiRoute entry for the same route.
+    // Key on (http_method, http_path) when both are set, otherwise on (name, file).
+    {
+        let mut seen_routes: HashSet<(String, String)> = HashSet::new();
+        suggestions.retain(|s| {
+            if let (Some(m), Some(p)) = (&s.http_method, &s.http_path) {
+                seen_routes.insert((m.clone(), p.clone()))
+            } else {
+                true
+            }
+        });
+    }
+
+    // ── If no same-file handlers, look in sibling files (same directory) ──────
+    if suggestions.is_empty() {
+        // Derive the directory of the target file.
+        let dir = file.rsplitn(2, '/').last().unwrap_or("");
+
+        for idx in graph.graph.node_indices() {
+            let node = &graph.graph[idx];
+            if let GraphNode::Function {
+                name,
+                is_handler: true,
+                http_method: Some(method),
+                http_path: Some(path),
+                ..
+            } = node
+            {
+                let node_file = node_file_path(graph, node).unwrap_or_default();
+                // Same directory prefix (e.g. reliably_app/assistant/).
+                if !dir.is_empty() && node_file.starts_with(dir) {
+                    suggestions.push(FunctionSuggestion {
+                        name: name.clone(),
+                        file: node_file,
+                        http_method: Some(method.clone()),
+                        http_path: Some(path.clone()),
+                        reason: "sibling_file_handler".into(),
+                    });
+                }
+            }
+        }
+
+        {
+            let mut seen_routes: HashSet<(String, String)> = HashSet::new();
+            suggestions.retain(|s| {
+                if let (Some(m), Some(p)) = (&s.http_method, &s.http_path) {
+                    seen_routes.insert((m.clone(), p.clone()))
+                } else {
+                    true
+                }
+            });
+        }
+    }
+
+    suggestions
+}
+
+fn find_nodes_by_name(graph: &CodeGraph, target: &str) -> Vec<petgraph::graph::NodeIndex> {
+    find_nodes_by_name_in_file(graph, target, None)
+}
+
+/// Find graph nodes matching `target`, optionally restricted to nodes whose
+/// file path contains `file_hint` (suffix match).  When `file_hint` is
+/// provided and yields matches, nodes from other files are excluded, so that
+/// `service.py:get` doesn't pull in every `get` function across the workspace.
+fn find_nodes_by_name_in_file(
+    graph: &CodeGraph,
+    target: &str,
+    file_hint: Option<&str>,
+) -> Vec<petgraph::graph::NodeIndex> {
+    let lower_target = target.to_lowercase();
+
+    // Fast path: exact file path lookup (no function involved).
+    if file_hint.is_none() {
+        if let Some(&idx) = graph.path_to_file.get(target) {
+            return vec![idx];
+        }
+    }
+
+    let mut all: Vec<petgraph::graph::NodeIndex> = Vec::new();
 
     for idx in graph.graph.node_indices() {
         let node = &graph.graph[idx];
         let name = node.display_name().to_lowercase();
-        if name == lower_target
-            || name.ends_with(&lower_target)
-            || name.contains(&format!("/{}", lower_target))
-            || name.contains(&format!(".{}", lower_target))
-        {
-            results.push(idx);
+        let matches_name = name == lower_target
+            || name.ends_with(&format!(".{}", lower_target))
+            || name.contains(&format!("/{}", lower_target));
+        if !matches_name {
+            continue;
+        }
+        all.push(idx);
+    }
+
+    // If a file hint was given, prefer nodes whose file path ends with the hint.
+    if let Some(hint) = file_hint {
+        let lower_hint = hint.to_lowercase();
+        let constrained: Vec<_> = all
+            .iter()
+            .copied()
+            .filter(|&idx| {
+                node_file_path(graph, &graph.graph[idx])
+                    .map(|p| p.to_lowercase().ends_with(&lower_hint))
+                    .unwrap_or(false)
+            })
+            .collect();
+        // Only apply the constraint when it actually narrows results.
+        if !constrained.is_empty() {
+            return constrained;
         }
     }
 
-    results
+    all
+}
+
+/// Public wrapper around `node_file_path` for use in CLI code.
+pub fn node_file_path_pub(graph: &CodeGraph, node: &GraphNode) -> Option<String> {
+    node_file_path(graph, node)
 }
 
 fn node_file_path(graph: &CodeGraph, node: &GraphNode) -> Option<String> {

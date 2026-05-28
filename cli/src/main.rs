@@ -318,18 +318,29 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
-    /// Trace who calls a function — "you are here" inbound call chain up to HTTP routes
+    /// Show who calls a function and which HTTP routes reach it ("you are here")
+    ///
+    /// Traces the inbound call chain from a function back to its HTTP entry points.
+    /// Use file:function to disambiguate when the same name appears in multiple files.
+    ///
+    /// Examples:
+    ///   unfault graph callers validate_order
+    ///   unfault graph callers services/orders.py:validate_order
+    ///   unfault graph callers validate_order --max-depth 3
+    ///   unfault graph callers validate_order --json
     Callers {
-        /// Function to trace in format file:function or just function_name
+        /// Function to trace. Use "function_name" or "file.py:function_name" to disambiguate.
+        ///
+        /// Examples: validate_order  |  services/orders.py:validate_order
         #[arg(value_name = "FUNCTION")]
         function: String,
         /// Workspace path to analyze (defaults to current directory)
         #[arg(long, short = 'w', value_name = "PATH")]
         workspace: Option<String>,
-        /// Maximum depth for reverse call chain traversal (1-10)
+        /// Maximum number of call-chain hops to follow upward (default: 5)
         #[arg(long, value_name = "DEPTH", default_value = "5")]
         max_depth: i32,
-        /// Output as JSON
+        /// Output raw JSON (callers list + routes) instead of the rendered tree
         #[arg(long)]
         json: bool,
         /// Enable verbose output

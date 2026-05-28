@@ -91,6 +91,23 @@ pub struct CallersContext {
     pub routes: Vec<RouteInfo>,
 }
 
+/// A function suggested as a candidate when the queried name is not found or has no edges.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FunctionSuggestion {
+    /// Function name.
+    pub name: String,
+    /// File containing the function.
+    pub file: String,
+    /// HTTP method if this function is a route handler.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_method: Option<String>,
+    /// HTTP path if this function is a route handler.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_path: Option<String>,
+    /// Why this was suggested ("fuzzy_match", "same_file_handler", "most_called").
+    pub reason: String,
+}
+
 /// Workspace structural information.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceContext {

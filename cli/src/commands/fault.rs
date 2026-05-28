@@ -236,14 +236,14 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
         None => std::env::current_dir()?,
     };
 
-    // Resolve function name (strip optional file: prefix)
-    let function_name = match args.function.split_once(':') {
-        Some((_file, func)) => func.to_string(),
-        None => args.function.clone(),
+    // Parse file:function — keep both parts for scoped graph lookup.
+    let (file_hint, function_name) = match args.function.split_once(':') {
+        Some((file, func)) => (Some(file.to_string()), func.to_string()),
+        None => (None, args.function.clone()),
     };
 
     // ── Resolve HTTP routes via the code graph ────────────────────────────────
-    let routes = resolve_routes(&workspace_path, &function_name, args.verbose);
+    let routes = resolve_routes(&workspace_path, &function_name, file_hint.as_deref(), args.verbose);
 
     // ── Template selection ────────────────────────────────────────────────────
     let templates: Vec<FaultTemplate> = match &args.template {
@@ -410,11 +410,11 @@ fn build_fault_command(target_url: &str, port: u16, duration: &str, flags: &[Str
         format!("--proxy {}={}", port, target_url),
         format!("--duration {}", duration),
     ];
+    // Each entry in `flags` is already a single logical flag (possibly with its
+    // value as a second token, e.g. "--latency-mean 350").  Keep them together
+    // on one continuation line so the output is copy-paste friendly.
     for flag in flags {
-        // Split multi-word flags so the output stays readable
-        for part in flag.split_whitespace() {
-            parts.push(part.to_string());
-        }
+        parts.push(flag.clone());
     }
     parts.join(" \\\n      ")
 }
@@ -424,6 +424,7 @@ fn build_fault_command(target_url: &str, port: u16, duration: &str, flags: &[Str
 fn resolve_routes(
     workspace_path: &std::path::Path,
     function_name: &str,
+    file_hint: Option<&str>,
     verbose: bool,
 ) -> Vec<(String, String)> {
     let graph = match crate::local_graph::build_analysis_graph(workspace_path, verbose) {
@@ -431,7 +432,11 @@ fn resolve_routes(
         Err(_) => return vec![],
     };
 
-    let ctx = unfault_analysis::graph::traversal::get_callers(&graph, function_name, 10);
+    let ctx = if let Some(hint) = file_hint {
+        unfault_analysis::graph::traversal::get_callers_in_file(&graph, function_name, hint, 10)
+    } else {
+        unfault_analysis::graph::traversal::get_callers(&graph, function_name, 10)
+    };
 
     let mut routes: Vec<(String, String)> =
         ctx.routes.into_iter().map(|r| (r.method, r.path)).collect();
@@ -445,9 +450,22 @@ fn resolve_routes(
     use unfault_analysis::graph::GraphNode;
 
     let lower_target = function_name.to_lowercase();
+    let lower_hint = file_hint.map(|h| h.to_lowercase());
+
     for idx in graph.graph.node_indices() {
         let node = &graph.graph[idx];
         let name = node.display_name().to_lowercase();
+
+        // When a file hint is present, skip nodes from other files.
+        if let Some(ref hint) = lower_hint {
+            let node_file = unfault_analysis::graph::traversal::node_file_path_pub(&graph, node)
+                .unwrap_or_default()
+                .to_lowercase();
+            if !node_file.ends_with(hint.as_str()) {
+                continue;
+            }
+        }
+
         if name == lower_target
             || name.ends_with(&format!(".{}", lower_target))
             || name.ends_with(&format!("/{}", lower_target))

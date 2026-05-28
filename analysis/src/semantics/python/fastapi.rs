@@ -65,6 +65,8 @@ pub struct FastApiRoute {
     pub body_end_byte: usize,
     /// Handler parameter types (for detecting Pydantic-typed body parameters)
     pub handler_params: Vec<RouteParam>,
+    /// The router/app variable this route is registered on (e.g. "router", "app").
+    pub router_var: String,
 }
 
 /// A parameter in a route handler function.
@@ -271,20 +273,34 @@ fn extract_include_router_call(file: &ParsedFile, call_node: Node) -> Option<Fas
         return None;
     }
 
-    // For now, we don't try too hard to parse arguments. We just grab the raw
-    // text of the "arguments" node and, optionally later, can refine it into
-    // router_expr + prefix if needed.
-    let router_expr = {
-        if let Some(args) = call_node.child_by_field_name("arguments") {
-            file.text_for_node(&args)
-        } else {
-            "<unknown>".to_string()
+    let args_node = call_node.child_by_field_name("arguments");
+
+    // Extract the first positional argument as the router expression (e.g. "router", "users.router").
+    let router_expr = match &args_node {
+        Some(args) => {
+            let source_bytes = file.source.as_bytes();
+            let mut first_expr = None;
+            let mut cursor = args.walk();
+            for child in args.children(&mut cursor) {
+                match child.kind() {
+                    "(" | ")" | "," => continue,
+                    "keyword_argument" => break,
+                    _ => {
+                        first_expr =
+                            Some(child.utf8_text(source_bytes).unwrap_or("").to_string());
+                        break;
+                    }
+                }
+            }
+            first_expr.unwrap_or_else(|| file.text_for_node(args))
         }
+        None => "<unknown>".to_string(),
     };
 
-    // TODO: later we can inspect the arguments node and try to extract
-    // a literal `prefix="..."` keyword argument.
-    let prefix = None;
+    // Extract prefix="..." keyword argument if present.
+    let prefix = args_node
+        .as_ref()
+        .and_then(|args| extract_keyword_string_arg(file, *args, "prefix"));
 
     let location = file.location_for_node(&call_node);
 
@@ -486,7 +502,9 @@ fn extract_fastapi_route(file: &ParsedFile, decorated_def: Node) -> Option<FastA
 
     // Check if any decorator is a FastAPI route decorator
     for decorator in &decorators {
-        if let Some((http_method, path)) = extract_route_decorator_info(file, *decorator) {
+        if let Some((http_method, path, router_var)) =
+            extract_route_decorator_info(file, *decorator)
+        {
             // Get the function name
             let handler_name = func_def
                 .child_by_field_name("name")
@@ -510,6 +528,7 @@ fn extract_fastapi_route(file: &ParsedFile, decorated_def: Node) -> Option<FastA
             return Some(FastApiRoute {
                 http_method,
                 path,
+                router_var,
                 handler_name,
                 is_async,
                 has_try_except,
@@ -668,7 +687,10 @@ fn parse_typed_default_param_text(text: &str) -> Option<(String, String)> {
 /// Handles patterns like:
 /// - `@app.get("/path")`
 /// - `@router.post("/path")`
-fn extract_route_decorator_info(file: &ParsedFile, decorator: Node) -> Option<(String, String)> {
+fn extract_route_decorator_info(
+    file: &ParsedFile,
+    decorator: Node,
+) -> Option<(String, String, String)> {
     let source_bytes = file.source.as_bytes();
 
     // Decorator structure:
@@ -689,6 +711,9 @@ fn extract_route_decorator_info(file: &ParsedFile, decorator: Node) -> Option<(S
                 continue;
             }
 
+            let object = func.child_by_field_name("object")?;
+            let router_var = object.utf8_text(source_bytes).ok()?.to_string();
+
             let attr = func.child_by_field_name("attribute")?;
             let method_name = attr.utf8_text(source_bytes).ok()?;
 
@@ -708,10 +733,35 @@ fn extract_route_decorator_info(file: &ParsedFile, decorator: Node) -> Option<(S
             let args = child.child_by_field_name("arguments")?;
             let path = extract_first_string_arg(file, args)?;
 
-            return Some((http_method.to_string(), path));
+            return Some((http_method.to_string(), path, router_var));
         }
     }
 
+    None
+}
+
+/// Extract a named keyword argument's string value from an argument list.
+fn extract_keyword_string_arg(file: &ParsedFile, args: Node, key: &str) -> Option<String> {
+    let source_bytes = file.source.as_bytes();
+    let mut cursor = args.walk();
+    for child in args.children(&mut cursor) {
+        if child.kind() != "keyword_argument" {
+            continue;
+        }
+        let mut kw_cursor = child.walk();
+        let kw_children: Vec<_> = child.children(&mut kw_cursor).collect();
+        if kw_children.len() < 3 {
+            continue;
+        }
+        let kw_name = kw_children[0].utf8_text(source_bytes).unwrap_or("");
+        if kw_name != key {
+            continue;
+        }
+        let value_node = &kw_children[2];
+        let raw = value_node.utf8_text(source_bytes).ok()?;
+        let trimmed = raw.trim_matches(|c| c == '"' || c == '\'');
+        return Some(trimmed.to_string());
+    }
     None
 }
 
@@ -1433,7 +1483,7 @@ app.include_router(users_router)
     }
 
     #[test]
-    fn router_expr_contains_full_arguments() {
+    fn router_expr_is_first_positional_arg_and_prefix_extracted() {
         let src = r#"
 from fastapi import FastAPI
 
@@ -1445,9 +1495,10 @@ app.include_router(users.router, prefix="/api/v1", tags=["users"])
         assert!(summary.is_some());
         let summary = summary.unwrap();
         assert_eq!(summary.routers.len(), 1);
-        // Should contain the full arguments text
-        assert!(summary.routers[0].router_expr.contains("users.router"));
-        assert!(summary.routers[0].router_expr.contains("prefix"));
+        // router_expr is now only the first positional argument
+        assert_eq!(summary.routers[0].router_expr, "users.router");
+        // prefix keyword argument is extracted separately
+        assert_eq!(summary.routers[0].prefix, Some("/api/v1".to_string()));
     }
 
     // ==================== Exception Handler Detection Tests ====================
