@@ -69,6 +69,35 @@ enum Commands {
         #[command(subcommand)]
         command: GraphCommands,
     },
+    /// Generate fault injection scenario commands for endpoints reachable from a function
+    Fault {
+        /// Function to target in format file:function or just function_name
+        #[arg(value_name = "FUNCTION")]
+        function: String,
+        /// Fault scenario template (omit to list all 12 templates)
+        #[arg(long, short = 't', value_name = "TEMPLATE")]
+        template: Option<String>,
+        /// Injection mode: ingress (inbound to your app) or egress (outbound to dependencies)
+        #[arg(long, short = 'm', value_name = "MODE", default_value = "ingress")]
+        mode: String,
+        /// Target URL.
+        /// Ingress: local app base URL (default: http://127.0.0.1:8000).
+        /// Egress: remote dependency base URL (required).
+        #[arg(long, short = 'u', value_name = "URL")]
+        url: Option<String>,
+        /// Local proxy port for the fault proxy (default: 9090)
+        #[arg(long, short = 'p', value_name = "PORT", default_value = "9090")]
+        port: u16,
+        /// Injection duration (default: 2m)
+        #[arg(long, short = 'd', value_name = "DURATION", default_value = "2m")]
+        duration: String,
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
     /// Start the LSP server for IDE integration
     Lsp {
         /// Enable verbose logging to stderr
@@ -289,6 +318,24 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Trace who calls a function — "you are here" inbound call chain up to HTTP routes
+    Callers {
+        /// Function to trace in format file:function or just function_name
+        #[arg(value_name = "FUNCTION")]
+        function: String,
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Maximum depth for reverse call chain traversal (1-10)
+        #[arg(long, value_name = "DEPTH", default_value = "5")]
+        max_depth: i32,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
 }
 
 /// Centrality sort metric options
@@ -442,6 +489,34 @@ async fn run_command(command: Commands) -> i32 {
     match command {
         Commands::Config { command } => run_config_command(command).await,
         Commands::Graph { command } => run_graph_command(command).await,
+        Commands::Fault {
+            function,
+            template,
+            mode,
+            url,
+            port,
+            duration,
+            workspace,
+            verbose,
+        } => {
+            let args = commands::fault::FaultArgs {
+                function,
+                template,
+                mode,
+                url,
+                port,
+                duration,
+                workspace_path: workspace,
+                verbose,
+            };
+            match commands::fault::execute(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Fault error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
         Commands::Info { id } => commands::info::execute(&id),
         Commands::Lint {
             output,
@@ -807,6 +882,28 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Graph dump error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::Callers {
+            function,
+            workspace,
+            max_depth,
+            json,
+            verbose,
+        } => {
+            let args = commands::graph::CallersArgs {
+                workspace_path: workspace,
+                function,
+                max_depth,
+                json,
+                verbose,
+            };
+            match commands::graph::execute_callers(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph callers error: {}", e);
                     EXIT_ERROR
                 }
             }

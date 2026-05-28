@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use super::ir_builder::is_test_file;
+
 use unfault_core::graph::{CodeGraph, GraphEdgeKind, GraphNode, build_code_graph};
 use unfault_core::parse::ast::FileId;
 use unfault_core::parse::{go, python, rust as rust_parse, typescript};
@@ -120,9 +122,9 @@ pub fn build_local_graph(
     let mut semantics_entries: Vec<(FileId, Arc<SourceSemantics>)> = Vec::new();
     let mut file_id_counter: u64 = 1;
 
-    // Determine files to process
+    // Determine files to process — test files are always excluded.
     let files = match file_paths {
-        Some(paths) => paths.to_vec(),
+        Some(paths) => paths.iter().filter(|p| !is_test_file(p)).cloned().collect(),
         None => discover_source_files(workspace_path)?,
     };
 
@@ -233,7 +235,7 @@ fn discover_source_files(workspace_path: &Path) -> Result<Vec<PathBuf>> {
         let entry = entry?;
         let path = entry.path();
 
-        if path.is_file() && detect_language(path).is_some() {
+        if path.is_file() && detect_language(path).is_some() && !is_test_file(path) {
             files.push(path.to_path_buf());
         }
     }

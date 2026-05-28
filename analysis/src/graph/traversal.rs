@@ -7,7 +7,8 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::graph_query::{
-    EnumerateContext, FlowContext, FlowPathNode, GraphContext, WorkspaceContext,
+    CallerInfo, CallersContext, EnumerateContext, FlowContext, FlowPathNode, GraphContext,
+    RouteInfo, WorkspaceContext,
 };
 
 pub fn extract_flow(graph: &CodeGraph, target: &str, max_depth: usize) -> FlowContext {
@@ -285,6 +286,147 @@ pub fn workspace_overview(graph: &CodeGraph) -> WorkspaceContext {
         function_count,
         entrypoints,
         central_files,
+    }
+}
+
+/// Walk inbound `Calls` edges from `target` up to `max_depth` hops and collect
+/// the callers together with any HTTP routes that anchor the call chain.
+///
+/// This is the "you are here" reverse-BFS: given a function name it finds every
+/// function that (transitively) calls it, and which HTTP routes those callers are
+/// reachable from.
+pub fn get_callers(graph: &CodeGraph, target: &str, max_depth: usize) -> CallersContext {
+    let start_indices = find_nodes_by_name(graph, target);
+    if start_indices.is_empty() {
+        return CallersContext::default();
+    }
+
+    // Collect all callers via reverse BFS over Calls edges.
+    let mut all_callers: Vec<CallerInfo> = Vec::new();
+    let mut routes: Vec<RouteInfo> = Vec::new();
+    let mut seen_callers: HashSet<String> = HashSet::new();
+    let mut seen_routes: HashSet<String> = HashSet::new();
+
+    for start_idx in &start_indices {
+        let mut visited: HashSet<petgraph::graph::NodeIndex> = HashSet::new();
+        let mut queue: VecDeque<(petgraph::graph::NodeIndex, usize)> = VecDeque::new();
+
+        visited.insert(*start_idx);
+        queue.push_back((*start_idx, 0));
+
+        while let Some((current, depth)) = queue.pop_front() {
+            if depth >= max_depth {
+                continue;
+            }
+
+            for edge in graph.graph.edges_directed(current, Direction::Incoming) {
+                if !matches!(edge.weight(), GraphEdgeKind::Calls) {
+                    continue;
+                }
+                let caller_idx = edge.source();
+                if visited.contains(&caller_idx) {
+                    continue;
+                }
+                visited.insert(caller_idx);
+
+                let caller_node = &graph.graph[caller_idx];
+                let caller_name = caller_node.display_name();
+
+                // Collect the caller
+                if !seen_callers.contains(&caller_name) {
+                    seen_callers.insert(caller_name.clone());
+                    let file_path = node_file_path(graph, caller_node);
+
+                    // Check if this caller itself is an HTTP handler
+                    if let GraphNode::Function {
+                        is_handler: true,
+                        http_method,
+                        http_path: Some(path),
+                        ..
+                    } = caller_node
+                    {
+                        let route_key =
+                            format!("{} {}", http_method.as_deref().unwrap_or("*"), path);
+                        if !seen_routes.contains(&route_key) {
+                            seen_routes.insert(route_key);
+                            routes.push(RouteInfo {
+                                method: http_method.clone().unwrap_or_else(|| "*".to_string()),
+                                path: path.clone(),
+                            });
+                        }
+                    }
+
+                    all_callers.push(CallerInfo {
+                        name: caller_name,
+                        file: file_path,
+                        depth: depth + 1,
+                    });
+                }
+
+                queue.push_back((caller_idx, depth + 1));
+            }
+
+            // Also look for FastApiRoute nodes that contain (via Contains edge) the current
+            // function — these represent the HTTP entry points for the chain.
+            for edge in graph.graph.edges_directed(current, Direction::Incoming) {
+                if !matches!(edge.weight(), GraphEdgeKind::Contains) {
+                    continue;
+                }
+                let parent_idx = edge.source();
+                let parent_node = &graph.graph[parent_idx];
+                match parent_node {
+                    GraphNode::FastApiRoute {
+                        http_method, path, ..
+                    } => {
+                        let route_key = format!("{} {}", http_method, path);
+                        if !seen_routes.contains(&route_key) {
+                            seen_routes.insert(route_key);
+                            routes.push(RouteInfo {
+                                method: http_method.clone(),
+                                path: path.clone(),
+                            });
+                        }
+                    }
+                    GraphNode::Function {
+                        is_handler: true,
+                        http_method,
+                        http_path: Some(path),
+                        ..
+                    } => {
+                        let route_key =
+                            format!("{} {}", http_method.as_deref().unwrap_or("*"), path);
+                        if !seen_routes.contains(&route_key) {
+                            seen_routes.insert(route_key);
+                            routes.push(RouteInfo {
+                                method: http_method.clone().unwrap_or_else(|| "*".to_string()),
+                                path: path.clone(),
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    // Sort callers by depth ascending so the direct callers appear first.
+    all_callers.sort_by_key(|c| c.depth);
+
+    // Resolve target display name from the first matched node.
+    let target_name = start_indices
+        .first()
+        .map(|&idx| graph.graph[idx].display_name())
+        .unwrap_or_else(|| target.to_string());
+
+    let target_file = start_indices
+        .first()
+        .and_then(|&idx| node_file_path(graph, &graph.graph[idx]));
+
+    CallersContext {
+        target: target_name,
+        target_file,
+        callers: all_callers,
+        routes,
     }
 }
 

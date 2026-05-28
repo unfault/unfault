@@ -553,6 +553,161 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
 // Graph Dump Command (Local)
 // =============================================================================
 
+/// Arguments for the graph callers command
+#[derive(Debug)]
+pub struct CallersArgs {
+    /// Workspace path to auto-detect workspace_id from (defaults to current directory)
+    pub workspace_path: Option<String>,
+    /// Function in format file:function
+    pub function: String,
+    /// Maximum depth for reverse call chain traversal
+    pub max_depth: i32,
+    /// Output JSON instead of formatted text
+    pub json: bool,
+    /// Verbose output
+    pub verbose: bool,
+}
+
+/// Execute the graph callers command
+///
+/// Shows the inbound call chain for a function: who calls it, and which HTTP
+/// routes anchor that call chain — the "you are here" view.
+pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    // Parse function argument (file:function or just function_name)
+    let function_name = match args.function.split_once(':') {
+        Some((_file, func)) => func.to_string(),
+        None => args.function.clone(),
+    };
+
+    if args.verbose {
+        eprintln!("{} Tracing callers of: {}", "→".cyan(), args.function);
+    }
+
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    let ctx = unfault_analysis::graph::traversal::get_callers(
+        &graph,
+        &function_name,
+        args.max_depth as usize,
+    );
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&ctx)?);
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!();
+
+    if ctx.callers.is_empty() && ctx.routes.is_empty() {
+        println!("  {} No callers found for '{}'.", "ℹ".cyan(), function_name);
+        println!();
+        return Ok(EXIT_SUCCESS);
+    }
+
+    // ── Header ────────────────────────────────────────────────────────────────
+    println!(
+        "{} {}",
+        "Call path to".bold(),
+        function_name.bright_white().bold()
+    );
+    if let Some(ref f) = ctx.target_file {
+        println!("  {}", f.dimmed());
+    }
+    println!();
+
+    // ── Routes at the top ─────────────────────────────────────────────────────
+    for route in &ctx.routes {
+        let method_colored = match route.method.as_str() {
+            "GET" => route.method.bright_green(),
+            "POST" => route.method.bright_yellow(),
+            "PUT" | "PATCH" => route.method.bright_cyan(),
+            "DELETE" => route.method.bright_red(),
+            _ => route.method.normal(),
+        };
+        println!("  {} {}", method_colored, route.path.bold());
+    }
+
+    if !ctx.routes.is_empty() {
+        println!();
+    }
+
+    // ── Call chain tree ───────────────────────────────────────────────────────
+    // Render callers sorted deepest-first (route → … → direct caller → target)
+    // Group by max depth so we can print a single linear chain when there is one.
+    let max_depth = ctx.callers.iter().map(|c| c.depth).max().unwrap_or(0);
+
+    // Collect a representative chain: one node per depth level (deepest first).
+    let mut chain: Vec<&unfault_analysis::types::graph_query::CallerInfo> = Vec::new();
+    for depth in (1..=max_depth).rev() {
+        if let Some(node) = ctx.callers.iter().find(|c| c.depth == depth) {
+            chain.push(node);
+        }
+    }
+
+    for (i, caller) in chain.iter().enumerate() {
+        let indent = "  ".repeat(i + 1);
+        let connector = if i == 0 { "└─" } else { "└─" };
+        let file_info = caller
+            .file
+            .as_deref()
+            .map(|p| format!(" ({})", p))
+            .unwrap_or_default();
+        println!(
+            "{}{} {}{}",
+            indent,
+            connector.dimmed(),
+            caller.name.bright_white(),
+            file_info.dimmed()
+        );
+    }
+
+    // Target (you are here)
+    let you_indent = "  ".repeat(chain.len() + 1);
+    let target_file_info = ctx
+        .target_file
+        .as_deref()
+        .map(|p| format!(" ({})", p))
+        .unwrap_or_default();
+    println!(
+        "{}└─ {}{}  {}",
+        you_indent,
+        ctx.target.bright_blue().bold(),
+        target_file_info.dimmed(),
+        "← you are here".cyan().dimmed()
+    );
+
+    // If there were multiple callers at any depth, mention it.
+    let total_unique = ctx.callers.len();
+    let shown = chain.len();
+    if total_unique > shown {
+        println!();
+        println!(
+            "  {} {} total caller(s) found. Use {} for the full list.",
+            "ℹ".cyan(),
+            total_unique,
+            "--json".bold()
+        );
+    }
+
+    println!();
+    Ok(EXIT_SUCCESS)
+}
+
 /// Arguments for the graph dump command
 #[derive(Debug)]
 pub struct DumpArgs {

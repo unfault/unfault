@@ -949,14 +949,6 @@ pub fn render_session_overview(context: &ReviewOutputContext) {
     render_session_footer(context);
 }
 
-fn format_list(values: &[String], separator: &str) -> String {
-    if values.is_empty() {
-        "—".into()
-    } else {
-        values.join(separator)
-    }
-}
-
 fn display_ir_findings(args: &ReviewArgs, result: &AnalysisResult) {
     let findings = &result.response.findings;
     let hazards = &result.response.system_hazards;

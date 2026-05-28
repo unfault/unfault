@@ -55,6 +55,42 @@ pub struct EnumerateContext {
     pub items: Vec<String>,
 }
 
+/// A single caller in an inbound call chain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallerInfo {
+    /// Display name of the calling function.
+    pub name: String,
+    /// File where the caller is defined.
+    pub file: Option<String>,
+    /// Number of hops from the target function (1 = direct caller).
+    pub depth: usize,
+}
+
+/// HTTP route information attached to a callers context.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouteInfo {
+    /// HTTP method (GET, POST, …).
+    pub method: String,
+    /// URL path (e.g. /api/orders/{id}).
+    pub path: String,
+}
+
+/// Result of a reverse-call-chain query (who calls this function?).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CallersContext {
+    /// The function that was queried.
+    pub target: String,
+    /// File where the target function is defined.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_file: Option<String>,
+    /// All callers found, sorted by depth ascending.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub callers: Vec<CallerInfo>,
+    /// HTTP routes that anchor the call chain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<RouteInfo>,
+}
+
 /// Workspace structural information.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceContext {
