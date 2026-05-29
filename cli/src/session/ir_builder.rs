@@ -57,6 +57,61 @@ pub struct IrBuildResult {
     pub cache_stats: CacheStats,
 }
 
+/// Try to load a cached code graph from disk.
+///
+/// Returns `Some(graph)` if the cache file exists and its stored aggregate
+/// hash matches `expected_hash`. Returns `None` otherwise.
+fn try_load_graph_cache(
+    path: &std::path::Path,
+    expected_hash: u64,
+    verbose: bool,
+) -> Option<unfault_core::graph::CodeGraph> {
+    use std::io::BufReader;
+
+    // The file is: [aggregate_hash: u64 LE][msgpack graph bytes]
+    let mut file = std::fs::File::open(path).ok()?;
+    use std::io::Read;
+    let mut header = [0u8; 8];
+    file.read_exact(&mut header).ok()?;
+    let stored_hash = u64::from_le_bytes(header);
+    if stored_hash != expected_hash {
+        return None;
+    }
+
+    let reader = BufReader::new(file);
+    match rmp_serde::from_read::<_, unfault_core::graph::CodeGraph>(reader) {
+        Ok(mut graph) => {
+            graph.rebuild_indexes();
+            if verbose {
+                eprintln!("{} Graph loaded from cache", "TIMING".yellow());
+            }
+            Some(graph)
+        }
+        Err(_) => None,
+    }
+}
+
+/// Save a code graph to the graph cache file.
+fn save_graph_cache(
+    path: &std::path::Path,
+    aggregate_hash: u64,
+    graph: &unfault_core::graph::CodeGraph,
+    _verbose: bool,
+) -> anyhow::Result<()> {
+    use std::io::{BufWriter, Write};
+
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let file = std::fs::File::create(path)?;
+    let mut writer = BufWriter::new(file);
+    // Write 8-byte aggregate hash header, then msgpack graph
+    writer.write_all(&aggregate_hash.to_le_bytes())?;
+    rmp_serde::encode::write(&mut writer, graph)?;
+    Ok(())
+}
+
 /// Build an Intermediate Representation from files in a directory.
 ///
 /// This function:
@@ -334,6 +389,34 @@ pub fn build_ir_cached(
                 return None;
             };
 
+            let relative_path = file_path
+                .strip_prefix(workspace_path)
+                .unwrap_or(file_path)
+                .to_string_lossy()
+                .to_string();
+
+            let file_id = FileId((index + 1) as u64);
+
+            // Fast path: check mtime + size before reading file content.
+            // On a warm cache this avoids reading all source files entirely.
+            if let Ok(meta) = std::fs::metadata(file_path) {
+                let mtime_secs = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                    .map(|d| d.as_secs())
+                    .unwrap_or(0);
+                let file_size = meta.len();
+
+                let mut cache_guard = cache.lock().unwrap();
+                if let Some((_hash, cached_semantics)) =
+                    cache_guard.get_if_metadata_matches(&relative_path, mtime_secs, file_size)
+                {
+                    return Some((file_id, cached_semantics));
+                }
+            }
+
+            // Slow path: read file, compute content hash, check cache.
             let content = match std::fs::read_to_string(file_path) {
                 Ok(c) => c,
                 Err(e) => {
@@ -344,18 +427,10 @@ pub fn build_ir_cached(
                 }
             };
 
-            let relative_path = file_path
-                .strip_prefix(workspace_path)
-                .unwrap_or(file_path)
-                .to_string_lossy()
-                .to_string();
-
-            let file_id = FileId((index + 1) as u64);
-
             // Compute content hash
             let content_hash = SemanticsCache::hash_content(&content);
 
-            // Try cache first
+            // Try content-hash cache
             {
                 let mut cache_guard = cache.lock().unwrap();
                 if let Some(cached_semantics) = cache_guard.get(&relative_path, content_hash) {
@@ -465,10 +540,28 @@ pub fn build_ir_cached(
                 }
             };
 
-            // Store in cache
+            // Store in cache (include mtime+size for fast metadata pre-check next run)
             {
+                let (mtime_secs, file_size) = std::fs::metadata(file_path)
+                    .ok()
+                    .map(|m| {
+                        let mtime = m
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        (mtime, m.len())
+                    })
+                    .unwrap_or((0, 0));
                 let mut cache_guard = cache.lock().unwrap();
-                cache_guard.set(&relative_path, content_hash, &semantics);
+                cache_guard.set(
+                    &relative_path,
+                    content_hash,
+                    mtime_secs,
+                    file_size,
+                    &semantics,
+                );
             }
 
             Some((file_id, semantics))
@@ -478,6 +571,7 @@ pub fn build_ir_cached(
 
     let mut semantics_entries: Vec<(FileId, Arc<SourceSemantics>)> = Vec::new();
     let mut all_semantics: Vec<SourceSemantics> = Vec::new();
+    let mut content_hashes: Vec<u64> = Vec::new();
 
     for result in results {
         if let Some((file_id, semantics)) = result {
@@ -500,9 +594,54 @@ pub fn build_ir_cached(
         eprintln!("{} File read + cache: {}ms", "TIMING".yellow(), parse_ms);
     }
 
-    // Build the code graph
+    // Build or load the code graph.
+    // If all files were cache hits, try to load a pre-built graph from disk
+    // to avoid rebuilding petgraph (~1.3s on large workspaces).
     let graph_start = Instant::now();
-    let code_graph = build_code_graph(&semantics_entries);
+    let all_cache_hits = cache_stats.misses == 0;
+    let graph_cache_path = workspace_path
+        .join(".unfault")
+        .join("cache")
+        .join("graph.msgpack");
+
+    // Compute aggregate hash over sorted content hashes to key the graph cache.
+    {
+        let mut cache_guard = cache.lock().unwrap();
+        content_hashes = files
+            .iter()
+            .filter_map(|f| {
+                let rel = f
+                    .strip_prefix(workspace_path)
+                    .unwrap_or(f)
+                    .to_string_lossy()
+                    .to_string();
+                let path_hash = xxhash_rust::xxh3::xxh3_64(rel.as_bytes());
+                cache_guard.get_stored_content_hash(path_hash)
+            })
+            .collect();
+    }
+    content_hashes.sort_unstable();
+    let aggregate_hash = {
+        let bytes: Vec<u8> = content_hashes
+            .iter()
+            .flat_map(|h| h.to_le_bytes())
+            .collect();
+        xxhash_rust::xxh3::xxh3_64(&bytes)
+    };
+
+    let code_graph = if all_cache_hits {
+        try_load_graph_cache(&graph_cache_path, aggregate_hash, verbose)
+            .unwrap_or_else(|| build_code_graph(&semantics_entries))
+    } else {
+        build_code_graph(&semantics_entries)
+    };
+
+    // Save graph cache when all entries were cache hits (graph is stable)
+    // and the cache file doesn't already match.
+    if all_cache_hits {
+        let _ = save_graph_cache(&graph_cache_path, aggregate_hash, &code_graph, verbose);
+    }
+
     let graph_ms = graph_start.elapsed().as_millis();
 
     let stats = code_graph.stats();

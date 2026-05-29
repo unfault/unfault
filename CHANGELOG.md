@@ -10,6 +10,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.12] — 2026-05-29
+
+### Performance
+
+- **Warm-cache runs 3–5× faster on large workspaces**
+
+  Two independent optimisations targeting the two most expensive phases
+  measured on a 27k-file codebase (was ~4s total on a warm cache):
+
+  **1. mtime + size fast path for per-file cache lookup (saves ~1.5s)**
+  Previously every file was read from disk on every run just to compute
+  its content hash before checking the cache. The cache now stores
+  `mtime_secs` and `file_size` alongside `content_hash`. On the next run
+  only the file metadata is read (syscall, no I/O); if mtime and size
+  match the stored values the file read is skipped entirely and the cached
+  semantics are returned directly. Legacy cache entries (version < 4)
+  without metadata fall back to the old content-hash path gracefully.
+  `CACHE_VERSION` bumped to 4 — existing cache entries will be rebuilt
+  on the first run and the fast path will apply from the second run onward.
+
+  **2. Graph cache on disk (saves ~1.3s)**
+  The petgraph was rebuilt from all semantics entries on every run even
+  when nothing had changed. A `graph.msgpack` file is now stored in
+  `.unfault/cache/`. It is keyed on an aggregate xxh3 hash of all file
+  content hashes (stable across runs when no file changes). On a fully
+  warm cache the graph is loaded directly instead of being rebuilt,
+  eliminating the `build_code_graph` call entirely. The cache is
+  invalidated automatically whenever any file changes.
+
+  **Expected warm-cache timing after first primed run:**
+  - File discovery: ~600ms (unchanged — filesystem walk)
+  - File read + cache: ~200ms (was ~1600ms)
+  - Graph build: ~50ms (was ~1300ms, now just loading msgpack)
+  - Total: ~1s (was ~4s)
+
 ## [0.9.11] — 2026-05-29
 
 ### Fixed
