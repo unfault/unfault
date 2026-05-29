@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- **`unfault fault` — correct `fault run` flag usage** per the fault-project.com CLI reference:
+  - `--disable-http-proxy --proxy PORT=URL` → `--proxy-address 127.0.0.1:PORT` + `--upstream URL`
+  - `--schedule-start`/`--schedule-end` (non-existent) → `--<fault>-sched "start:25%,duration:50%"` using relative intervals that scale with `--duration`
+  - `latency-pareto` template: `--latency-mean`/`--latency-stddev` → `--latency-shape 1.5 --latency-scale 20` (correct params for pareto distribution)
+  - Bandwidth templates: added `--bandwidth-unit KBps` (default unit is `Bps`)
+  - Packet loss templates: `--packet-loss-rate`/`--packet-loss-mode` (non-existent) → `--packet-loss-direction`
+  - Blackhole templates: added `--blackhole-direction` (was missing)
+
 ## [0.9.0] — 2026-05-28
 
 ### Added
