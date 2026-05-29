@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.13] — 2026-05-29
+
+### Performance
+
+- **Fix mtime fast path mutex contention (warm cache still slow at ~1.2s)**
+  The v0.9.12 mtime fast path read the msgpack cache file *inside* the
+  `Mutex<SemanticsCache>` lock. With 27k files all hitting the fast path in
+  parallel via `par_iter`, the mutex serialised all file I/O — no better than
+  before.
+  Fix: split into two phases. Phase 1 (under lock, ~100ns): look up the index
+  entry, return the cache file path if mtime+size match. Phase 2 (outside
+  lock): read the msgpack file in parallel across Rayon threads. The lock is
+  held only for the in-memory HashMap lookup; all I/O is concurrent.
+  Expected warm-cache "File read + cache" to drop from ~1.2s to ~150–300ms.
+
 ## [0.9.12] — 2026-05-29
 
 ### Performance

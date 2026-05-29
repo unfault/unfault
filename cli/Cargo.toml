@@ -1,6 +1,6 @@
 [package]
 name = "unfault"
-version = "0.9.12"
+version = "0.9.13"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

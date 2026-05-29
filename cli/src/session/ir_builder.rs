@@ -398,7 +398,8 @@ pub fn build_ir_cached(
             let file_id = FileId((index + 1) as u64);
 
             // Fast path: check mtime + size before reading file content.
-            // On a warm cache this avoids reading all source files entirely.
+            // Phase 1 (under lock): check index, get cache file path if match.
+            // Phase 2 (outside lock): read msgpack — parallel I/O, no contention.
             if let Ok(meta) = std::fs::metadata(file_path) {
                 let mtime_secs = meta
                     .modified()
@@ -408,11 +409,20 @@ pub fn build_ir_cached(
                     .unwrap_or(0);
                 let file_size = meta.len();
 
-                let mut cache_guard = cache.lock().unwrap();
-                if let Some((_hash, cached_semantics)) =
-                    cache_guard.get_if_metadata_matches(&relative_path, mtime_secs, file_size)
-                {
-                    return Some((file_id, cached_semantics));
+                let cache_file_path = {
+                    let mut cache_guard = cache.lock().unwrap();
+                    cache_guard.check_metadata(&relative_path, mtime_secs, file_size)
+                };
+
+                if let Some((_hash, cache_path)) = cache_file_path {
+                    // Read msgpack outside the lock — parallel across threads
+                    if let Ok(file) = std::fs::File::open(&cache_path) {
+                        let reader = std::io::BufReader::new(file);
+                        if let Ok(semantics) = rmp_serde::from_read::<_, SourceSemantics>(reader) {
+                            cache.lock().unwrap().record_metadata_hit();
+                            return Some((file_id, semantics));
+                        }
+                    }
                 }
             }
 

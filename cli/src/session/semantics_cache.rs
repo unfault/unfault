@@ -247,19 +247,20 @@ impl SemanticsCache {
         }
     }
 
-    /// Try to get cached semantics using only file metadata (mtime + size).
+    /// Check whether a file's metadata (mtime + size) matches the cached entry.
     ///
-    /// If the stored mtime and size match, we skip reading the file content
-    /// entirely and return the cached semantics directly. This avoids the
-    /// ~1.5s of file I/O on large warm-cache workspaces.
+    /// Returns `Some((content_hash, cache_path))` if the metadata matches so
+    /// the caller can read the msgpack file **outside the lock**. Returns `None`
+    /// on any mismatch or if metadata is absent (legacy entry).
     ///
-    /// Returns `Some((content_hash, semantics))` on a metadata hit, `None` otherwise.
-    pub fn get_if_metadata_matches(
+    /// This is the first half of the two-phase fast path — call this under the
+    /// lock, then do the actual file I/O without holding the lock.
+    pub fn check_metadata(
         &mut self,
         relative_path: &str,
         mtime_secs: u64,
         file_size: u64,
-    ) -> Option<(u64, SourceSemantics)> {
+    ) -> Option<(u64, PathBuf)> {
         if !self.enabled {
             return None;
         }
@@ -276,18 +277,13 @@ impl SemanticsCache {
             return None;
         }
 
-        let content_hash = entry.content_hash;
-        let cache_path = entry.cache_path.clone();
+        Some((entry.content_hash, entry.cache_path.clone()))
+    }
 
-        let file = fs::File::open(&cache_path).ok()?;
-        let reader = BufReader::new(file);
-        match rmp_serde::from_read(reader) {
-            Ok(semantics) => {
-                self.stats.hits += 1;
-                Some((content_hash, semantics))
-            }
-            Err(_) => None,
-        }
+    /// Record a metadata-based cache hit (called after successful file read
+    /// outside the lock).
+    pub fn record_metadata_hit(&mut self) {
+        self.stats.hits += 1;
     }
 
     /// Store semantics in the cache.
