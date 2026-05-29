@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.8] — 2026-05-29
+
+### Tests
+
+- **Cross-file call resolution from Flask handlers — 3 new tests confirming behaviour**
+  - `flask_handler_cross_file_call_via_module_level_import` — `from services.users import get_all_users` at top of file, called inside `@app.route` handler
+  - `flask_handler_cross_file_call_via_function_scoped_import` — same import made *inside* the handler body (`def list_users(): from services.users import get_all_users; return get_all_users()`)
+  - `flask_restful_action_route_cross_file_call_via_function_scoped_import` — same function-scoped import pattern inside an `@ClassName.action_route` handler
+  - All three pass: function-scoped imports are captured by the semantic extractor (with `is_module_level: false`) and the import lookup in `resolve_cross_file_call` does not filter by scope, so they resolve identically to module-level imports
+
 ## [0.9.7] — 2026-05-29
 
 ### Fixed

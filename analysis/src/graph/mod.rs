@@ -2054,4 +2054,132 @@ def run_handler():
             .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == process_idx);
         assert!(has_calls_edge, "expected Calls edge run_handler -> process");
     }
+
+    // ── Cross-file calls from Flask handlers (function-scoped imports) ────────
+
+    #[test]
+    fn flask_handler_cross_file_call_via_module_level_import() {
+        // Standard pattern: import at top of file, call inside handler.
+        let handler_src = r#"
+from flask import Flask
+from services.users import get_all_users
+
+app = Flask(__name__)
+
+@app.route('/users', methods=['GET'])
+def list_users():
+    return get_all_users()
+"#;
+        let service_src = r#"
+def get_all_users():
+    return []
+"#;
+        let (handler_fid, handler_sem) = parse_python_with_id("routes/api.py", handler_src, 1);
+        let (service_fid, service_sem) = parse_python_with_id("services/users.py", service_src, 2);
+        let sem_entries = vec![(handler_fid, handler_sem), (service_fid, service_sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let handler_idx = *cg
+            .function_nodes
+            .get(&(handler_fid, "list_users".to_string()))
+            .expect("list_users not in graph");
+        let callee_idx = *cg
+            .function_nodes
+            .get(&(service_fid, "get_all_users".to_string()))
+            .expect("get_all_users not in graph");
+
+        let has_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == callee_idx);
+        assert!(
+            has_edge,
+            "expected Calls edge list_users -> get_all_users (module-level import)"
+        );
+    }
+
+    #[test]
+    fn flask_handler_cross_file_call_via_function_scoped_import() {
+        // The pattern the user reported: import is *inside* the handler body.
+        let handler_src = r#"
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/users', methods=['GET'])
+def list_users():
+    from services.users import get_all_users
+    return get_all_users()
+"#;
+        let service_src = r#"
+def get_all_users():
+    return []
+"#;
+        let (handler_fid, handler_sem) = parse_python_with_id("routes/api.py", handler_src, 1);
+        let (service_fid, service_sem) = parse_python_with_id("services/users.py", service_src, 2);
+        let sem_entries = vec![(handler_fid, handler_sem), (service_fid, service_sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let handler_idx = *cg
+            .function_nodes
+            .get(&(handler_fid, "list_users".to_string()))
+            .expect("list_users not in graph");
+        let callee_idx = *cg
+            .function_nodes
+            .get(&(service_fid, "get_all_users".to_string()))
+            .expect("get_all_users not in graph");
+
+        let has_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == callee_idx);
+        assert!(
+            has_edge,
+            "expected Calls edge list_users -> get_all_users (function-scoped import)"
+        );
+    }
+
+    #[test]
+    fn flask_restful_action_route_cross_file_call_via_function_scoped_import() {
+        // The action_route pattern with a function-scoped import inside the handler.
+        let handler_src = r#"
+endpoint = Endpoint("users")
+
+@endpoint.route("/users")
+class UserController(BaseController):
+    pass
+
+@UserController.action_route("/", methods=["GET"])
+def list_users():
+    from services.users import get_all_users
+    return get_all_users()
+"#;
+        let service_src = r#"
+def get_all_users():
+    return []
+"#;
+        let (handler_fid, handler_sem) =
+            parse_python_with_id("controllers/users.py", handler_src, 1);
+        let (service_fid, service_sem) = parse_python_with_id("services/users.py", service_src, 2);
+        let sem_entries = vec![(handler_fid, handler_sem), (service_fid, service_sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let handler_idx = *cg
+            .function_nodes
+            .get(&(handler_fid, "list_users".to_string()))
+            .expect("list_users not in graph");
+        let callee_idx = *cg
+            .function_nodes
+            .get(&(service_fid, "get_all_users".to_string()))
+            .expect("get_all_users not in graph");
+
+        let has_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == callee_idx);
+        assert!(
+            has_edge,
+            "expected Calls edge list_users -> get_all_users (action_route, function-scoped import)"
+        );
+    }
 }
