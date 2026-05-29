@@ -104,7 +104,7 @@ impl PyFileSemantics {
 
     /// Run framework-specific analysis (FastAPI, Flask, etc.).
     pub fn analyze_frameworks(&mut self, parsed: &ParsedFile) -> anyhow::Result<()> {
-        let fastapi_summary = super::fastapi::summarize_fastapi(parsed);
+        let fastapi_summary = unfault_core::semantics::python::fastapi::summarize_fastapi(parsed);
         if fastapi_summary.is_some() {
             self.fastapi = fastapi_summary;
         }

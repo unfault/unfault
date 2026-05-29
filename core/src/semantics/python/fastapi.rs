@@ -1822,4 +1822,140 @@ def receive_data(data: dict):
         // end_line should be after the function body
         assert!(route.location.range.end_line > route.decorator_location.range.end_line);
     }
+
+    // ==================== Application Factory Pattern Tests ====================
+
+    #[test]
+    fn factory_app_detected() {
+        let src = r#"
+from fastapi import FastAPI
+
+def create_app():
+    app = FastAPI()
+    return app
+"#;
+        let summary = parse_and_summarize_fastapi(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.apps.len(), 1);
+        assert_eq!(summary.apps[0].var_name, "app");
+    }
+
+    #[test]
+    fn factory_routes_detected() {
+        let src = r#"
+from fastapi import FastAPI
+
+def create_app():
+    app = FastAPI()
+
+    @app.get("/health")
+    async def health():
+        return {"status": "ok"}
+
+    @app.post("/users")
+    async def create_user(user: dict):
+        return user
+
+    return app
+"#;
+        let summary = parse_and_summarize_fastapi(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 2);
+        let paths: Vec<&str> = summary.routes.iter().map(|r| r.path.as_str()).collect();
+        assert!(paths.contains(&"/health"));
+        assert!(paths.contains(&"/users"));
+    }
+
+    #[test]
+    fn factory_router_include_detected() {
+        let src = r#"
+from fastapi import FastAPI, APIRouter
+
+users_router = APIRouter()
+
+def create_app():
+    app = FastAPI()
+    app.include_router(users_router, prefix="/users")
+    return app
+"#;
+        let summary = parse_and_summarize_fastapi(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routers.len(), 1);
+        assert_eq!(summary.routers[0].router_expr, "users_router");
+        assert_eq!(summary.routers[0].prefix.as_deref(), Some("/users"));
+    }
+
+    #[test]
+    fn factory_middleware_detected() {
+        let src = r#"
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+def create_app():
+    app = FastAPI()
+    app.add_middleware(CORSMiddleware, allow_origins=["*"])
+    return app
+"#;
+        let summary = parse_and_summarize_fastapi(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.middlewares.len(), 1);
+        assert!(
+            summary.middlewares[0]
+                .middleware_type
+                .contains("CORSMiddleware")
+        );
+    }
+
+    #[test]
+    fn factory_exception_handler_detected() {
+        let src = r#"
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+
+def create_app():
+    app = FastAPI()
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+    return app
+"#;
+        let summary = parse_and_summarize_fastapi(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.exception_handlers.len(), 1);
+        assert_eq!(
+            summary.exception_handlers[0].exception_type,
+            "HTTPException"
+        );
+    }
+
+    #[test]
+    fn factory_router_on_nested_router_detected() {
+        let src = r#"
+from fastapi import APIRouter
+
+def create_router():
+    router = APIRouter()
+
+    @router.get("/items")
+    async def list_items():
+        return []
+
+    @router.post("/items")
+    async def create_item(item: dict):
+        return item
+
+    return router
+"#;
+        let summary = parse_and_summarize_fastapi(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 2);
+    }
 }
