@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.10] — 2026-05-29
+
+### Changed
+
+- **`unfault graph callers --debug`** — extended diagnostics
+  - Also searches for `_<function_name>` (underscore-prefixed handler) and prints its outgoing `Calls` edges with callee names and files
+  - This reveals whether the edge from the handler to the target exists at all, or whether the cross-file resolution failed to add it
+
 ## [0.9.9] — 2026-05-29
 
 ### Added

@@ -814,6 +814,47 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         if !found {
             eprintln!("  (no nodes found with that name)");
         }
+
+        // Also show what the expected handler calls — find any handler node whose
+        // name starts with '_' followed by the target name, and print its outgoing edges.
+        let handler_name = format!("_{}", lower);
+        eprintln!(
+            "\n{} Debug: outgoing Calls edges from nodes matching '{}'",
+            "→".cyan(),
+            handler_name
+        );
+        let mut found_handler = false;
+        for idx in graph.graph.node_indices() {
+            let node = &graph.graph[idx];
+            let name = node.display_name().to_lowercase();
+            if name == handler_name {
+                found_handler = true;
+                let file = unfault_analysis::graph::traversal::node_file_path_pub(&graph, node)
+                    .unwrap_or_else(|| "<no file>".to_string());
+                let outgoing: Vec<_> = graph
+                    .graph
+                    .edges_directed(idx, Direction::Outgoing)
+                    .filter(|e| matches!(e.weight(), GraphEdgeKind::Calls))
+                    .collect();
+                eprintln!(
+                    "  node {:?}  name={}  file={}\n    outgoing Calls edges: {}",
+                    idx,
+                    node.display_name(),
+                    file,
+                    outgoing.len()
+                );
+                for edge in &outgoing {
+                    let callee = &graph.graph[edge.target()];
+                    let callee_file =
+                        unfault_analysis::graph::traversal::node_file_path_pub(&graph, callee)
+                            .unwrap_or_default();
+                    eprintln!("      → {} ({})", callee.display_name(), callee_file);
+                }
+            }
+        }
+        if !found_handler {
+            eprintln!("  (no nodes found with that name)");
+        }
         eprintln!();
     }
 
