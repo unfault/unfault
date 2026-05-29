@@ -8,6 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+### Fixed
+
+## [0.9.1] — 2026-05-29
+
+### Added
+
 - **Flask-smorest / MethodView route detection**
   - `@blp.route('/path')` decorating a `MethodView` subclass is now parsed: each HTTP-method-named method (`get`, `post`, `put`, `patch`, `delete`, `options`, `head`) produces its own `FlaskRoute` entry with the path from the class-level decorator
   - `handler_name` is set to `ClassName.method` (e.g. `ItemList.get`) for unique identification
