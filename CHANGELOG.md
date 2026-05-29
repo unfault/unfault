@@ -10,6 +10,41 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.6] — 2026-05-29
+
+### Fixed
+
+- **`unfault graph callers` — two bugs causing "no call edges were resolved"**
+
+  **Bug 1 — Double node for framework route handlers:**
+  The analysis graph builder called `add_function_nodes` (which emits a plain
+  `Function { is_handler: false, http_method: None, http_path: None }` node)
+  and then `add_flask_nodes` / `add_fastapi_nodes` (which emit a second
+  `Function { is_handler: true, http_method: Some(...), http_path: Some(...) }`
+  node for the same handler). `function_nodes` was overwritten with the
+  framework node (inserted last). The `Calls` edges from the third pass
+  referenced the first node. `get_callers` looked up the framework node but
+  found no incoming edges — zero callers.
+  **Fix:** Add `handler_names_to_skip` to the analysis graph's
+  `add_function_nodes`, mirroring the core graph builder's existing logic.
+
+  **Bug 2 — Wrong caller key in the Calls edge pass:**
+  The third pass iterated `sem.function_calls()` and looked up the caller in
+  `function_nodes` using `func_call.caller_qualified_name` (e.g.
+  `"MyClass.method"`). But `function_nodes` is keyed by the simple function
+  name (e.g. `"method"`). The lookup always failed, so **zero `Calls` edges
+  were ever added** in the analysis graph for method callers.
+  **Fix:** Use `func_call.caller_function` (simple name) as the lookup key,
+  falling back to the last segment of `caller_qualified_name`.
+
+  **Cross-file call resolution added to analysis graph:**
+  The analysis graph's Calls pass was intra-file only. It now also resolves
+  calls through imports using `resolve_cross_file_call`, implementing the
+  same three strategies as the core graph: direct import, module-attribute,
+  and submodule-as-item.
+
+  **3 new tests:** `intra_file_calls_edge_added`, `flask_handler_not_duplicated_in_graph`, `intra_file_calls_edge_from_flask_handler`
+
 ## [0.9.5] — 2026-05-29
 
 ### Added

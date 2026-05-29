@@ -731,20 +731,85 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
         }
     }
 
-    // Third pass: add call edges using function call data
+    // Third pass: add Calls edges using per-function call sites.
+    //
+    // Keyed on func.name (simple name) to match the function_nodes HashMap.
+    // Two-stage resolution mirrors the core graph builder:
+    //   1. Intra-file: callee lives in the same file
+    //   2. Cross-file: callee is reached through an import in the calling file
+    //
+    // Build import lookup first.
+    let imports_by_file: std::collections::HashMap<
+        FileId,
+        (String, Vec<crate::semantics::Import>),
+    > = sem_entries
+        .iter()
+        .map(|(file_id, sem)| {
+            let (path, imports) = match sem.as_ref() {
+                SourceSemantics::Python(py) => (py.path.clone(), py.imports()),
+                SourceSemantics::Go(go) => (go.path.clone(), go.imports()),
+                SourceSemantics::Rust(rs) => (rs.path.clone(), rs.imports()),
+                SourceSemantics::Typescript(ts) => (ts.path.clone(), ts.imports()),
+            };
+            (*file_id, (path, imports))
+        })
+        .collect();
+
     for (file_id, sem) in sem_entries {
+        let empty_path = String::new();
+        let empty_imports: Vec<crate::semantics::Import> = Vec::new();
+        let (file_path, imports) = imports_by_file
+            .get(file_id)
+            .map(|(p, i)| (p.as_str(), i.as_slice()))
+            .unwrap_or((empty_path.as_str(), empty_imports.as_slice()));
+
         for func_call in sem.function_calls() {
-            // Find caller function node
-            let caller_key = (*file_id, func_call.caller_qualified_name.clone());
-            if let Some(&caller_idx) = cg.function_nodes.get(&caller_key) {
-                // Basic resolution: assume callee in same file, use last part of callee_parts
-                if let Some(callee_name) = func_call.callee_parts.last() {
-                    let callee_key = (*file_id, callee_name.clone());
-                    if let Some(&callee_idx) = cg.function_nodes.get(&callee_key) {
-                        cg.graph
-                            .add_edge(caller_idx, callee_idx, GraphEdgeKind::Calls);
-                    }
-                }
+            // Use caller_function (simple name) — function_nodes is keyed by simple name,
+            // not the qualified name which includes class prefixes like "MyClass.method".
+            let caller_name = if func_call.caller_function.is_empty() {
+                // Fall back: take the last segment of the qualified name.
+                func_call
+                    .caller_qualified_name
+                    .split('.')
+                    .last()
+                    .unwrap_or("")
+                    .to_string()
+            } else {
+                func_call.caller_function.clone()
+            };
+            if caller_name.is_empty() {
+                continue;
+            }
+
+            let caller_key = (*file_id, caller_name);
+            let Some(&caller_node) = cg.function_nodes.get(&caller_key) else {
+                continue;
+            };
+
+            // Callee simple name: last segment of callee_parts.
+            let callee_name = match func_call.callee_parts.last() {
+                Some(n) => n.clone(),
+                None => continue,
+            };
+
+            // Stage 1: intra-file resolution
+            let callee_key = (*file_id, callee_name.clone());
+            if let Some(&callee_node) = cg.function_nodes.get(&callee_key) {
+                cg.graph
+                    .add_edge(caller_node, callee_node, GraphEdgeKind::Calls);
+                continue;
+            }
+
+            // Stage 2: cross-file resolution through imports
+            if let Some(callee_node) = resolve_cross_file_call(
+                &cg,
+                &callee_name,
+                &func_call.callee_expr,
+                imports,
+                file_path,
+            ) {
+                cg.graph
+                    .add_edge(caller_node, callee_node, GraphEdgeKind::Calls);
             }
         }
     }
@@ -812,6 +877,146 @@ fn add_import_edges(
 }
 
 /// Add function nodes from a file
+/// Resolve a cross-file function call through imports.
+///
+/// Mirrors the core graph builder's `resolve_call_through_imports` with the
+/// three strategies:
+///   1. `from module import e`  then  `e()`
+///   2. `import module`         then  `module.e()`
+///   3. `from pkg import sub`   then  `sub.func()`  (submodule-as-item)
+fn resolve_cross_file_call(
+    cg: &CodeGraph,
+    callee: &str,
+    callee_expr: &str,
+    imports: &[crate::semantics::Import],
+    importing_file_path: &str,
+) -> Option<NodeIndex> {
+    // Strategy 1: direct import match — `from module import e` then `e()`
+    for import in imports {
+        if import.imports_item(callee) {
+            if let Some(source_idx) = find_source_file(cg, &import.module_path, importing_file_path)
+            {
+                if let GraphNode::File { file_id, .. } = &cg.graph[source_idx] {
+                    let key = (*file_id, callee.to_string());
+                    if let Some(&node) = cg.function_nodes.get(&key) {
+                        return Some(node);
+                    }
+                }
+            }
+        }
+    }
+
+    // Strategy 2 & 3: attribute call — `module.func()` or `sub.func()`
+    if callee_expr.contains('.') {
+        let parts: Vec<&str> = callee_expr.split('.').collect();
+        if parts.len() >= 2 {
+            let module_alias = parts[0];
+            let func_name = parts[parts.len() - 1];
+
+            // Strategy 2: `import module` / `import module as alias` then `module.func()`
+            for import in imports {
+                let matches = import.module_alias.as_deref() == Some(module_alias)
+                    || import
+                        .module_path
+                        .split('.')
+                        .last()
+                        .map(|last| last == module_alias)
+                        .unwrap_or(false);
+                if matches {
+                    if let Some(source_idx) =
+                        find_source_file(cg, &import.module_path, importing_file_path)
+                    {
+                        if let GraphNode::File { file_id, .. } = &cg.graph[source_idx] {
+                            let key = (*file_id, func_name.to_string());
+                            if let Some(&node) = cg.function_nodes.get(&key) {
+                                return Some(node);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Strategy 3: `from pkg import sub` then `sub.func()`
+            for import in imports {
+                if import.imports_item(module_alias) {
+                    let submodule = format!("{}.{}", import.module_path, module_alias);
+                    if let Some(source_idx) = find_source_file(cg, &submodule, importing_file_path)
+                    {
+                        if let GraphNode::File { file_id, .. } = &cg.graph[source_idx] {
+                            let key = (*file_id, func_name.to_string());
+                            if let Some(&node) = cg.function_nodes.get(&key) {
+                                return Some(node);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Find the graph node for the source file that provides `module_path`,
+/// resolving relative imports using `importing_file_path` as context.
+fn find_source_file(
+    cg: &CodeGraph,
+    module_path: &str,
+    importing_file_path: &str,
+) -> Option<NodeIndex> {
+    let module_as_path = module_path.replace('.', "/");
+
+    // Absolute import: try both `module/path.py` and `module/path/__init__.py`
+    for &idx in cg.path_to_file.values() {
+        if let GraphNode::File { path, .. } = &cg.graph[idx] {
+            let normalized = path.replace('\\', "/");
+            if normalized.ends_with(&format!("{}.py", module_as_path))
+                || normalized.ends_with(&format!("{}/__init__.py", module_as_path))
+            {
+                return Some(idx);
+            }
+        }
+    }
+
+    // Relative import: resolve relative to the importing file's directory
+    if module_path.starts_with('.') {
+        let dots = module_path.chars().take_while(|&c| c == '.').count();
+        let relative_module = &module_path[dots..];
+        let base_dir = importing_file_path
+            .rfind('/')
+            .map(|i| &importing_file_path[..i])
+            .unwrap_or("");
+
+        // Walk up `dots - 1` parent directories
+        let mut dir = base_dir.to_string();
+        for _ in 1..dots {
+            if let Some(i) = dir.rfind('/') {
+                dir = dir[..i].to_string();
+            }
+        }
+
+        let rel_as_path = relative_module.replace('.', "/");
+        let candidate_prefix = if dir.is_empty() {
+            rel_as_path.clone()
+        } else {
+            format!("{}/{}", dir, rel_as_path)
+        };
+
+        for &idx in cg.path_to_file.values() {
+            if let GraphNode::File { path, .. } = &cg.graph[idx] {
+                let normalized = path.replace('\\', "/");
+                if normalized.ends_with(&format!("{}.py", candidate_prefix))
+                    || normalized.ends_with(&format!("{}/__init__.py", candidate_prefix))
+                {
+                    return Some(idx);
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn add_function_nodes(
     cg: &mut CodeGraph,
     file_node: NodeIndex,
@@ -826,7 +1031,29 @@ fn add_function_nodes(
         SourceSemantics::Typescript(ts) => ts.functions(),
     };
 
+    // Collect handler names that will be added by framework-specific functions
+    // with http_method/http_path populated. Skip them here to avoid creating a
+    // second, metadata-free node that would shadow the framework node in
+    // function_nodes and break edge lookup.
+    let handler_names_to_skip: std::collections::HashSet<String> = match sem.as_ref() {
+        SourceSemantics::Python(py) => {
+            let mut skip = std::collections::HashSet::new();
+            if let Some(fastapi) = &py.fastapi {
+                skip.extend(fastapi.routes.iter().map(|r| r.handler_name.clone()));
+            }
+            if let Some(flask) = &py.flask {
+                skip.extend(flask.routes.iter().map(|r| r.handler_name.clone()));
+            }
+            skip
+        }
+        _ => std::collections::HashSet::new(),
+    };
+
     for func in functions {
+        if handler_names_to_skip.contains(&func.name) {
+            continue;
+        }
+
         let qualified_name = match &func.class_name {
             Some(class) => format!("{}.{}", class, func.name),
             None => func.name.clone(),
@@ -1701,5 +1928,130 @@ def process():
         // Should find by suffix
         assert!(cg.find_file_by_path("auth/middleware.py").is_some());
         assert!(cg.find_file_by_path("middleware.py").is_some());
+    }
+
+    // ── Calls edge construction ───────────────────────────────────────────────
+
+    #[test]
+    fn intra_file_calls_edge_added() {
+        let src = r#"
+def helper():
+    return 42
+
+def handler():
+    return helper()
+"#;
+        let (file_id, sem) = parse_and_build_semantics("app.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        // Both functions should be in the graph
+        assert!(
+            cg.function_nodes
+                .contains_key(&(file_id, "helper".to_string()))
+        );
+        assert!(
+            cg.function_nodes
+                .contains_key(&(file_id, "handler".to_string()))
+        );
+
+        // There should be a Calls edge from handler -> helper
+        let handler_idx = *cg
+            .function_nodes
+            .get(&(file_id, "handler".to_string()))
+            .unwrap();
+        let helper_idx = *cg
+            .function_nodes
+            .get(&(file_id, "helper".to_string()))
+            .unwrap();
+
+        let has_calls_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == helper_idx);
+        assert!(has_calls_edge, "expected Calls edge handler -> helper");
+    }
+
+    #[test]
+    fn flask_handler_not_duplicated_in_graph() {
+        // Verifies that a Flask route handler is emitted exactly once
+        // (by add_flask_nodes, not again by add_function_nodes), and that
+        // the single node carries http_method and http_path.
+        let src = r#"
+from flask import Flask
+
+app = Flask(__name__)
+
+@app.route('/users', methods=['GET'])
+def list_users():
+    return []
+"#;
+        let (file_id, sem) = parse_and_build_semantics("api.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        // Should appear exactly once in function_nodes
+        let node_idx = cg.function_nodes.get(&(file_id, "list_users".to_string()));
+        assert!(node_idx.is_some(), "list_users should be in function_nodes");
+
+        // Count all Function nodes named list_users
+        let count = cg.graph.node_indices().filter(|&i| {
+            matches!(&cg.graph[i], GraphNode::Function { name, .. } if name == "list_users")
+        }).count();
+        assert_eq!(
+            count, 1,
+            "list_users should appear exactly once in the graph"
+        );
+
+        // Should have HTTP metadata
+        let node = &cg.graph[*node_idx.unwrap()];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    is_handler: true,
+                    http_method: Some(_),
+                    http_path: Some(_),
+                    ..
+                }
+            ),
+            "Flask handler should have http_method and http_path set"
+        );
+    }
+
+    #[test]
+    fn intra_file_calls_edge_from_flask_handler() {
+        // The handler itself calls a helper. Callers of the helper should
+        // be resolvable once the double-node bug is fixed.
+        let src = r#"
+from flask import Flask
+
+app = Flask(__name__)
+
+def process():
+    return {"ok": True}
+
+@app.route('/run', methods=['POST'])
+def run_handler():
+    return process()
+"#;
+        let (file_id, sem) = parse_and_build_semantics("api.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let handler_idx = *cg
+            .function_nodes
+            .get(&(file_id, "run_handler".to_string()))
+            .unwrap();
+        let process_idx = *cg
+            .function_nodes
+            .get(&(file_id, "process".to_string()))
+            .unwrap();
+
+        let has_calls_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == process_idx);
+        assert!(has_calls_edge, "expected Calls edge run_handler -> process");
     }
 }
