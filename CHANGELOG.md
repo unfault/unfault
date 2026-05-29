@@ -10,6 +10,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.14] — 2026-05-29
+
+### Changed
+
+- **`SemanticsCache` internal redesign — lock-free read path**
+  - `CacheStats` now uses `AtomicUsize` for `hits` and `misses` — all read
+    methods can increment counters without holding any lock
+  - All read methods (`check_metadata`, `get`, `record_metadata_hit`,
+    `record_miss`, `get_stored_content_hash`) take `&self` instead of
+    `&mut self` — they are safe to call from multiple threads with only
+    a shared reference
+  - Only `set()` (called on cache misses, the slow path) retains `&mut self`
+  - `CacheStats` replaced by `CacheStatsSnapshot` (plain `usize` fields) for
+    display and the `IrBuildResult` public API; `stats_snapshot()` takes a
+    lock-free snapshot
+  - The `Mutex<SemanticsCache>` in `ir_builder.rs` is now held for
+    nanoseconds (index lookup only) on the hot path; the msgpack file read
+    already happened outside the lock since v0.9.13
+  - Practical effect: the remaining ~1s "File read + cache" time on a 27k-file
+    warm cache is dominated by filesystem I/O (reading 27k msgpack files),
+    not lock contention — a more specialised mutex would not have helped
+
 ## [0.9.13] — 2026-05-29
 
 ### Performance

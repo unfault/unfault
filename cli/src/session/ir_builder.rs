@@ -46,15 +46,15 @@ use unfault_core::semantics::rust::{build_rust_semantics, model::RustFileSemanti
 use unfault_core::semantics::typescript::model::TsFileSemantics;
 use unfault_core::types::context::{Language, SourceFile};
 
-use super::semantics_cache::{CacheStats, SemanticsCache};
+use super::semantics_cache::{CacheStatsSnapshot, SemanticsCache};
 
 /// Result of building IR with cache statistics
 #[derive(Debug)]
 pub struct IrBuildResult {
     /// The built intermediate representation
     pub ir: IntermediateRepresentation,
-    /// Cache statistics (hits, misses, etc.)
-    pub cache_stats: CacheStats,
+    /// Cache statistics snapshot (hits, misses, etc.)
+    pub cache_stats: CacheStatsSnapshot,
 }
 
 /// Try to load a cached code graph from disk.
@@ -356,8 +356,7 @@ pub fn build_ir_cached(
 
     // Open or create the cache
     let cache_start = Instant::now();
-    let cache = SemanticsCache::open(workspace_path)?;
-    let cache = Arc::new(Mutex::new(cache));
+    let cache = Arc::new(Mutex::new(SemanticsCache::open(workspace_path)?));
     let cache_open_ms = cache_start.elapsed().as_millis();
 
     // Determine files to process — test files are always excluded regardless
@@ -410,7 +409,7 @@ pub fn build_ir_cached(
                 let file_size = meta.len();
 
                 let cache_file_path = {
-                    let mut cache_guard = cache.lock().unwrap();
+                    let cache_guard = cache.lock().unwrap();
                     cache_guard.check_metadata(&relative_path, mtime_secs, file_size)
                 };
 
@@ -442,7 +441,7 @@ pub fn build_ir_cached(
 
             // Try content-hash cache
             {
-                let mut cache_guard = cache.lock().unwrap();
+                let cache_guard = cache.lock().unwrap();
                 if let Some(cached_semantics) = cache_guard.get(&relative_path, content_hash) {
                     return Some((file_id, cached_semantics));
                 }
@@ -591,7 +590,7 @@ pub fn build_ir_cached(
     }
 
     // Get final cache stats
-    let cache_stats = cache.lock().unwrap().stats().clone();
+    let cache_stats = cache.lock().unwrap().stats_snapshot();
 
     if verbose {
         eprintln!(
@@ -616,7 +615,7 @@ pub fn build_ir_cached(
 
     // Compute aggregate hash over sorted content hashes to key the graph cache.
     {
-        let mut cache_guard = cache.lock().unwrap();
+        let cache_guard = cache.lock().unwrap();
         content_hashes = files
             .iter()
             .filter_map(|f| {

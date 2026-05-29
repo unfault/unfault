@@ -1,9 +1,5 @@
 //! Semantics cache for accelerating repeated analysis runs.
 //!
-//! This module provides a file-based cache for parsed semantics. When a file
-//! hasn't changed (same content hash), we can skip re-parsing and use the
-//! cached semantics instead.
-//!
 //! ## Design
 //!
 //! - Cache key: (relative_path, content_hash_xxh3_64)
@@ -11,16 +7,19 @@
 //! - Storage: `.unfault/cache/semantics/<hash>.msgpack`
 //! - Invalidation: Content hash mismatch or cache version bump
 //!
-//! ## Performance
+//! ## Concurrency model
 //!
-//! - xxh3 hashing: ~6GB/s (vs ~500MB/s for SHA-256)
-//! - MessagePack: 2-10x smaller than JSON, faster to serialize
-//! - Expected: ~50-100ms for warm cache vs ~2000ms for cold parse
+//! After `open()` the index is immutable — reads need no synchronisation.
+//! Hit/miss counters use `AtomicUsize` so they can be incremented from any
+//! thread without a lock. Writes (`set`) happen only on cache misses and are
+//! coordinated by the caller with a `Mutex<SemanticsCache>` that is only
+//! contended on the rare slow path.
 
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::{Context, Result};
 use xxhash_rust::xxh3::xxh3_64;
@@ -40,31 +39,54 @@ struct CacheMeta {
 /// Entry in the in-memory cache index
 #[derive(Debug, Clone)]
 struct CacheEntry {
-    /// Path to the cached file
+    /// Path to the cached msgpack file
     cache_path: PathBuf,
     /// Content hash of the source file
     content_hash: u64,
     /// Last-modified time of the source file (seconds since UNIX epoch).
-    /// Used as a fast pre-check to skip file reads on warm cache hits.
     mtime_secs: u64,
-    /// File size in bytes. Combined with mtime this gives high confidence
-    /// the file hasn't changed without reading its content.
+    /// File size in bytes.
     file_size: u64,
 }
 
-/// Statistics about cache usage during a build
-#[derive(Debug, Clone, Default)]
+/// Statistics about cache usage during a build.
+///
+/// Uses `AtomicUsize` so threads can update counts without holding any lock.
+#[derive(Debug, Default)]
 pub struct CacheStats {
-    /// Number of files with cache hits
-    pub hits: usize,
-    /// Number of files with cache misses (had to parse)
-    pub misses: usize,
-    /// Total bytes saved by using cache
-    pub bytes_saved: usize,
+    pub hits: AtomicUsize,
+    pub misses: AtomicUsize,
 }
 
 impl CacheStats {
-    /// Returns the hit rate as a percentage
+    pub fn hit_rate(&self) -> f64 {
+        let h = self.hits.load(Ordering::Relaxed);
+        let m = self.misses.load(Ordering::Relaxed);
+        let total = h + m;
+        if total == 0 {
+            0.0
+        } else {
+            (h as f64 / total as f64) * 100.0
+        }
+    }
+
+    /// Snapshot for display — cheap copy of the current values.
+    pub fn snapshot(&self) -> CacheStatsSnapshot {
+        CacheStatsSnapshot {
+            hits: self.hits.load(Ordering::Relaxed),
+            misses: self.misses.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// A plain-data snapshot of `CacheStats` for display / logging.
+#[derive(Debug, Clone, Default)]
+pub struct CacheStatsSnapshot {
+    pub hits: usize,
+    pub misses: usize,
+}
+
+impl CacheStatsSnapshot {
     pub fn hit_rate(&self) -> f64 {
         let total = self.hits + self.misses;
         if total == 0 {
@@ -77,36 +99,35 @@ impl CacheStats {
 
 /// A file-based cache for parsed semantics.
 ///
-/// The cache stores semantics indexed by (path_hash, content_hash).
-/// When a file's content hash matches, we can skip parsing.
+/// The index is built once in `open()` and is never mutated on the hot read
+/// path. All read methods take `&self` and are safe to call from multiple
+/// threads simultaneously without any locking. `set()` takes `&mut self` and
+/// is only called on cache misses (the slow path).
 #[derive(Debug)]
 pub struct SemanticsCache {
-    /// Root directory of the cache (e.g., `.unfault/cache/semantics`)
+    /// Root directory of the cache
     cache_dir: PathBuf,
-    /// In-memory index: path_hash -> CacheEntry
+    /// Immutable after `open()` — no lock required for reads.
     index: HashMap<u64, CacheEntry>,
-    /// Statistics for this session
-    stats: CacheStats,
-    /// Whether the cache is enabled
+    /// Lock-free hit/miss counters.
+    pub stats: CacheStats,
+    /// Whether the cache is enabled.
     enabled: bool,
 }
 
 impl SemanticsCache {
     /// Open or create a cache in the given workspace directory.
-    ///
-    /// Creates `.unfault/cache/semantics/` if it doesn't exist.
     pub fn open(workspace_path: &Path) -> Result<Self> {
         let cache_dir = workspace_path
             .join(".unfault")
             .join("cache")
             .join("semantics");
 
-        // Create cache directory if it doesn't exist
         if !cache_dir.exists() {
             fs::create_dir_all(&cache_dir).context("Failed to create cache directory")?;
         }
 
-        // Check cache version
+        // Check cache version — clear on mismatch.
         let meta_path = cache_dir.join("meta.json");
         let should_clear = if meta_path.exists() {
             let meta: CacheMeta = serde_json::from_reader(BufReader::new(fs::File::open(
@@ -116,14 +137,12 @@ impl SemanticsCache {
                 version: 0,
                 created_at: 0,
             });
-
             meta.version != CACHE_VERSION
         } else {
             false
         };
 
         if should_clear {
-            // Clear old cache
             for entry in fs::read_dir(&cache_dir)? {
                 let entry = entry?;
                 if entry.path().extension().map_or(false, |e| e == "msgpack") {
@@ -132,7 +151,6 @@ impl SemanticsCache {
             }
         }
 
-        // Write current version
         let meta = CacheMeta {
             version: CACHE_VERSION,
             created_at: std::time::SystemTime::now()
@@ -140,17 +158,15 @@ impl SemanticsCache {
                 .unwrap()
                 .as_secs(),
         };
-        let meta_file = fs::File::create(&meta_path)?;
-        serde_json::to_writer(BufWriter::new(meta_file), &meta)?;
+        serde_json::to_writer(BufWriter::new(fs::File::create(&meta_path)?), &meta)?;
 
-        // Build index from existing cache files
+        // Build index from existing cache files.
+        // Filename: <content_hash>_<path_hash>_<mtime>_<size>_<truncated_path>.msgpack
         let mut index = HashMap::new();
         for entry in fs::read_dir(&cache_dir)? {
             let entry = entry?;
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "msgpack") {
-                // Parse filename: <content_hash>_<path_hash>_<mtime>_<size>_<truncated_path>.msgpack
-                // Legacy format (version <4): <content_hash>_<path_hash>_<truncated_path>.msgpack
                 let filename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                 let parts: Vec<&str> = filename.splitn(5, '_').collect();
                 if parts.len() >= 2 {
@@ -188,7 +204,7 @@ impl SemanticsCache {
         })
     }
 
-    /// Create a disabled cache (always returns None for lookups)
+    /// Create a disabled cache (always returns None for lookups).
     pub fn disabled() -> Self {
         Self {
             cache_dir: PathBuf::new(),
@@ -203,60 +219,14 @@ impl SemanticsCache {
         xxh3_64(content.as_bytes())
     }
 
-    /// Try to get cached semantics for a file.
-    ///
-    /// Returns `Some(semantics)` if the file is in the cache and the content
-    /// hash matches. Returns `None` if there's a cache miss.
-    pub fn get(&mut self, relative_path: &str, content_hash: u64) -> Option<SourceSemantics> {
-        if !self.enabled {
-            return None;
-        }
-
-        // Compute path hash for lookup
-        let path_hash = xxh3_64(relative_path.as_bytes());
-
-        let entry = match self.index.get(&path_hash) {
-            Some(e) => e,
-            None => {
-                // No entry in index = cache miss
-                self.stats.misses += 1;
-                return None;
-            }
-        };
-
-        // Check if content hash matches
-        if entry.content_hash != content_hash {
-            self.stats.misses += 1;
-            return None;
-        }
-
-        // Try to read from cache file
-        let file = fs::File::open(&entry.cache_path).ok()?;
-        let reader = BufReader::new(file);
-
-        match rmp_serde::from_read(reader) {
-            Ok(semantics) => {
-                self.stats.hits += 1;
-                Some(semantics)
-            }
-            Err(_) => {
-                // Cache file corrupted, treat as miss
-                self.stats.misses += 1;
-                None
-            }
-        }
-    }
+    // ── Read methods — all `&self`, no locking required ─────────────────────
 
     /// Check whether a file's metadata (mtime + size) matches the cached entry.
     ///
-    /// Returns `Some((content_hash, cache_path))` if the metadata matches so
-    /// the caller can read the msgpack file **outside the lock**. Returns `None`
-    /// on any mismatch or if metadata is absent (legacy entry).
-    ///
-    /// This is the first half of the two-phase fast path — call this under the
-    /// lock, then do the actual file I/O without holding the lock.
+    /// Returns `Some((content_hash, cache_path))` when the metadata matches.
+    /// The caller should then read the msgpack file **without holding any lock**.
     pub fn check_metadata(
-        &mut self,
+        &self,
         relative_path: &str,
         mtime_secs: u64,
         file_size: u64,
@@ -264,27 +234,75 @@ impl SemanticsCache {
         if !self.enabled {
             return None;
         }
-
         let path_hash = xxh3_64(relative_path.as_bytes());
         let entry = self.index.get(&path_hash)?;
-
-        // mtime=0 means legacy entry without metadata — skip fast path
-        if entry.mtime_secs == 0 || entry.file_size == 0 {
+        // mtime_secs == 0 means legacy entry without metadata.
+        if entry.mtime_secs == 0
+            || entry.file_size == 0
+            || entry.mtime_secs != mtime_secs
+            || entry.file_size != file_size
+        {
             return None;
         }
-
-        if entry.mtime_secs != mtime_secs || entry.file_size != file_size {
-            return None;
-        }
-
         Some((entry.content_hash, entry.cache_path.clone()))
     }
 
-    /// Record a metadata-based cache hit (called after successful file read
-    /// outside the lock).
-    pub fn record_metadata_hit(&mut self) {
-        self.stats.hits += 1;
+    /// Try to get cached semantics by content hash.
+    ///
+    /// Returns `Some(semantics)` on a hit, `None` on a miss.
+    /// Reads the msgpack file inline — only call this when you already have
+    /// the file content and have computed its hash (the slow path).
+    pub fn get(&self, relative_path: &str, content_hash: u64) -> Option<SourceSemantics> {
+        if !self.enabled {
+            return None;
+        }
+        let path_hash = xxh3_64(relative_path.as_bytes());
+        let entry = match self.index.get(&path_hash) {
+            Some(e) => e,
+            None => {
+                self.stats.misses.fetch_add(1, Ordering::Relaxed);
+                return None;
+            }
+        };
+        if entry.content_hash != content_hash {
+            self.stats.misses.fetch_add(1, Ordering::Relaxed);
+            return None;
+        }
+        let file = fs::File::open(&entry.cache_path).ok()?;
+        match rmp_serde::from_read(BufReader::new(file)) {
+            Ok(semantics) => {
+                self.stats.hits.fetch_add(1, Ordering::Relaxed);
+                Some(semantics)
+            }
+            Err(_) => {
+                self.stats.misses.fetch_add(1, Ordering::Relaxed);
+                None
+            }
+        }
     }
+
+    /// Return the stored content hash for a path hash without doing any I/O.
+    /// Used to compute the aggregate hash for graph cache keying.
+    pub fn get_stored_content_hash(&self, path_hash: u64) -> Option<u64> {
+        self.index.get(&path_hash).map(|e| e.content_hash)
+    }
+
+    /// Record a metadata-based cache hit (called after a successful parallel read).
+    pub fn record_metadata_hit(&self) {
+        self.stats.hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record a cache miss.
+    pub fn record_miss(&self) {
+        self.stats.misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Get a snapshot of cache statistics.
+    pub fn stats_snapshot(&self) -> CacheStatsSnapshot {
+        self.stats.snapshot()
+    }
+
+    // ── Write method — `&mut self`, call only on the slow (miss) path ────────
 
     /// Store semantics in the cache.
     pub fn set(
@@ -298,12 +316,7 @@ impl SemanticsCache {
         if !self.enabled {
             return;
         }
-
-        // Compute path hash for indexing
         let path_hash = xxh3_64(relative_path.as_bytes());
-
-        // Generate cache filename:
-        // <content_hash>_<path_hash>_<mtime>_<size>_<truncated_path>.msgpack
         let safe_path = relative_path.replace(['/', '\\', ':'], "_");
         let truncated_path: String = safe_path.chars().take(40).collect();
         let filename = format!(
@@ -311,8 +324,6 @@ impl SemanticsCache {
             content_hash, path_hash, mtime_secs, file_size, truncated_path
         );
         let cache_path = self.cache_dir.join(&filename);
-
-        // Serialize and write
         if let Ok(file) = fs::File::create(&cache_path) {
             let mut writer = BufWriter::new(file);
             if rmp_serde::encode::write(&mut writer, semantics).is_ok() {
@@ -329,28 +340,11 @@ impl SemanticsCache {
         }
     }
 
-    /// Return the stored content hash for a path hash, without doing I/O.
-    /// Used to compute the aggregate hash for graph cache keying.
-    pub fn get_stored_content_hash(&self, path_hash: u64) -> Option<u64> {
-        self.index.get(&path_hash).map(|e| e.content_hash)
-    }
-
-    /// Record a cache miss (for stats tracking when we skip the cache lookup)
-    pub fn record_miss(&mut self) {
-        self.stats.misses += 1;
-    }
-
-    /// Get cache statistics.
-    pub fn stats(&self) -> &CacheStats {
-        &self.stats
-    }
-
-    /// Clear the cache.
+    /// Clear all cached files.
     pub fn clear(&self) -> Result<()> {
         if !self.enabled {
             return Ok(());
         }
-
         for entry in fs::read_dir(&self.cache_dir)? {
             let entry = entry?;
             if entry.path().extension().map_or(false, |e| e == "msgpack") {
@@ -370,7 +364,6 @@ mod tests {
     use unfault_core::semantics::python::model::PyFileSemantics;
     use unfault_core::types::context::{Language, SourceFile};
 
-    /// Create a simple Python semantics for testing
     fn create_test_semantics() -> SourceSemantics {
         let source_file = SourceFile {
             path: "test.py".to_string(),
@@ -387,7 +380,6 @@ mod tests {
         let hash1 = SemanticsCache::hash_content("hello world");
         let hash2 = SemanticsCache::hash_content("hello world");
         let hash3 = SemanticsCache::hash_content("hello world!");
-
         assert_eq!(hash1, hash2);
         assert_ne!(hash1, hash3);
     }
@@ -395,58 +387,46 @@ mod tests {
     #[test]
     fn test_cache_miss_on_empty() {
         let temp_dir = TempDir::new().unwrap();
-        let mut cache = SemanticsCache::open(temp_dir.path()).unwrap();
-
+        let cache = SemanticsCache::open(temp_dir.path()).unwrap();
         let result = cache.get("test.py", 12345);
         assert!(result.is_none());
-        assert_eq!(cache.stats().misses, 1);
+        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 1);
     }
 
     #[test]
     fn test_cache_hit() {
         let temp_dir = TempDir::new().unwrap();
         let mut cache = SemanticsCache::open(temp_dir.path()).unwrap();
-
         let semantics = create_test_semantics();
         let content_hash = 12345u64;
-
         cache.set("test.py", content_hash, 1000, 512, &semantics);
-
         let result = cache.get("test.py", content_hash);
         assert!(result.is_some());
-        assert_eq!(cache.stats().hits, 1);
+        assert_eq!(cache.stats.hits.load(Ordering::Relaxed), 1);
     }
 
     #[test]
     fn test_cache_miss_on_hash_change() {
         let temp_dir = TempDir::new().unwrap();
         let mut cache = SemanticsCache::open(temp_dir.path()).unwrap();
-
         let semantics = create_test_semantics();
-
         cache.set("test.py", 12345, 1000, 512, &semantics);
-
-        // Different hash should miss
         let result = cache.get("test.py", 99999);
         assert!(result.is_none());
-        assert_eq!(cache.stats().misses, 1);
+        assert_eq!(cache.stats.misses.load(Ordering::Relaxed), 1);
     }
 
     #[test]
     fn test_cache_persistence() {
         let temp_dir = TempDir::new().unwrap();
         let content_hash = 12345u64;
-
-        // Write to cache
         {
             let mut cache = SemanticsCache::open(temp_dir.path()).unwrap();
             let semantics = create_test_semantics();
             cache.set("test.py", content_hash, 1000, 512, &semantics);
         }
-
-        // Read from cache with new instance
         {
-            let mut cache = SemanticsCache::open(temp_dir.path()).unwrap();
+            let cache = SemanticsCache::open(temp_dir.path()).unwrap();
             let result = cache.get("test.py", content_hash);
             assert!(result.is_some());
         }
@@ -454,10 +434,9 @@ mod tests {
 
     #[test]
     fn test_hit_rate() {
-        let stats = CacheStats {
+        let stats = CacheStatsSnapshot {
             hits: 80,
             misses: 20,
-            bytes_saved: 0,
         };
         assert!((stats.hit_rate() - 80.0).abs() < 0.01);
     }
@@ -465,11 +444,26 @@ mod tests {
     #[test]
     fn test_disabled_cache() {
         let mut cache = SemanticsCache::disabled();
-
         let semantics = create_test_semantics();
         cache.set("test.py", 12345, 1000, 512, &semantics);
-
         let result = cache.get("test.py", 12345);
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn check_metadata_matches() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut cache = SemanticsCache::open(temp_dir.path()).unwrap();
+        let semantics = create_test_semantics();
+        cache.set("test.py", 99999, 1234567890, 1024, &semantics);
+        // Matching metadata returns the cache path
+        let result = cache.check_metadata("test.py", 1234567890, 1024);
+        assert!(result.is_some());
+        // Mismatched mtime returns None
+        let result = cache.check_metadata("test.py", 1234567891, 1024);
+        assert!(result.is_none());
+        // Mismatched size returns None
+        let result = cache.check_metadata("test.py", 1234567890, 1025);
         assert!(result.is_none());
     }
 }
