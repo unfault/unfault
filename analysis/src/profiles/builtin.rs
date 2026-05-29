@@ -329,6 +329,8 @@ fn python_flask_backend() -> Profile {
                     "@bp.route(",
                     "@blp.route(",
                     "MethodView",
+                    ".action_route(",
+                    "BaseController",
                 ])),
         )
         .with_file_hint(
@@ -341,6 +343,8 @@ fn python_flask_backend() -> Profile {
                     "from flask import Blueprint",
                     "from flask_smorest import Blueprint",
                     "from flask_smorest import",
+                    "from flask_restful import",
+                    "Endpoint(",
                 ])),
         )
         .with_file_hint(

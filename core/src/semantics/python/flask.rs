@@ -77,6 +77,11 @@ pub fn summarize_flask(file: &ParsedFile) -> Option<FlaskFileSummary> {
     collect_flask_error_handlers(file, root, &mut error_handlers);
     collect_flask_config_settings(file, root, &mut config_settings);
 
+    // Two-pass action_route pattern: first build the class→base-path map,
+    // then extract handlers that reference those classes.
+    let class_bases = collect_action_route_class_bases(file, root);
+    collect_action_route_handlers(file, root, &class_bases, &mut routes);
+
     if apps.is_empty()
         && blueprints.is_empty()
         && routes.is_empty()
@@ -628,6 +633,266 @@ fn body_has_try_except(body: Node) -> bool {
         }
     }
     false
+}
+
+// ---------------------------------------------------------------------------
+// Flask-RESTful / custom action_route pattern
+// ---------------------------------------------------------------------------
+//
+// Supports codebases that define routes through a two-level convention:
+//
+//   Step 1 – a controller class is registered to a base path via an
+//   endpoint-level class decorator:
+//
+//       endpoint = Endpoint("name")
+//
+//       @endpoint.route("/base")
+//       class MyController(BaseController):
+//           pass
+//
+//   Step 2 – individual handlers are attached to the controller via a
+//   classmethod decorator, always the outermost decorator on the handler
+//   function (innermost in tree-sitter's child list = listed first):
+//
+//       @MyController.action_route("/sub", methods=["GET", "POST"])
+//       @inject_auth          # any number of inner decorators (ignored)
+//       def handler(...):
+//           ...
+//
+// We also detect the standard flask-restful pattern where `Resource`
+// subclasses are decorated directly with `@api.resource("/path")`.
+//
+// The full route path is formed by joining the class base path with the
+// action_route sub-path: "/base" + "/sub" → "/base/sub".
+
+/// Maps a class name to the base path registered via `@endpoint.route("/base")`.
+/// Returns an empty map if no such pattern exists in the file.
+fn collect_action_route_class_bases(
+    file: &ParsedFile,
+    root: Node,
+) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    collect_action_route_class_bases_node(file, root, &mut map);
+    map
+}
+
+fn collect_action_route_class_bases_node(
+    file: &ParsedFile,
+    node: Node,
+    map: &mut std::collections::HashMap<String, String>,
+) {
+    if node.kind() == "decorated_definition" {
+        let source_bytes = file.source.as_bytes();
+
+        let mut decorators = Vec::new();
+        let mut class_def: Option<Node> = None;
+
+        let mut cursor = node.walk();
+        for child in node.children(&mut cursor) {
+            match child.kind() {
+                "decorator" => decorators.push(child),
+                "class_definition" => class_def = Some(child),
+                _ => {}
+            }
+        }
+
+        if let Some(class_node) = class_def {
+            // Try each decorator for the `@something.route("/path")` shape.
+            for dec in &decorators {
+                if let Some(base_path) = extract_endpoint_route_path(file, *dec) {
+                    let class_name = class_node
+                        .child_by_field_name("name")
+                        .and_then(|n| n.utf8_text(source_bytes).ok())
+                        .unwrap_or("")
+                        .to_string();
+                    if !class_name.is_empty() {
+                        map.insert(class_name, base_path);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_action_route_class_bases_node(file, child, map);
+    }
+}
+
+/// Extracts the path string from a `@something.route("/path")` decorator.
+/// Returns `None` if the decorator doesn't match the shape.
+fn extract_endpoint_route_path(file: &ParsedFile, decorator: Node) -> Option<String> {
+    let source_bytes = file.source.as_bytes();
+
+    let mut cursor = decorator.walk();
+    for child in decorator.children(&mut cursor) {
+        if child.kind() != "call" {
+            continue;
+        }
+        let func = child.child_by_field_name("function")?;
+        if func.kind() != "attribute" {
+            continue;
+        }
+        let attr = func.child_by_field_name("attribute")?;
+        let method = attr.utf8_text(source_bytes).ok()?;
+        if method != "route" {
+            continue;
+        }
+        let args = child.child_by_field_name("arguments")?;
+        return extract_first_string_arg(file, args);
+    }
+    None
+}
+
+/// Collect `FlaskRoute` entries produced by `@ClassName.action_route("/sub", methods=[...])`.
+///
+/// Requires `class_bases` — a map from class name to its registered base path
+/// (built by `collect_action_route_class_bases`).
+fn collect_action_route_handlers(
+    file: &ParsedFile,
+    root: Node,
+    class_bases: &std::collections::HashMap<String, String>,
+    out: &mut Vec<FlaskRoute>,
+) {
+    collect_action_route_handlers_node(file, root, class_bases, out);
+}
+
+fn collect_action_route_handlers_node(
+    file: &ParsedFile,
+    node: Node,
+    class_bases: &std::collections::HashMap<String, String>,
+    out: &mut Vec<FlaskRoute>,
+) {
+    if node.kind() == "decorated_definition" {
+        extract_action_route_handler(file, node, class_bases, out);
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_action_route_handlers_node(file, child, class_bases, out);
+    }
+}
+
+fn extract_action_route_handler(
+    file: &ParsedFile,
+    decorated_def: Node,
+    class_bases: &std::collections::HashMap<String, String>,
+    out: &mut Vec<FlaskRoute>,
+) {
+    let source_bytes = file.source.as_bytes();
+
+    let mut decorators = Vec::new();
+    let mut func_def: Option<Node> = None;
+
+    let mut cursor = decorated_def.walk();
+    for child in decorated_def.children(&mut cursor) {
+        match child.kind() {
+            "decorator" => decorators.push(child),
+            "function_definition" | "async_function_definition" => func_def = Some(child),
+            _ => {}
+        }
+    }
+
+    let func_def = match func_def {
+        Some(f) => f,
+        None => return,
+    };
+
+    // The outermost decorator is always listed first in `decorators`.
+    // We scan all decorators and take the first that matches `action_route`.
+    for decorator in &decorators {
+        if let Some((class_name, sub_path, http_method)) =
+            extract_action_route_decorator(file, *decorator)
+        {
+            // Look up the base path for this controller class.
+            let base_path = match class_bases.get(&class_name) {
+                Some(p) => p.trim_end_matches('/').to_string(),
+                // If there's no registered base path, use the sub-path directly.
+                None => String::new(),
+            };
+            let full_path = if sub_path.starts_with('/') {
+                format!("{}{}", base_path, sub_path)
+            } else {
+                format!("{}/{}", base_path, sub_path)
+            };
+
+            let handler_name = func_def
+                .child_by_field_name("name")
+                .and_then(|n| n.utf8_text(source_bytes).ok())
+                .unwrap_or("unknown")
+                .to_string();
+
+            let fn_text = file.text_for_node(&func_def);
+            let is_async = fn_text.trim_start().starts_with("async def");
+
+            let body = match func_def.child_by_field_name("body") {
+                Some(b) => b,
+                None => return,
+            };
+            let has_try_except = body_has_try_except(body);
+
+            let location = file.location_for_node(&decorated_def);
+            let decorator_location = file.location_for_node(decorator);
+
+            out.push(FlaskRoute {
+                app_var_name: class_name,
+                http_method,
+                path: full_path,
+                handler_name,
+                is_async,
+                has_try_except,
+                location,
+                decorator_location,
+                body_start_byte: body.start_byte(),
+                body_end_byte: body.end_byte(),
+            });
+            // Stop at first matching action_route decorator.
+            return;
+        }
+    }
+}
+
+/// Extract `(class_name, sub_path, http_method)` from `@ClassName.action_route("/sub", methods=["GET"])`.
+///
+/// Returns `None` if the decorator doesn't match.
+fn extract_action_route_decorator(
+    file: &ParsedFile,
+    decorator: Node,
+) -> Option<(String, String, String)> {
+    let source_bytes = file.source.as_bytes();
+
+    let mut cursor = decorator.walk();
+    for child in decorator.children(&mut cursor) {
+        if child.kind() != "call" {
+            continue;
+        }
+        let func = child.child_by_field_name("function")?;
+        if func.kind() != "attribute" {
+            continue;
+        }
+
+        let object = func.child_by_field_name("object")?;
+        let attr = func.child_by_field_name("attribute")?;
+
+        // Must be `ClassName.action_route`
+        if attr.utf8_text(source_bytes).ok()? != "action_route" {
+            continue;
+        }
+
+        let class_name = object.utf8_text(source_bytes).ok()?.to_string();
+        let args = child.child_by_field_name("arguments")?;
+
+        // First positional arg is the sub-path (named `rule` in the signature,
+        // but passed positionally in practice).
+        let sub_path = extract_first_string_arg(file, args)?;
+
+        // `methods=[...]` kwarg → same logic as @app.route().
+        let http_method = extract_route_methods(file, args);
+
+        return Some((class_name, sub_path, http_method));
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------
@@ -1451,5 +1716,269 @@ def create_app():
             .collect();
         assert!(methods.contains(&"GET"));
         assert!(methods.contains(&"POST"));
+    }
+
+    // ==================== action_route / Custom BaseController Pattern Tests ====================
+
+    #[test]
+    fn action_route_simple_get() {
+        // Most basic: single class, single handler.
+        let src = r#"
+from flask_restful import Resource
+
+class BaseController(Resource):
+    @classmethod
+    def action_route(cls, rule: str, **options):
+        pass
+
+endpoint = Endpoint("users")
+
+@endpoint.route("/users")
+class UserController(BaseController):
+    pass
+
+@UserController.action_route("/", methods=["GET"])
+def list_users():
+    return []
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some(), "should detect something");
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert_eq!(summary.routes[0].path, "/users/");
+        assert_eq!(summary.routes[0].http_method, "GET");
+        assert_eq!(summary.routes[0].handler_name, "list_users");
+        assert_eq!(summary.routes[0].app_var_name, "UserController");
+    }
+
+    #[test]
+    fn action_route_multiple_methods_on_same_subpath() {
+        let src = r#"
+endpoint = Endpoint("items")
+
+@endpoint.route("/items")
+class ItemController(BaseController):
+    pass
+
+@ItemController.action_route("/", methods=["GET"])
+def list_items():
+    return []
+
+@ItemController.action_route("/", methods=["POST"])
+def create_item():
+    return {}, 201
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 2);
+
+        let get_route = summary
+            .routes
+            .iter()
+            .find(|r| r.http_method == "GET")
+            .unwrap();
+        assert_eq!(get_route.path, "/items/");
+
+        let post_route = summary
+            .routes
+            .iter()
+            .find(|r| r.http_method == "POST")
+            .unwrap();
+        assert_eq!(post_route.path, "/items/");
+    }
+
+    #[test]
+    fn action_route_sub_path_joined_with_base() {
+        let src = r#"
+endpoint = Endpoint("orders")
+
+@endpoint.route("/orders")
+class OrderController(BaseController):
+    pass
+
+@OrderController.action_route("/<int:order_id>", methods=["GET"])
+def get_order(order_id):
+    return {}
+
+@OrderController.action_route("/<int:order_id>", methods=["DELETE"])
+def delete_order(order_id):
+    return {}, 204
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes.len(), 2);
+        for route in &summary.routes {
+            assert_eq!(route.path, "/orders/<int:order_id>");
+        }
+    }
+
+    #[test]
+    fn action_route_with_inner_decorators_ignored() {
+        // action_route is outermost; inner @inject_auth etc. are irrelevant.
+        let src = r#"
+endpoint = Endpoint("secure")
+
+@endpoint.route("/secure")
+class SecureController(BaseController):
+    pass
+
+@SecureController.action_route("/data", methods=["GET"])
+@inject_auth
+@log_request
+def get_data():
+    return {}
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert_eq!(summary.routes[0].path, "/secure/data");
+        assert_eq!(summary.routes[0].http_method, "GET");
+        assert_eq!(summary.routes[0].handler_name, "get_data");
+    }
+
+    #[test]
+    fn action_route_default_method_is_get() {
+        // No `methods` kwarg → defaults to GET.
+        let src = r#"
+endpoint = Endpoint("health")
+
+@endpoint.route("/health")
+class HealthController(BaseController):
+    pass
+
+@HealthController.action_route("/check")
+def health_check():
+    return {"status": "ok"}
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert_eq!(summary.routes[0].http_method, "GET");
+        assert_eq!(summary.routes[0].path, "/health/check");
+    }
+
+    #[test]
+    fn action_route_multiple_controllers() {
+        // Two independent controllers, each with their own handlers.
+        let src = r#"
+endpoint = Endpoint("api")
+
+@endpoint.route("/users")
+class UserController(BaseController):
+    pass
+
+@endpoint.route("/products")
+class ProductController(BaseController):
+    pass
+
+@UserController.action_route("/", methods=["GET"])
+def list_users():
+    return []
+
+@ProductController.action_route("/", methods=["GET"])
+def list_products():
+    return []
+
+@ProductController.action_route("/<int:id>", methods=["DELETE"])
+def delete_product(id):
+    return {}, 204
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes.len(), 3);
+
+        let user_routes: Vec<_> = summary
+            .routes
+            .iter()
+            .filter(|r| r.path.starts_with("/users"))
+            .collect();
+        assert_eq!(user_routes.len(), 1);
+
+        let product_routes: Vec<_> = summary
+            .routes
+            .iter()
+            .filter(|r| r.path.starts_with("/products"))
+            .collect();
+        assert_eq!(product_routes.len(), 2);
+    }
+
+    #[test]
+    fn action_route_no_class_base_uses_subpath_directly() {
+        // Handler uses action_route but no matching @endpoint.route class exists.
+        // Path should just be the sub-path itself.
+        let src = r#"
+@OrphanController.action_route("/orphan", methods=["GET"])
+def orphan_handler():
+    return {}
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert_eq!(summary.routes[0].path, "/orphan");
+        assert_eq!(summary.routes[0].app_var_name, "OrphanController");
+    }
+
+    #[test]
+    fn action_route_try_except_detected() {
+        let src = r#"
+endpoint = Endpoint("api")
+
+@endpoint.route("/items")
+class ItemController(BaseController):
+    pass
+
+@ItemController.action_route("/risky", methods=["POST"])
+def risky_handler():
+    try:
+        return do_something()
+    except Exception:
+        return {}, 500
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert!(summary.routes[0].has_try_except);
+    }
+
+    #[test]
+    fn action_route_async_handler_detected() {
+        let src = r#"
+endpoint = Endpoint("api")
+
+@endpoint.route("/stream")
+class StreamController(BaseController):
+    pass
+
+@StreamController.action_route("/events", methods=["GET"])
+async def stream_events():
+    return []
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert!(summary.routes[0].is_async);
+    }
+
+    #[test]
+    fn action_route_mixed_with_regular_flask_routes() {
+        // A file that has both regular @app.route and action_route-style.
+        let src = r#"
+from flask import Flask
+
+app = Flask(__name__)
+endpoint = Endpoint("api")
+
+@app.route("/health")
+def health():
+    return "ok"
+
+@endpoint.route("/users")
+class UserController(BaseController):
+    pass
+
+@UserController.action_route("/", methods=["GET"])
+def list_users():
+    return []
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        // One regular route + one action_route-based route.
+        assert_eq!(summary.routes.len(), 2);
+        let paths: Vec<&str> = summary.routes.iter().map(|r| r.path.as_str()).collect();
+        assert!(paths.contains(&"/health"));
+        assert!(paths.contains(&"/users/"));
     }
 }
