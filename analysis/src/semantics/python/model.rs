@@ -7,6 +7,7 @@ use crate::semantics::python::orm::OrmQueryCall;
 use crate::types::context::Language;
 
 use super::fastapi::FastApiFileSummary;
+use unfault_core::semantics::python::flask::FlaskFileSummary;
 
 /// Information about a bare except clause found in the code.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +58,9 @@ pub struct PyFileSemantics {
     /// Framework-specific summary: FastAPI-related semantics for this file.
     pub fastapi: Option<FastApiFileSummary>,
 
+    /// Framework-specific summary: Flask-related semantics for this file.
+    pub flask: Option<FlaskFileSummary>,
+
     /// HTTP clients calls
     pub http_calls: Vec<HttpCallSite>,
 
@@ -84,6 +88,7 @@ impl PyFileSemantics {
             assignments: Vec::new(),
             calls: Vec::new(),
             fastapi: None,
+            flask: None,
             http_calls: Vec::new(),
             orm_queries: Vec::new(),
             bare_excepts: Vec::new(),
@@ -97,12 +102,16 @@ impl PyFileSemantics {
         sem
     }
 
-    /// Run framework-specific analysis (FastAPI, later Django, Flask, etc.).
+    /// Run framework-specific analysis (FastAPI, Flask, etc.).
     pub fn analyze_frameworks(&mut self, parsed: &ParsedFile) -> anyhow::Result<()> {
-        // Right now we only have FastAPI analysis.
         let fastapi_summary = super::fastapi::summarize_fastapi(parsed);
         if fastapi_summary.is_some() {
             self.fastapi = fastapi_summary;
+        }
+
+        let flask_summary = unfault_core::semantics::python::flask::summarize_flask(parsed);
+        if flask_summary.is_some() {
+            self.flask = flask_summary;
         }
 
         self.http_calls = super::http::summarize_http_clients(parsed);

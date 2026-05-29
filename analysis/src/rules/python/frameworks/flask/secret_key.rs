@@ -73,83 +73,107 @@ impl Rule for FlaskHardcodedSecretKeyRule {
                 continue;
             }
 
-            // Check for SECRET_KEY assignments with hardcoded values
+            // Collect all SECRET_KEY candidate (key, value_repr, line, col) from:
+            //   (a) module-level assignments: SECRET_KEY = "..."
+            //   (b) factory-pattern config:   app.config['SECRET_KEY'] = "..."
+            //                                 app.config.update(SECRET_KEY="...")
+            let mut secret_key_candidates: Vec<(String, u32, u32)> = Vec::new();
+
             for assign in &py.assignments {
                 if assign.target == "SECRET_KEY" || assign.target.ends_with("SECRET_KEY") {
-                    let value = assign.value_repr.trim();
+                    secret_key_candidates.push((
+                        assign.value_repr.clone(),
+                        assign.location.range.start_line + 1,
+                        assign.location.range.start_col + 1,
+                    ));
+                }
+            }
 
-                    // Check if it's a hardcoded string (not from environment)
-                    let is_hardcoded = (value.starts_with('"') || value.starts_with('\''))
-                        && !value.contains("os.environ")
-                        && !value.contains("os.getenv")
-                        && !value.contains("config(")
-                        && !value.contains("env(");
-
-                    // Also check for common weak/default keys
-                    let is_weak_key = value.contains("dev")
-                        || value.contains("secret")
-                        || value.contains("change")
-                        || value.contains("your-secret")
-                        || value.contains("xxx")
-                        || value.len() < 20; // Very short keys
-
-                    if is_hardcoded {
-                        let severity = if is_weak_key {
-                            Severity::Critical
-                        } else {
-                            Severity::High
-                        };
-
-                        let title = if is_weak_key {
-                            "Flask SECRET_KEY is hardcoded with a weak/default value".to_string()
-                        } else {
-                            "Flask SECRET_KEY is hardcoded".to_string()
-                        };
-
-                        let description =
-                            "SECRET_KEY is hardcoded in the source code. This key is used to \
-                             sign session cookies and other security-sensitive data. If exposed \
-                             (e.g., in version control), attackers can forge sessions and \
-                             potentially gain unauthorized access. Load SECRET_KEY from \
-                             environment variables or a secure secrets manager."
-                                .to_string();
-
-                        let fix_preview = generate_fix_preview();
-
-                        // Use stdlib_import since we're adding "import os"
-                        let patch = generate_secret_key_patch(
-                            *file_id,
-                            assign.location.range.start_line + 1,
-                            &py.imports,
-                            py.import_insertion_line_for(ImportInsertionType::stdlib_import()),
-                        );
-
-                        findings.push(RuleFinding {
-                            rule_id: self.id().to_string(),
-                            title,
-                            description: Some(description),
-                            kind: FindingKind::StabilityRisk,
-                            severity,
-                            confidence: 0.90,
-                            dimension: Dimension::Stability,
-                            file_id: *file_id,
-                            file_path: py.path.clone(),
-                            line: Some(assign.location.range.start_line + 1),
-                            column: Some(assign.location.range.start_col + 1),
-                            end_line: None,
-                            end_column: None,
-                            byte_range: None,
-                            patch: Some(patch),
-                            fix_preview: Some(fix_preview),
-                            tags: vec![
-                                "python".into(),
-                                "flask".into(),
-                                "secret-key".into(),
-                                "security".into(),
-                                "hardcoded".into(),
-                            ],
-                        });
+            if let Some(flask) = &py.flask {
+                for cfg in &flask.config_settings {
+                    if cfg.key == "SECRET_KEY" || cfg.key.ends_with("SECRET_KEY") {
+                        secret_key_candidates.push((
+                            cfg.value_repr.clone(),
+                            cfg.location.range.start_line + 1,
+                            cfg.location.range.start_col + 1,
+                        ));
                     }
+                }
+            }
+
+            for (value_repr, line, col) in secret_key_candidates {
+                let value = value_repr.trim();
+
+                // Check if it's a hardcoded string (not from environment)
+                let is_hardcoded = (value.starts_with('"') || value.starts_with('\''))
+                    && !value.contains("os.environ")
+                    && !value.contains("os.getenv")
+                    && !value.contains("config(")
+                    && !value.contains("env(");
+
+                // Also check for common weak/default keys
+                let is_weak_key = value.contains("dev")
+                    || value.contains("secret")
+                    || value.contains("change")
+                    || value.contains("your-secret")
+                    || value.contains("xxx")
+                    || value.len() < 20; // Very short keys
+
+                if is_hardcoded {
+                    let severity = if is_weak_key {
+                        Severity::Critical
+                    } else {
+                        Severity::High
+                    };
+
+                    let title = if is_weak_key {
+                        "Flask SECRET_KEY is hardcoded with a weak/default value".to_string()
+                    } else {
+                        "Flask SECRET_KEY is hardcoded".to_string()
+                    };
+
+                    let description =
+                        "SECRET_KEY is hardcoded in the source code. This key is used to \
+                         sign session cookies and other security-sensitive data. If exposed \
+                         (e.g., in version control), attackers can forge sessions and \
+                         potentially gain unauthorized access. Load SECRET_KEY from \
+                         environment variables or a secure secrets manager."
+                            .to_string();
+
+                    let fix_preview = generate_fix_preview();
+
+                    let patch = generate_secret_key_patch(
+                        *file_id,
+                        line,
+                        &py.imports,
+                        py.import_insertion_line_for(ImportInsertionType::stdlib_import()),
+                    );
+
+                    findings.push(RuleFinding {
+                        rule_id: self.id().to_string(),
+                        title,
+                        description: Some(description),
+                        kind: FindingKind::StabilityRisk,
+                        severity,
+                        confidence: 0.90,
+                        dimension: Dimension::Stability,
+                        file_id: *file_id,
+                        file_path: py.path.clone(),
+                        line: Some(line),
+                        column: Some(col),
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
+                        patch: Some(patch),
+                        fix_preview: Some(fix_preview),
+                        tags: vec![
+                            "python".into(),
+                            "flask".into(),
+                            "secret-key".into(),
+                            "security".into(),
+                            "hardcoded".into(),
+                        ],
+                    });
                 }
             }
 

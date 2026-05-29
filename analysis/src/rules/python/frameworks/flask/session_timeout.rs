@@ -75,29 +75,57 @@ impl Rule for FlaskSessionTimeoutRule {
                 continue;
             }
 
-            // Track session-related settings
+            // Track session-related settings from both module-level assignments
+            // and factory-pattern config (app.config[...] / app.config.update(...)).
             let mut has_permanent_session_lifetime = false;
             let mut has_session_permanent = false;
             let mut session_lifetime_value: Option<i64> = None;
 
-            for assign in &py.assignments {
-                match assign.target.as_str() {
+            // Build a unified iterator: (key, value_repr, line, col)
+            let module_level = py.assignments.iter().map(|a| {
+                (
+                    a.target.as_str(),
+                    a.value_repr.as_str(),
+                    a.location.range.start_line + 1,
+                    a.location.range.start_col + 1,
+                )
+            });
+
+            let factory_level: Vec<(&str, &str, u32, u32)> = py
+                .flask
+                .as_ref()
+                .map(|f| {
+                    f.config_settings
+                        .iter()
+                        .map(|c| {
+                            (
+                                c.key.as_str(),
+                                c.value_repr.as_str(),
+                                c.location.range.start_line + 1,
+                                c.location.range.start_col + 1,
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            for (key, value, line, col) in module_level.chain(factory_level.into_iter()) {
+                match key {
                     "PERMANENT_SESSION_LIFETIME" => {
                         has_permanent_session_lifetime = true;
-                        // Try to parse the value (could be timedelta or seconds)
-                        let value = assign.value_repr.trim();
-                        if let Ok(seconds) = value.parse::<i64>() {
+                        if let Ok(seconds) = value.trim().parse::<i64>() {
                             session_lifetime_value = Some(seconds);
-                            // Check for very long session lifetimes (> 30 days)
                             if seconds > 30 * 24 * 60 * 60 {
                                 findings.push(RuleFinding {
                                     rule_id: self.id().to_string(),
-                                    title: "Flask PERMANENT_SESSION_LIFETIME is very long".to_string(),
+                                    title: "Flask PERMANENT_SESSION_LIFETIME is very long"
+                                        .to_string(),
                                     description: Some(format!(
                                         "PERMANENT_SESSION_LIFETIME is set to {} seconds ({} days). \
                                          Long session lifetimes increase the risk of session hijacking. \
                                          Consider shorter session lifetimes.",
-                                        seconds, seconds / (24 * 60 * 60)
+                                        seconds,
+                                        seconds / (24 * 60 * 60)
                                     )),
                                     kind: FindingKind::StabilityRisk,
                                     severity: Severity::Low,
@@ -105,11 +133,11 @@ impl Rule for FlaskSessionTimeoutRule {
                                     dimension: Dimension::Stability,
                                     file_id: *file_id,
                                     file_path: py.path.clone(),
-                                    line: Some(assign.location.range.start_line + 1),
-                                    column: Some(assign.location.range.start_col + 1),
-                    end_line: None,
-                    end_column: None,
-            byte_range: None,
+                                    line: Some(line),
+                                    column: Some(col),
+                                    end_line: None,
+                                    end_column: None,
+                                    byte_range: None,
                                     patch: None,
                                     fix_preview: Some(generate_session_lifetime_fix_preview()),
                                     tags: vec![

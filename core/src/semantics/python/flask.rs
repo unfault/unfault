@@ -9,6 +9,10 @@ pub struct FlaskFileSummary {
     pub blueprints: Vec<FlaskBlueprint>,
     pub routes: Vec<FlaskRoute>,
     pub error_handlers: Vec<FlaskErrorHandler>,
+    /// Config key/value pairs collected from both module-level assignments
+    /// *and* factory-function patterns such as `app.config['KEY'] = val`
+    /// or `app.config.update(KEY=val, ...)`.
+    pub config_settings: Vec<FlaskConfigSetting>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -46,6 +50,18 @@ pub struct FlaskErrorHandler {
     pub location: AstLocation,
 }
 
+/// A single Flask config key/value pair detected in the file, regardless of
+/// whether it was set at module level (`SECRET_KEY = "x"`) or inside a factory
+/// function via `app.config['KEY'] = value` or `app.config.update(KEY=value)`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlaskConfigSetting {
+    /// Config key name, e.g. `"SECRET_KEY"`, `"SESSION_COOKIE_SECURE"`.
+    pub key: String,
+    /// Text representation of the value as it appears in source, e.g. `"\"dev\""`, `"False"`.
+    pub value_repr: String,
+    pub location: AstLocation,
+}
+
 pub fn summarize_flask(file: &ParsedFile) -> Option<FlaskFileSummary> {
     let root = file.tree.root_node();
 
@@ -53,13 +69,20 @@ pub fn summarize_flask(file: &ParsedFile) -> Option<FlaskFileSummary> {
     let mut blueprints = Vec::new();
     let mut routes = Vec::new();
     let mut error_handlers = Vec::new();
+    let mut config_settings = Vec::new();
 
     collect_flask_apps(file, root, &mut apps);
     collect_flask_blueprints(file, root, &mut blueprints);
     collect_flask_routes(file, root, &mut routes);
     collect_flask_error_handlers(file, root, &mut error_handlers);
+    collect_flask_config_settings(file, root, &mut config_settings);
 
-    if apps.is_empty() && blueprints.is_empty() && routes.is_empty() && error_handlers.is_empty() {
+    if apps.is_empty()
+        && blueprints.is_empty()
+        && routes.is_empty()
+        && error_handlers.is_empty()
+        && config_settings.is_empty()
+    {
         return None;
     }
 
@@ -68,6 +91,7 @@ pub fn summarize_flask(file: &ParsedFile) -> Option<FlaskFileSummary> {
         blueprints,
         routes,
         error_handlers,
+        config_settings,
     })
 }
 
@@ -606,6 +630,180 @@ fn body_has_try_except(body: Node) -> bool {
     false
 }
 
+// ---------------------------------------------------------------------------
+// Flask config setting collection
+// ---------------------------------------------------------------------------
+//
+// Recognises two factory-pattern idioms in addition to bare module-level
+// assignments (which are handled separately via `py.assignments`):
+//
+//   1. Subscript assignment:
+//      `app.config['SECRET_KEY'] = "value"`
+//      AST: expression_statement → assignment
+//           left  = subscript  (object=attribute "app.config", subscript=string "'SECRET_KEY'")
+//           right = <value>
+//
+//   2. config.update() call:
+//      `app.config.update(SESSION_COOKIE_SECURE=False, PERMANENT_SESSION_LIFETIME=3600)`
+//      AST: call
+//           function  = attribute "app.config.update"
+//           arguments = argument_list with keyword_argument nodes
+
+fn collect_flask_config_settings(file: &ParsedFile, node: Node, out: &mut Vec<FlaskConfigSetting>) {
+    match node.kind() {
+        // Pattern 1: app.config['KEY'] = value
+        "assignment" => {
+            extract_config_subscript_assignment(file, node, out);
+        }
+        // Pattern 2: app.config.update(KEY=value, ...)
+        "call" => {
+            extract_config_update_call(file, node, out);
+        }
+        _ => {}
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_flask_config_settings(file, child, out);
+    }
+}
+
+/// Handles `app.config['SECRET_KEY'] = "value"`.
+fn extract_config_subscript_assignment(
+    file: &ParsedFile,
+    node: Node,
+    out: &mut Vec<FlaskConfigSetting>,
+) {
+    let source_bytes = file.source.as_bytes();
+
+    let left = match node.child_by_field_name("left") {
+        Some(n) => n,
+        None => return,
+    };
+    let right = match node.child_by_field_name("right") {
+        Some(n) => n,
+        None => return,
+    };
+
+    // LHS must be a subscript: `app.config['KEY']`
+    if left.kind() != "subscript" {
+        return;
+    }
+
+    // The object of the subscript must be an attribute ending in `.config`
+    let object = match left.child_by_field_name("value") {
+        Some(n) => n,
+        None => return,
+    };
+    if object.kind() != "attribute" {
+        return;
+    }
+    let attr = match object.child_by_field_name("attribute") {
+        Some(n) => n,
+        None => return,
+    };
+    if attr.utf8_text(source_bytes).ok() != Some("config") {
+        return;
+    }
+
+    // The subscript key must be a string literal.
+    let subscript = match left.child_by_field_name("subscript") {
+        Some(n) => n,
+        None => return,
+    };
+    if subscript.kind() != "string" {
+        return;
+    }
+    let raw_key = match subscript.utf8_text(source_bytes).ok() {
+        Some(s) => s,
+        None => return,
+    };
+    let key = raw_key.trim_matches(|c| c == '"' || c == '\'').to_string();
+    if key.is_empty() {
+        return;
+    }
+
+    let value_repr = file.text_for_node(&right);
+    let location = file.location_for_node(&node);
+
+    out.push(FlaskConfigSetting {
+        key,
+        value_repr,
+        location,
+    });
+}
+
+/// Handles `app.config.update(SESSION_COOKIE_SECURE=False, ...)`.
+fn extract_config_update_call(file: &ParsedFile, node: Node, out: &mut Vec<FlaskConfigSetting>) {
+    let source_bytes = file.source.as_bytes();
+
+    // The function being called must be an attribute expression.
+    let func = match node.child_by_field_name("function") {
+        Some(n) => n,
+        None => return,
+    };
+    if func.kind() != "attribute" {
+        return;
+    }
+
+    // The method name must be `update`.
+    let method = match func.child_by_field_name("attribute") {
+        Some(n) => n,
+        None => return,
+    };
+    if method.utf8_text(source_bytes).ok() != Some("update") {
+        return;
+    }
+
+    // The receiver must itself be an attribute whose attribute part is `config`.
+    let receiver = match func.child_by_field_name("object") {
+        Some(n) => n,
+        None => return,
+    };
+    if receiver.kind() != "attribute" {
+        return;
+    }
+    let config_attr = match receiver.child_by_field_name("attribute") {
+        Some(n) => n,
+        None => return,
+    };
+    if config_attr.utf8_text(source_bytes).ok() != Some("config") {
+        return;
+    }
+
+    // Walk the argument list and collect keyword arguments.
+    let args = match node.child_by_field_name("arguments") {
+        Some(n) => n,
+        None => return,
+    };
+
+    let location = file.location_for_node(&node);
+    let mut cursor = args.walk();
+    for child in args.children(&mut cursor) {
+        if child.kind() != "keyword_argument" {
+            continue;
+        }
+        let key_node = match child.child_by_field_name("name") {
+            Some(n) => n,
+            None => continue,
+        };
+        let value_node = match child.child_by_field_name("value") {
+            Some(n) => n,
+            None => continue,
+        };
+        let key = match key_node.utf8_text(source_bytes).ok() {
+            Some(k) => k.to_string(),
+            None => continue,
+        };
+        let value_repr = file.text_for_node(&value_node);
+        out.push(FlaskConfigSetting {
+            key,
+            value_repr,
+            location: location.clone(),
+        });
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1061,6 +1259,186 @@ class ItemList(MethodView):
     @blp.response(201)
     def post(self):
         return {}, 201
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 2);
+        let methods: Vec<&str> = summary
+            .routes
+            .iter()
+            .map(|r| r.http_method.as_str())
+            .collect();
+        assert!(methods.contains(&"GET"));
+        assert!(methods.contains(&"POST"));
+    }
+
+    // ==================== Application Factory Pattern Tests ====================
+
+    #[test]
+    fn factory_routes_are_detected() {
+        let src = r#"
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+
+    @app.route('/health')
+    def health():
+        return 'ok'
+
+    @app.route('/users', methods=['POST'])
+    def create_user():
+        return {}, 201
+
+    return app
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.apps.len(), 1);
+        assert_eq!(summary.routes.len(), 2);
+        let paths: Vec<&str> = summary.routes.iter().map(|r| r.path.as_str()).collect();
+        assert!(paths.contains(&"/health"));
+        assert!(paths.contains(&"/users"));
+    }
+
+    #[test]
+    fn factory_config_subscript_assignment_detected() {
+        let src = r#"
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    app.config['SECRET_KEY'] = 'hardcoded-secret'
+    app.config['SESSION_COOKIE_SECURE'] = False
+    return app
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.config_settings.len(), 2);
+
+        let secret = summary
+            .config_settings
+            .iter()
+            .find(|c| c.key == "SECRET_KEY")
+            .unwrap();
+        assert_eq!(secret.value_repr, "'hardcoded-secret'");
+
+        let cookie = summary
+            .config_settings
+            .iter()
+            .find(|c| c.key == "SESSION_COOKIE_SECURE")
+            .unwrap();
+        assert_eq!(cookie.value_repr, "False");
+    }
+
+    #[test]
+    fn factory_config_update_kwargs_detected() {
+        let src = r#"
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    app.config.update(
+        SESSION_COOKIE_SECURE=False,
+        SESSION_COOKIE_HTTPONLY=False,
+        PERMANENT_SESSION_LIFETIME=9999999,
+    )
+    return app
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.config_settings.len(), 3);
+
+        let keys: Vec<&str> = summary
+            .config_settings
+            .iter()
+            .map(|c| c.key.as_str())
+            .collect();
+        assert!(keys.contains(&"SESSION_COOKIE_SECURE"));
+        assert!(keys.contains(&"SESSION_COOKIE_HTTPONLY"));
+        assert!(keys.contains(&"PERMANENT_SESSION_LIFETIME"));
+    }
+
+    #[test]
+    fn factory_config_mixed_patterns_detected() {
+        // Both subscript and update() in the same factory.
+        let src = r#"
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    app.config['SECRET_KEY'] = 'top-secret'
+    app.config.update(SESSION_COOKIE_SECURE=False)
+    return app
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let cfg = summary.unwrap().config_settings;
+        assert_eq!(cfg.len(), 2);
+        assert!(cfg.iter().any(|c| c.key == "SECRET_KEY"));
+        assert!(cfg.iter().any(|c| c.key == "SESSION_COOKIE_SECURE"));
+    }
+
+    #[test]
+    fn non_config_attribute_assignments_not_collected() {
+        // `app.something_else['KEY'] = value` should not be collected.
+        let src = r#"
+from flask import Flask
+
+def create_app():
+    app = Flask(__name__)
+    app.extensions['cache'] = 'value'
+    return app
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        assert!(summary.unwrap().config_settings.is_empty());
+    }
+
+    #[test]
+    fn factory_blueprint_registration_detected() {
+        let src = r#"
+from flask import Flask, Blueprint
+
+users_bp = Blueprint('users', __name__)
+
+def create_app():
+    app = Flask(__name__)
+    app.register_blueprint(users_bp)
+    return app
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.apps.len(), 1);
+        assert_eq!(summary.blueprints.len(), 1);
+    }
+
+    #[test]
+    fn factory_methodview_routes_detected() {
+        let src = r#"
+from flask import Flask
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+def create_app():
+    app = Flask(__name__)
+    blp = Blueprint('items', __name__)
+
+    @blp.route('/items')
+    class ItemList(MethodView):
+        def get(self):
+            return []
+
+        def post(self):
+            return {}, 201
+
+    app.register_blueprint(blp)
+    return app
 "#;
         let summary = parse_and_summarize_flask(src);
         assert!(summary.is_some());
