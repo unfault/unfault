@@ -8,6 +8,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- **Flask-smorest / MethodView route detection**
+  - `@blp.route('/path')` decorating a `MethodView` subclass is now parsed: each HTTP-method-named method (`get`, `post`, `put`, `patch`, `delete`, `options`, `head`) produces its own `FlaskRoute` entry with the path from the class-level decorator
+  - `handler_name` is set to `ClassName.method` (e.g. `ItemList.get`) for unique identification
+  - Methods decorated with `@blp.arguments` / `@blp.response` are correctly unwrapped and detected
+  - Non-HTTP methods (`__init__`, helpers, etc.) are ignored
+  - `flask_smorest` imports (`from flask_smorest import …` / `import flask_smorest`) now trigger Flask framework detection in the workspace scanner
+  - `flask_smorest.Blueprint` (`blp = Blueprint('name', __name__, description=…)`) is detected as a Flask blueprint — no change needed at the AST level since the call site is identical to `flask.Blueprint`
+  - File hints in the `python_flask_backend` profile extended: `@blp.route(`, `MethodView`, `from flask_smorest import Blueprint` added to `flask_routes`, `flask_blueprints`, and `flask_app` hint patterns
+
 ### Fixed
 
 - **`unfault fault` — correct `fault run` flag usage** per the fault-project.com CLI reference:

@@ -448,6 +448,8 @@ impl WorkspaceScanner {
                                         }
                                         if contents.contains("from flask")
                                             || contents.contains("import flask")
+                                            || contents.contains("from flask_smorest")
+                                            || contents.contains("import flask_smorest")
                                         {
                                             has_flask.store(true, Ordering::Relaxed);
                                         }

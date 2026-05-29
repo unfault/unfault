@@ -310,6 +310,8 @@ fn python_flask_backend() -> Profile {
                 .include(FilePredicate::text_contains_any([
                     "from flask import Flask",
                     "Flask(__name__)",
+                    "flask_smorest.Api(",
+                    "Api(app",
                 ])),
         )
         .with_file_hint(
@@ -325,6 +327,8 @@ fn python_flask_backend() -> Profile {
                     "@app.delete(",
                     "@app.patch(",
                     "@bp.route(",
+                    "@blp.route(",
+                    "MethodView",
                 ])),
         )
         .with_file_hint(
@@ -335,6 +339,8 @@ fn python_flask_backend() -> Profile {
                 .include(FilePredicate::text_contains_any([
                     "Blueprint(",
                     "from flask import Blueprint",
+                    "from flask_smorest import Blueprint",
+                    "from flask_smorest import",
                 ])),
         )
         .with_file_hint(

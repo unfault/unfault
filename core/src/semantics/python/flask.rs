@@ -138,6 +138,8 @@ fn extract_flask_blueprint(file: &ParsedFile, node: Node) -> Option<FlaskBluepri
 
     let function = right.child_by_field_name("function")?;
     let func_name = file.text_for_node(&function);
+    // Accept both `flask.Blueprint` and `flask_smorest.Blueprint` (the latter is imported
+    // with `from flask_smorest import Blueprint` so the call site looks identical).
     if func_name != "Blueprint" {
         return None;
     }
@@ -158,9 +160,10 @@ fn extract_flask_blueprint(file: &ParsedFile, node: Node) -> Option<FlaskBluepri
 
 fn collect_flask_routes(file: &ParsedFile, node: Node, out: &mut Vec<FlaskRoute>) {
     if node.kind() == "decorated_definition" {
-        if let Some(route) = extract_flask_route(file, node) {
-            out.push(route);
-        }
+        // Function-based routes (@app.route / @blp.route on a plain function)
+        extract_flask_function_route(file, node, out);
+        // Class-based routes (@blp.route on a MethodView subclass)
+        extract_flask_methodview_routes(file, node, out);
     }
 
     let mut cursor = node.walk();
@@ -169,7 +172,8 @@ fn collect_flask_routes(file: &ParsedFile, node: Node, out: &mut Vec<FlaskRoute>
     }
 }
 
-fn extract_flask_route(file: &ParsedFile, decorated_def: Node) -> Option<FlaskRoute> {
+/// Extract a single route from a decorated plain function (`@app.route('/') def index(): ...`).
+fn extract_flask_function_route(file: &ParsedFile, decorated_def: Node, out: &mut Vec<FlaskRoute>) {
     let source_bytes = file.source.as_bytes();
 
     let mut decorators = Vec::new();
@@ -184,7 +188,10 @@ fn extract_flask_route(file: &ParsedFile, decorated_def: Node) -> Option<FlaskRo
         }
     }
 
-    let func_def = func_def?;
+    let func_def = match func_def {
+        Some(f) => f,
+        None => return,
+    };
 
     let fn_text = file.text_for_node(&func_def);
     let is_async = fn_text.trim_start().starts_with("async def");
@@ -195,18 +202,20 @@ fn extract_flask_route(file: &ParsedFile, decorated_def: Node) -> Option<FlaskRo
         {
             let handler_name = func_def
                 .child_by_field_name("name")
-                .map(|n| n.utf8_text(source_bytes).ok())
-                .flatten()
+                .and_then(|n| n.utf8_text(source_bytes).ok())
                 .unwrap_or("unknown")
                 .to_string();
 
-            let body = func_def.child_by_field_name("body")?;
+            let body = match func_def.child_by_field_name("body") {
+                Some(b) => b,
+                None => return,
+            };
             let has_try_except = body_has_try_except(body);
 
             let location = file.location_for_node(&decorated_def);
             let decorator_location = file.location_for_node(decorator);
 
-            return Some(FlaskRoute {
+            out.push(FlaskRoute {
                 app_var_name,
                 http_method,
                 path,
@@ -218,10 +227,151 @@ fn extract_flask_route(file: &ParsedFile, decorated_def: Node) -> Option<FlaskRo
                 body_start_byte: body.start_byte(),
                 body_end_byte: body.end_byte(),
             });
+            // Only the first matching route decorator per function.
+            return;
+        }
+    }
+}
+
+/// Extract one `FlaskRoute` per HTTP-method handler from a Flask-smorest `MethodView` class.
+///
+/// Pattern:
+/// ```python
+/// @blp.route('/items')
+/// class ItemList(MethodView):
+///     def get(self): ...
+///     def post(self): ...
+/// ```
+/// Each method (`get`, `post`, …) becomes its own `FlaskRoute` with the path from the
+/// class-level `@blp.route(...)` decorator and the HTTP method inferred from the method name.
+fn extract_flask_methodview_routes(
+    file: &ParsedFile,
+    decorated_def: Node,
+    out: &mut Vec<FlaskRoute>,
+) {
+    let source_bytes = file.source.as_bytes();
+
+    let mut decorators = Vec::new();
+    let mut class_def: Option<Node> = None;
+
+    let mut cursor = decorated_def.walk();
+    for child in decorated_def.children(&mut cursor) {
+        match child.kind() {
+            "decorator" => decorators.push(child),
+            "class_definition" => class_def = Some(child),
+            _ => {}
         }
     }
 
-    None
+    let class_def = match class_def {
+        Some(c) => c,
+        None => return,
+    };
+
+    // Find the first @blp.route(...) decorator on this class.
+    let mut route_info: Option<(String, String)> = None; // (app_var_name, path)
+    for decorator in &decorators {
+        if let Some((app_var_name, _method, path)) = extract_flask_route_decorator(file, *decorator)
+        {
+            route_info = Some((app_var_name, path));
+            break;
+        }
+    }
+
+    let (app_var_name, path) = match route_info {
+        Some(r) => r,
+        None => return,
+    };
+
+    // Walk the class body and collect method definitions whose names map to HTTP methods.
+    let class_body = match class_def.child_by_field_name("body") {
+        Some(b) => b,
+        None => return,
+    };
+
+    let class_location = file.location_for_node(&decorated_def);
+
+    let mut body_cursor = class_body.walk();
+    for child in class_body.children(&mut body_cursor) {
+        // Methods can appear as plain `function_definition` or `decorated_definition`
+        // (e.g. with @blp.arguments / @blp.response decorators).
+        let method_node = match child.kind() {
+            "function_definition" | "async_function_definition" => child,
+            "decorated_definition" => {
+                // Find the inner function_definition inside the decorated method.
+                let mut inner: Option<Node> = None;
+                let mut dc = child.walk();
+                for n in child.children(&mut dc) {
+                    if matches!(
+                        n.kind(),
+                        "function_definition" | "async_function_definition"
+                    ) {
+                        inner = Some(n);
+                        break;
+                    }
+                }
+                match inner {
+                    Some(n) => n,
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+
+        let method_name = match method_node
+            .child_by_field_name("name")
+            .and_then(|n| n.utf8_text(source_bytes).ok())
+        {
+            Some(n) => n,
+            None => continue,
+        };
+
+        let http_method = match method_name.to_lowercase().as_str() {
+            "get" => "GET",
+            "post" => "POST",
+            "put" => "PUT",
+            "delete" => "DELETE",
+            "patch" => "PATCH",
+            "options" => "OPTIONS",
+            "head" => "HEAD",
+            _ => continue, // skip __init__, helper methods, etc.
+        };
+
+        let fn_text = file.text_for_node(&method_node);
+        let is_async = fn_text.trim_start().starts_with("async def");
+
+        let body = match method_node.child_by_field_name("body") {
+            Some(b) => b,
+            None => continue,
+        };
+        let has_try_except = body_has_try_except(body);
+
+        // Use the class name as a prefix so handler_name is unique and readable.
+        let class_name = class_def
+            .child_by_field_name("name")
+            .and_then(|n| n.utf8_text(source_bytes).ok())
+            .unwrap_or("Unknown");
+        let handler_name = format!("{}.{}", class_name, method_name);
+
+        // Use the first matching route decorator location for the decorator_location field.
+        let decorator_location = decorators
+            .first()
+            .map(|d| file.location_for_node(d))
+            .unwrap_or_else(|| class_location.clone());
+
+        out.push(FlaskRoute {
+            app_var_name: app_var_name.clone(),
+            http_method: http_method.to_string(),
+            path: path.clone(),
+            handler_name,
+            is_async,
+            has_try_except,
+            location: class_location.clone(),
+            decorator_location,
+            body_start_byte: body.start_byte(),
+            body_end_byte: body.end_byte(),
+        });
+    }
 }
 
 fn extract_flask_route_decorator(
@@ -679,5 +829,249 @@ from flask import Flask, Blueprint
 "#;
         let summary = parse_and_summarize_flask(src);
         assert!(summary.is_none());
+    }
+
+    // ==================== Flask-smorest / MethodView Tests ====================
+
+    #[test]
+    fn detects_smorest_blueprint() {
+        let src = r#"
+from flask_smorest import Blueprint
+
+blp = Blueprint('pets', __name__, description='Operations on pets')
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.blueprints.len(), 1);
+        assert_eq!(summary.blueprints[0].var_name, "blp");
+        assert_eq!(summary.blueprints[0].import_name, "pets");
+    }
+
+    #[test]
+    fn detects_methodview_get_route() {
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('items', __name__)
+
+@blp.route('/items')
+class ItemList(MethodView):
+    def get(self):
+        return []
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert_eq!(summary.routes[0].path, "/items");
+        assert_eq!(summary.routes[0].http_method, "GET");
+        assert_eq!(summary.routes[0].handler_name, "ItemList.get");
+        assert_eq!(summary.routes[0].app_var_name, "blp");
+    }
+
+    #[test]
+    fn detects_methodview_multiple_methods() {
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('items', __name__)
+
+@blp.route('/items')
+class ItemList(MethodView):
+    def get(self):
+        return []
+
+    def post(self):
+        return {}, 201
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        // Each HTTP method on the class becomes its own route entry.
+        assert_eq!(summary.routes.len(), 2);
+        let methods: Vec<&str> = summary
+            .routes
+            .iter()
+            .map(|r| r.http_method.as_str())
+            .collect();
+        assert!(methods.contains(&"GET"));
+        assert!(methods.contains(&"POST"));
+        // Both routes share the same path.
+        assert!(summary.routes.iter().all(|r| r.path == "/items"));
+    }
+
+    #[test]
+    fn detects_methodview_all_http_verbs() {
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('resource', __name__)
+
+@blp.route('/resource/<int:resource_id>')
+class Resource(MethodView):
+    def get(self, resource_id):
+        pass
+
+    def put(self, resource_id):
+        pass
+
+    def patch(self, resource_id):
+        pass
+
+    def delete(self, resource_id):
+        pass
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 4);
+        let methods: Vec<&str> = summary
+            .routes
+            .iter()
+            .map(|r| r.http_method.as_str())
+            .collect();
+        assert!(methods.contains(&"GET"));
+        assert!(methods.contains(&"PUT"));
+        assert!(methods.contains(&"PATCH"));
+        assert!(methods.contains(&"DELETE"));
+    }
+
+    #[test]
+    fn methodview_skips_non_http_methods() {
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('items', __name__)
+
+@blp.route('/items')
+class ItemList(MethodView):
+    def get(self):
+        return self._fetch()
+
+    def _fetch(self):
+        return []
+
+    def __init__(self):
+        super().__init__()
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        // Only `get` should be picked up; `_fetch` and `__init__` are not HTTP methods.
+        assert_eq!(summary.routes.len(), 1);
+        assert_eq!(summary.routes[0].http_method, "GET");
+    }
+
+    #[test]
+    fn detects_methodview_async_method() {
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('items', __name__)
+
+@blp.route('/items')
+class ItemList(MethodView):
+    async def get(self):
+        return []
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert!(summary.routes[0].is_async);
+    }
+
+    #[test]
+    fn detects_methodview_with_try_except() {
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('items', __name__)
+
+@blp.route('/items/<int:item_id>')
+class Item(MethodView):
+    def get(self, item_id):
+        try:
+            return fetch(item_id)
+        except Exception:
+            return {}, 500
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 1);
+        assert!(summary.routes[0].has_try_except);
+    }
+
+    #[test]
+    fn detects_mixed_function_and_methodview_routes() {
+        let src = r#"
+from flask import Flask
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+app = Flask(__name__)
+blp = Blueprint('items', __name__)
+
+@app.route('/health')
+def health():
+    return 'ok'
+
+@blp.route('/items')
+class ItemList(MethodView):
+    def get(self):
+        return []
+
+    def post(self):
+        return {}, 201
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        // 1 function-based + 2 class-based
+        assert_eq!(summary.routes.len(), 3);
+        let paths: Vec<&str> = summary.routes.iter().map(|r| r.path.as_str()).collect();
+        assert!(paths.contains(&"/health"));
+        assert!(paths.iter().filter(|&&p| p == "/items").count() == 2);
+    }
+
+    #[test]
+    fn detects_methodview_decorated_methods() {
+        // Methods decorated with @blp.arguments / @blp.response should still be detected.
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('items', __name__)
+
+@blp.route('/items')
+class ItemList(MethodView):
+    @blp.response(200)
+    def get(self):
+        return []
+
+    @blp.arguments(schema=None)
+    @blp.response(201)
+    def post(self):
+        return {}, 201
+"#;
+        let summary = parse_and_summarize_flask(src);
+        assert!(summary.is_some());
+        let summary = summary.unwrap();
+        assert_eq!(summary.routes.len(), 2);
+        let methods: Vec<&str> = summary
+            .routes
+            .iter()
+            .map(|r| r.http_method.as_str())
+            .collect();
+        assert!(methods.contains(&"GET"));
+        assert!(methods.contains(&"POST"));
     }
 }
