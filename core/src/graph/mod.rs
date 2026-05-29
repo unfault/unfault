@@ -908,6 +908,9 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
                 if let Some(fastapi) = &py.fastapi {
                     add_fastapi_nodes(&mut cg, file_node, *file_id, py, fastapi);
                 }
+                if let Some(flask) = &py.flask {
+                    add_flask_nodes(&mut cg, file_node, *file_id, flask);
+                }
             }
             SourceSemantics::Go(go) => {
                 // Add Go framework-specific nodes (Gin, Echo, Chi, Fiber, etc.)
@@ -1479,16 +1482,16 @@ fn add_function_nodes(
     // (they'll be added by framework-specific functions with HTTP metadata)
     let handler_names_to_skip: std::collections::HashSet<&str> = match sem.as_ref() {
         SourceSemantics::Python(py) => {
-            // Skip FastAPI route handlers
+            // Skip FastAPI and Flask route handlers — they are added by framework-specific
+            // functions with http_method and http_path already populated.
+            let mut skip = std::collections::HashSet::new();
             if let Some(fastapi) = &py.fastapi {
-                fastapi
-                    .routes
-                    .iter()
-                    .map(|r| r.handler_name.as_str())
-                    .collect()
-            } else {
-                std::collections::HashSet::new()
+                skip.extend(fastapi.routes.iter().map(|r| r.handler_name.as_str()));
             }
+            if let Some(flask) = &py.flask {
+                skip.extend(flask.routes.iter().map(|r| r.handler_name.as_str()));
+            }
+            skip
         }
         SourceSemantics::Typescript(ts) => {
             // Skip Express route handlers
@@ -1771,6 +1774,38 @@ fn add_fastapi_nodes(
     }
 
     let _ = py; // unused for now, but we'll likely need it later.
+}
+
+/// Add Flask route handlers as function nodes with `http_method` and `http_path` populated.
+///
+/// Covers all Flask routing patterns captured by `FlaskFileSummary`:
+/// - `@app.route(...)` / `@app.get(...)` / `@bp.route(...)` (plain functions)
+/// - `@blp.route(...)` on a `MethodView` subclass (Flask-smorest)
+/// - `@ClassName.action_route(...)` (custom BaseController pattern)
+fn add_flask_nodes(
+    cg: &mut CodeGraph,
+    file_node: NodeIndex,
+    file_id: FileId,
+    flask: &crate::semantics::python::flask::FlaskFileSummary,
+) {
+    for route in &flask.routes {
+        let qualified_name = route.handler_name.clone();
+        let func_node = cg.graph.add_node(GraphNode::Function {
+            file_id,
+            name: route.handler_name.clone(),
+            qualified_name,
+            is_async: route.is_async,
+            is_handler: true,
+            http_method: Some(route.http_method.clone()),
+            http_path: Some(route.path.clone()),
+        });
+
+        cg.graph
+            .add_edge(file_node, func_node, GraphEdgeKind::Contains);
+
+        cg.function_nodes
+            .insert((file_id, route.handler_name.clone()), func_node);
+    }
 }
 
 /// Add Express.js route handlers as function nodes with HTTP metadata.

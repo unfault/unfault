@@ -347,6 +347,34 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// List all HTTP routes detected across the workspace
+    ///
+    /// Shows every route handler found — across all supported frameworks
+    /// (Flask, FastAPI, Flask-smorest, Express, Gin, Axum, …) — with its
+    /// HTTP method, path, handler function name, and source file.
+    ///
+    /// Examples:
+    ///   unfault graph routes
+    ///   unfault graph routes --method GET
+    ///   unfault graph routes --file src/api
+    ///   unfault graph routes --json
+    Routes {
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Filter by HTTP method (case-insensitive, e.g. GET, POST)
+        #[arg(long, value_name = "METHOD")]
+        method: Option<String>,
+        /// Filter by file path (substring match)
+        #[arg(long, value_name = "FILE")]
+        file: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
 }
 
 /// Centrality sort metric options
@@ -915,6 +943,28 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Graph callers error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::Routes {
+            workspace,
+            method,
+            file,
+            json,
+            verbose,
+        } => {
+            let args = commands::graph::RoutesArgs {
+                workspace_path: workspace,
+                method,
+                file,
+                json,
+                verbose,
+            };
+            match commands::graph::execute_routes(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph routes error: {}", e);
                     EXIT_ERROR
                 }
             }

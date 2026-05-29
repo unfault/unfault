@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.5] — 2026-05-29
+
+### Added
+
+- **`unfault graph routes`** — new command listing every HTTP route detected across the workspace
+  - Output grouped by source file; each line shows `METHOD  /path  (handler_name)`
+  - `--method GET` filters to a specific HTTP verb (case-insensitive)
+  - `--file src/api` filters to files whose path contains the substring
+  - `--json` emits a JSON array of `{ method, path, handler, file }` objects
+  - Works across all supported frameworks: Flask (all patterns), FastAPI, Express, Gin, Axum, Actix, Rocket
+
+- **Flask routes wired into the code graph** (was silently dropped before this release)
+  - `build_code_graph()` in both `core` and `analysis` graph builders now has a `py.flask` branch alongside the existing `py.fastapi` branch
+  - A new `add_flask_nodes()` function emits `GraphNode::Function { is_handler: true, http_method: Some(...), http_path: Some(...) }` for every `FlaskRoute` in `FlaskFileSummary` — covering all patterns: `@app.route`, `@bp.route`, `@blp.route` on MethodView classes, and `@ClassName.action_route`
+  - Flask handler names are added to `handler_names_to_skip` in `add_function_nodes()` so they are not double-emitted as plain nameless handlers
+  - `unfault graph callers`, `unfault graph stats`, and all other graph commands now see Flask routes
+
 ## [0.9.4] — 2026-05-29
 
 ### Added

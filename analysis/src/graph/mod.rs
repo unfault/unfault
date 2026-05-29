@@ -34,6 +34,7 @@ use crate::semantics::common::CommonSemantics;
 use crate::semantics::python::fastapi::FastApiFileSummary;
 use crate::semantics::python::model::PyFileSemantics;
 use crate::types::context::Language;
+use unfault_core::semantics::python::flask::FlaskFileSummary;
 
 /// The observability provider that sourced an SLO definition.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -714,6 +715,9 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
                 if let Some(fastapi) = &py.fastapi {
                     add_fastapi_nodes(&mut cg, file_node, *file_id, py, fastapi);
                 }
+                if let Some(flask) = &py.flask {
+                    add_flask_nodes(&mut cg, file_node, *file_id, flask);
+                }
             }
             SourceSemantics::Go(_go) => {
                 // TODO: Add Go framework-specific nodes (Gin, Echo, Chi, etc.)
@@ -1065,6 +1069,33 @@ fn add_fastapi_nodes(
     }
 
     let _ = (py, router_prefix); // suppress unused warnings
+}
+
+/// Add Flask route handlers as function nodes with `http_method` and `http_path` populated.
+fn add_flask_nodes(
+    cg: &mut CodeGraph,
+    file_node: NodeIndex,
+    file_id: FileId,
+    flask: &FlaskFileSummary,
+) {
+    for route in &flask.routes {
+        let qualified_name = route.handler_name.clone();
+        let func_node = cg.graph.add_node(GraphNode::Function {
+            file_id,
+            name: route.handler_name.clone(),
+            qualified_name,
+            is_async: route.is_async,
+            is_handler: true,
+            http_method: Some(route.http_method.clone()),
+            http_path: Some(route.path.clone()),
+        });
+
+        cg.graph
+            .add_edge(file_node, func_node, GraphEdgeKind::Contains);
+
+        cg.function_nodes
+            .insert((file_id, route.handler_name.clone()), func_node);
+    }
 }
 
 #[cfg(test)]

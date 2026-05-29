@@ -457,6 +457,137 @@ pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
 }
 
 // =============================================================================
+// Routes
+// =============================================================================
+
+/// Arguments for the graph routes command
+#[derive(Debug)]
+pub struct RoutesArgs {
+    pub workspace_path: Option<String>,
+    /// Optional HTTP method filter (e.g. "GET", "POST")
+    pub method: Option<String>,
+    /// Optional file path filter (substring match)
+    pub file: Option<String>,
+    pub json: bool,
+    pub verbose: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct RouteEntry {
+    pub method: String,
+    pub path: String,
+    pub handler: String,
+    pub file: String,
+}
+
+pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    if args.verbose {
+        eprintln!("{} Building code graph...", "→".cyan());
+    }
+
+    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    // Collect all route entries from the graph.
+    let mut routes: Vec<RouteEntry> = Vec::new();
+
+    for node_idx in graph.graph.node_indices() {
+        let node = &graph.graph[node_idx];
+        match node {
+            unfault_analysis::graph::GraphNode::Function {
+                is_handler: true,
+                http_method: Some(method),
+                http_path: Some(path),
+                name,
+                ..
+            } => {
+                let file = unfault_analysis::graph::traversal::node_file_path_pub(&graph, node)
+                    .unwrap_or_default();
+                routes.push(RouteEntry {
+                    method: method.clone(),
+                    path: path.clone(),
+                    handler: name.clone(),
+                    file,
+                });
+            }
+            // FastApiRoute nodes carry method+path but not the handler name —
+            // those are already captured via their companion Function node above,
+            // so skip them to avoid duplicates.
+            _ => {}
+        }
+    }
+
+    // Apply filters.
+    if let Some(ref method_filter) = args.method {
+        let upper = method_filter.to_uppercase();
+        routes.retain(|r| r.method.to_uppercase() == upper);
+    }
+    if let Some(ref file_filter) = args.file {
+        routes.retain(|r| r.file.contains(file_filter.as_str()));
+    }
+
+    // Sort: file, then path, then method.
+    routes.sort_by(|a, b| {
+        a.file
+            .cmp(&b.file)
+            .then(a.path.cmp(&b.path))
+            .then(a.method.cmp(&b.method))
+    });
+
+    if routes.is_empty() {
+        if args.json {
+            println!("[]");
+        } else {
+            println!("\n{} No routes detected.\n", "→".cyan());
+        }
+        return Ok(EXIT_SUCCESS);
+    }
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&routes)?);
+    } else {
+        println!(
+            "\n{} {} route{} detected\n",
+            "→".cyan(),
+            routes.len().to_string().yellow(),
+            if routes.len() == 1 { "" } else { "s" }
+        );
+
+        // Group by file for readability.
+        let mut current_file = String::new();
+        for route in &routes {
+            if route.file != current_file {
+                current_file = route.file.clone();
+                println!("  {}", current_file.bright_blue());
+            }
+            println!(
+                "    {:<8} {}  {}",
+                route.method.green(),
+                route.path,
+                format!("({})", route.handler).dimmed()
+            );
+        }
+        println!();
+    }
+
+    Ok(EXIT_SUCCESS)
+}
+
+// =============================================================================
 // Error Handling
 // =============================================================================
 pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
