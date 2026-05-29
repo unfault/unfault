@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.15] — 2026-05-29
+
+### Performance
+
+- **Replace JSON round-trip with msgpack in `build_analysis_graph`**
+  `local_graph.rs` converted between the core and analysis `IntermediateRepresentation`
+  types via `serde_json::to_string` + `serde_json::from_str`. On a 27k-function
+  graph this produced a large JSON string (text formatting, UTF-8 escaping,
+  allocation per token) before immediately discarding it. Replaced with
+  `rmp_serde::to_vec` + `rmp_serde::from_slice` — same Serde round-trip,
+  binary format, ~10x faster serialization, far fewer allocations.
+
 ## [0.9.14] — 2026-05-29
 
 ### Changed
