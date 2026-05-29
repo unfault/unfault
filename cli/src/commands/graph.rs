@@ -697,6 +697,8 @@ pub struct CallersArgs {
     pub json: bool,
     /// Verbose output
     pub verbose: bool,
+    /// Print raw graph diagnostics for the target node (edges, duplicates, etc.)
+    pub debug: bool,
 }
 
 /// Execute the graph callers command
@@ -730,6 +732,90 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
             return Ok(EXIT_ERROR);
         }
     };
+
+    // Debug mode: dump raw graph information about the target node before
+    // running the callers query, so the user can see what's actually in the
+    // graph and whether Calls edges exist.
+    if args.debug {
+        use petgraph::Direction;
+        use petgraph::visit::EdgeRef;
+        use unfault_analysis::graph::{GraphEdgeKind, GraphNode};
+
+        eprintln!("\n{} Debug: nodes matching '{}'", "→".cyan(), function_name);
+
+        let lower = function_name.to_lowercase();
+        let mut found = false;
+        for idx in graph.graph.node_indices() {
+            let node = &graph.graph[idx];
+            let name = node.display_name().to_lowercase();
+            if name == lower
+                || name.ends_with(&format!(".{}", lower))
+                || name.contains(&format!("/{}", lower))
+            {
+                found = true;
+                let file = unfault_analysis::graph::traversal::node_file_path_pub(&graph, node)
+                    .unwrap_or_else(|| "<no file>".to_string());
+                let handler_info = if let GraphNode::Function {
+                    is_handler,
+                    http_method,
+                    http_path,
+                    ..
+                } = node
+                {
+                    if *is_handler {
+                        format!(
+                            " [handler: {} {}]",
+                            http_method.as_deref().unwrap_or("?"),
+                            http_path.as_deref().unwrap_or("?")
+                        )
+                    } else {
+                        String::new()
+                    }
+                } else {
+                    String::new()
+                };
+
+                let incoming_calls = graph
+                    .graph
+                    .edges_directed(idx, Direction::Incoming)
+                    .filter(|e| matches!(e.weight(), GraphEdgeKind::Calls))
+                    .count();
+                let outgoing_calls = graph
+                    .graph
+                    .edges_directed(idx, Direction::Outgoing)
+                    .filter(|e| matches!(e.weight(), GraphEdgeKind::Calls))
+                    .count();
+
+                eprintln!(
+                    "  node {:?}  name={}  file={}{}\n    incoming Calls edges: {}  outgoing Calls edges: {}",
+                    idx,
+                    node.display_name(),
+                    file,
+                    handler_info,
+                    incoming_calls,
+                    outgoing_calls
+                );
+
+                if incoming_calls > 0 {
+                    for edge in graph
+                        .graph
+                        .edges_directed(idx, Direction::Incoming)
+                        .filter(|e| matches!(e.weight(), GraphEdgeKind::Calls))
+                    {
+                        let caller = &graph.graph[edge.source()];
+                        let caller_file =
+                            unfault_analysis::graph::traversal::node_file_path_pub(&graph, caller)
+                                .unwrap_or_default();
+                        eprintln!("      ← {} ({})", caller.display_name(), caller_file);
+                    }
+                }
+            }
+        }
+        if !found {
+            eprintln!("  (no nodes found with that name)");
+        }
+        eprintln!();
+    }
 
     let ctx = if let Some(ref hint) = file_hint {
         unfault_analysis::graph::traversal::get_callers_in_file(

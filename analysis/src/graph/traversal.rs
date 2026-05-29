@@ -664,11 +664,17 @@ fn find_nodes_by_name_in_file(
 
     let mut all: Vec<petgraph::graph::NodeIndex> = Vec::new();
 
+    // Also match names that differ only by a leading underscore prefix
+    // (e.g. querying "my_function" should find "_my_function" in the graph).
+    let lower_target_underscored = format!("_{}", lower_target);
+
     for idx in graph.graph.node_indices() {
         let node = &graph.graph[idx];
         let name = node.display_name().to_lowercase();
         let matches_name = name == lower_target
+            || name == lower_target_underscored
             || name.ends_with(&format!(".{}", lower_target))
+            || name.ends_with(&format!(".{}", lower_target_underscored))
             || name.contains(&format!("/{}", lower_target));
         if !matches_name {
             continue;

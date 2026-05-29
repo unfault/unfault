@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.9] — 2026-05-29
+
+### Added
+
+- **`unfault graph callers --debug`** — raw graph diagnostics for the target function
+  - Prints every graph node whose name matches the query, with its file path, handler metadata, and count of incoming/outgoing `Calls` edges
+  - Lists each caller by name and file when incoming edges exist
+  - Designed to diagnose "found in graph but no call edges resolved" cases by showing exactly what the graph contains before the BFS runs
+
+### Tests
+
+- 3 more graph edge tests: `flask_handler_with_underscore_prefix_calls_inner_function`, `action_route_handler_cross_file_call_function_scoped_import`, `action_route_with_inner_decorators_cross_file_call`
+
 ## [0.9.8] — 2026-05-29
 
 ### Tests

@@ -346,6 +346,9 @@ enum GraphCommands {
         /// Enable verbose output
         #[arg(long, short = 'v')]
         verbose: bool,
+        /// Print raw graph diagnostics for the target node (edges, duplicates)
+        #[arg(long)]
+        debug: bool,
     },
     /// List all HTTP routes detected across the workspace
     ///
@@ -931,6 +934,7 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
             max_depth,
             json,
             verbose,
+            debug,
         } => {
             let args = commands::graph::CallersArgs {
                 workspace_path: workspace,
@@ -938,6 +942,7 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 max_depth,
                 json,
                 verbose,
+                debug,
             };
             match commands::graph::execute_callers(args).await {
                 Ok(exit_code) => exit_code,

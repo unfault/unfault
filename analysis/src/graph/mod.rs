@@ -2140,6 +2140,240 @@ def get_all_users():
     }
 
     #[test]
+    fn flask_handler_with_underscore_prefix_calls_inner_function() {
+        // Reproduces: handler is named _my_function (underscore prefix),
+        // it calls my_function (no prefix) defined in the same file.
+        // `unfault graph callers my_function` should find _my_function as a caller.
+        let src = r#"
+from flask import Flask
+
+app = Flask(__name__)
+
+def my_function():
+    return {"ok": True}
+
+@app.route('/run', methods=['POST'])
+def _my_function():
+    return my_function()
+"#;
+        let (file_id, sem) = parse_and_build_semantics("api.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        // Both nodes must be in the graph
+        let handler_idx = cg
+            .function_nodes
+            .get(&(file_id, "_my_function".to_string()))
+            .copied();
+        let callee_idx = cg
+            .function_nodes
+            .get(&(file_id, "my_function".to_string()))
+            .copied();
+
+        assert!(handler_idx.is_some(), "_my_function not in function_nodes");
+        assert!(callee_idx.is_some(), "my_function not in function_nodes");
+
+        // Calls edge _my_function -> my_function must exist
+        let has_edge = cg
+            .graph
+            .edges_directed(handler_idx.unwrap(), Direction::Outgoing)
+            .any(|e| {
+                matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == callee_idx.unwrap()
+            });
+        assert!(has_edge, "expected Calls edge _my_function -> my_function");
+
+        // get_callers("my_function") must find _my_function as a caller
+        let ctx = super::traversal::get_callers(&cg, "my_function", 5);
+        assert!(
+            ctx.target_file.is_some(),
+            "my_function should be found in graph"
+        );
+        assert!(
+            ctx.callers.iter().any(|c| c.name == "_my_function"),
+            "expected _my_function as a caller of my_function; got: {:?}",
+            ctx.callers
+        );
+    }
+
+    #[test]
+    fn self_import_same_file_handler_calls_sibling_function() {
+        // Exact pattern from the codebase:
+        // _attach_email_to_invitation (action_route handler) does:
+        //   from components.fr...employment import attach_email_to_invitation
+        //   attach_email_to_invitation(...)
+        // Both functions live in the SAME file.
+        // The import resolves back to the same file, so this is an intra-file
+        // call disguised as a cross-file import.
+        let src = r#"
+endpoint = Endpoint("company")
+
+@endpoint.route("/<int:id>")
+class CompanyController(BaseController):
+    pass
+
+@CompanyController.action_route("/<int:id>/attach_email", methods=["PATCH"])
+def _attach_email_to_invitation(id: int):
+    from components.fr.employment import attach_email_to_invitation
+    attach_email_to_invitation(id)
+
+def attach_email_to_invitation(company_id: int):
+    pass
+"#;
+        let (file_id, sem) = parse_python_with_id("components/fr/employment.py", src, 1);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let handler_idx = cg
+            .function_nodes
+            .get(&(file_id, "_attach_email_to_invitation".to_string()))
+            .copied()
+            .expect("_attach_email_to_invitation not in function_nodes");
+        let callee_idx = cg
+            .function_nodes
+            .get(&(file_id, "attach_email_to_invitation".to_string()))
+            .copied()
+            .expect("attach_email_to_invitation not in function_nodes");
+
+        let has_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == callee_idx);
+        assert!(
+            has_edge,
+            "expected Calls edge _attach_email_to_invitation -> attach_email_to_invitation"
+        );
+
+        let ctx = super::traversal::get_callers(&cg, "attach_email_to_invitation", 5);
+        assert!(
+            ctx.target_file.is_some(),
+            "attach_email_to_invitation should be found in graph"
+        );
+        assert!(
+            ctx.callers
+                .iter()
+                .any(|c| c.name == "_attach_email_to_invitation"),
+            "expected _attach_email_to_invitation as a caller; got: {:?}",
+            ctx.callers
+        );
+    }
+
+    #[test]
+    fn action_route_handler_cross_file_call_function_scoped_import() {
+        // action_route handler with underscore-prefixed name calls a function
+        // in a separate business logic file via a function-scoped import.
+        // This mirrors the exact pattern reported by the user.
+        let controller_src = r#"
+endpoint = Endpoint("company")
+
+@endpoint.route("/company")
+class CompanyController(BaseController):
+    pass
+
+@CompanyController.action_route("/<int:id>/do_thing/<int:user_id>", methods=["PATCH"])
+def _do_thing(id: int, user_id: int):
+    from business.actions import do_thing
+    do_thing(id, user_id)
+"#;
+        let service_src = r#"
+def do_thing(company_id: int, user_id: int):
+    pass
+"#;
+        let (controller_fid, controller_sem) =
+            parse_python_with_id("api/company/controller.py", controller_src, 1);
+        let (service_fid, service_sem) =
+            parse_python_with_id("business/actions.py", service_src, 2);
+        let sem_entries = vec![(controller_fid, controller_sem), (service_fid, service_sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let handler_idx = cg
+            .function_nodes
+            .get(&(controller_fid, "_do_thing".to_string()))
+            .copied()
+            .expect("_do_thing not in function_nodes");
+        let callee_idx = cg
+            .function_nodes
+            .get(&(service_fid, "do_thing".to_string()))
+            .copied()
+            .expect("do_thing not in function_nodes");
+
+        let has_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == callee_idx);
+        assert!(
+            has_edge,
+            "expected Calls edge _do_thing -> do_thing (cross-file, function-scoped import)"
+        );
+
+        // get_callers("do_thing") must find _do_thing as a caller
+        let ctx = super::traversal::get_callers(&cg, "do_thing", 5);
+        assert!(
+            ctx.callers.iter().any(|c| c.name == "_do_thing"),
+            "expected _do_thing as a caller of do_thing; got: {:?}",
+            ctx.callers
+        );
+    }
+
+    #[test]
+    fn action_route_with_inner_decorators_cross_file_call() {
+        // action_route is the outermost decorator; additional decorators
+        // (@use_args, @require_auth, etc.) sit between it and the function.
+        // The handler name and call edges must still resolve correctly.
+        let controller_src = r#"
+endpoint = Endpoint("company")
+
+@endpoint.route("/company")
+class CompanyController(BaseController):
+    pass
+
+@CompanyController.action_route("/<int:id>/do_thing/<int:user_id>", methods=["PATCH"])
+@use_args(SomeSchema(), location="json")
+@require_auth
+def _do_thing(id: int, user_id: int, json_args: dict):
+    from business.actions import do_thing
+    do_thing(id, user_id)
+"#;
+        let service_src = r#"
+def do_thing(company_id: int, user_id: int):
+    pass
+"#;
+        let (controller_fid, controller_sem) =
+            parse_python_with_id("api/company/controller.py", controller_src, 1);
+        let (service_fid, service_sem) =
+            parse_python_with_id("business/actions.py", service_src, 2);
+        let sem_entries = vec![(controller_fid, controller_sem), (service_fid, service_sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        // Handler must be registered under its real name
+        let handler_idx = cg
+            .function_nodes
+            .get(&(controller_fid, "_do_thing".to_string()))
+            .copied()
+            .expect("_do_thing not in function_nodes");
+        let callee_idx = cg
+            .function_nodes
+            .get(&(service_fid, "do_thing".to_string()))
+            .copied()
+            .expect("do_thing not in function_nodes");
+
+        let has_edge = cg
+            .graph
+            .edges_directed(handler_idx, Direction::Outgoing)
+            .any(|e| matches!(e.weight(), GraphEdgeKind::Calls) && e.target() == callee_idx);
+        assert!(
+            has_edge,
+            "expected Calls edge _do_thing -> do_thing with inner decorators present"
+        );
+
+        let ctx = super::traversal::get_callers(&cg, "do_thing", 5);
+        assert!(
+            ctx.callers.iter().any(|c| c.name == "_do_thing"),
+            "expected _do_thing as caller of do_thing; got: {:?}",
+            ctx.callers
+        );
+    }
+
+    #[test]
     fn flask_restful_action_route_cross_file_call_via_function_scoped_import() {
         // The action_route pattern with a function-scoped import inside the handler.
         let handler_src = r#"
