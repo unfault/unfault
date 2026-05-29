@@ -86,20 +86,22 @@ impl FaultTemplate {
         match self {
             Self::LatencyNormal => "350ms ± 50ms normal distribution latency",
             Self::LatencyPareto => "Pareto-distributed tail latency spikes",
-            Self::LatencyWindow => "Latency injection in a scheduled time window",
+            Self::LatencyWindow => {
+                "Latency injection at 25%–75% of run duration (requires --duration)"
+            }
             Self::JitterLight => "Light jitter: 30ms amplitude @ 5Hz",
             Self::JitterBidirectional => "Bidirectional jitter: 30ms @ 8Hz (both directions)",
             Self::Bandwidth64k => "Bandwidth throttle: 64 KBps download",
             Self::Bandwidth48kLatency => "48 KBps bandwidth + 200ms added latency",
             Self::Mobile3g => "Mobile 3G simulation: 48 KBps + 200ms + jitter",
             Self::PacketLoss => "Constant packet drop",
-            Self::PacketLossBurst => "Burst packet loss in a scheduled window",
+            Self::PacketLossBurst => "Packet loss at 25%–75% of run duration (requires --duration)",
             Self::Blackhole => "Blackhole: all traffic dropped (hang / timeout)",
-            Self::BlackholeWindow => "Blackhole in a scheduled time window",
+            Self::BlackholeWindow => "Blackhole at 25%–75% of run duration (requires --duration)",
         }
     }
 
-    /// Returns the `fault run` flags (excluding --proxy and --duration) for this template.
+    /// Returns the `fault run` flags (excluding proxy/upstream/duration) for this template.
     pub fn fault_flags(&self, direction: &str) -> Vec<String> {
         match self {
             Self::LatencyNormal => vec![
@@ -113,8 +115,8 @@ impl FaultTemplate {
                 "--with-latency".into(),
                 format!("--latency-direction {}", direction),
                 "--latency-distribution pareto".into(),
-                "--latency-mean 300".into(),
-                "--latency-stddev 100".into(),
+                "--latency-shape 1.5".into(),
+                "--latency-scale 20".into(),
             ],
             Self::LatencyWindow => vec![
                 "--with-latency".into(),
@@ -122,8 +124,7 @@ impl FaultTemplate {
                 "--latency-distribution normal".into(),
                 "--latency-mean 500".into(),
                 "--latency-stddev 100".into(),
-                "--schedule-start 00:00".into(),
-                "--schedule-end 23:59".into(),
+                r#"--latency-sched "start:25%,duration:50%""#.into(),
             ],
             Self::JitterLight => vec![
                 "--with-jitter".into(),
@@ -139,11 +140,13 @@ impl FaultTemplate {
             Self::Bandwidth64k => vec![
                 "--with-bandwidth".into(),
                 "--bandwidth-rate 64".into(),
+                "--bandwidth-unit KBps".into(),
                 "--bandwidth-direction ingress".into(),
             ],
             Self::Bandwidth48kLatency => vec![
                 "--with-bandwidth".into(),
                 "--bandwidth-rate 48".into(),
+                "--bandwidth-unit KBps".into(),
                 "--with-latency".into(),
                 "--latency-direction both".into(),
                 "--latency-distribution normal".into(),
@@ -153,6 +156,7 @@ impl FaultTemplate {
             Self::Mobile3g => vec![
                 "--with-bandwidth".into(),
                 "--bandwidth-rate 48".into(),
+                "--bandwidth-unit KBps".into(),
                 "--with-latency".into(),
                 "--latency-direction both".into(),
                 "--latency-distribution normal".into(),
@@ -164,20 +168,21 @@ impl FaultTemplate {
             ],
             Self::PacketLoss => vec![
                 "--with-packet-loss".into(),
-                "--packet-loss-rate 0.05".into(),
+                format!("--packet-loss-direction {}", direction),
             ],
             Self::PacketLossBurst => vec![
                 "--with-packet-loss".into(),
-                "--packet-loss-rate 0.15".into(),
-                "--packet-loss-mode burst".into(),
-                "--schedule-start 00:00".into(),
-                "--schedule-end 23:59".into(),
+                format!("--packet-loss-direction {}", direction),
+                r#"--packet-loss-sched "start:25%,duration:50%""#.into(),
             ],
-            Self::Blackhole => vec!["--with-blackhole".into()],
+            Self::Blackhole => vec![
+                "--with-blackhole".into(),
+                format!("--blackhole-direction {}", direction),
+            ],
             Self::BlackholeWindow => vec![
                 "--with-blackhole".into(),
-                "--schedule-start 00:00".into(),
-                "--schedule-end 23:59".into(),
+                format!("--blackhole-direction {}", direction),
+                r#"--blackhole-sched "start:25%,duration:50%""#.into(),
             ],
         }
     }
@@ -411,13 +416,12 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
 fn build_fault_command(target_url: &str, port: u16, duration: &str, flags: &[String]) -> String {
     let mut parts = vec![
         "fault run".to_string(),
-        "--disable-http-proxy".to_string(),
-        format!("--proxy {}={}", port, target_url),
+        format!("--proxy-address 127.0.0.1:{}", port),
+        format!("--upstream {}", target_url),
         format!("--duration {}", duration),
     ];
-    // Each entry in `flags` is already a single logical flag (possibly with its
-    // value as a second token, e.g. "--latency-mean 350").  Keep them together
-    // on one continuation line so the output is copy-paste friendly.
+    // Each entry in `flags` is a single logical flag with its value
+    // (e.g. "--latency-mean 350"). Keep them together on one line.
     for flag in flags {
         parts.push(flag.clone());
     }
