@@ -1277,9 +1277,21 @@ fn build_import(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<PyImpor
             let mod_part = text[4..import_idx].trim(); // after "from "
             let names_part = text[import_idx + 8..].trim(); // after " import "
             module = mod_part.to_string();
+            // Strip surrounding parentheses from multi-line imports:
+            //   from pkg import (     ->  names_part = "(\n    foo,\n    bar,\n)"
+            //   from pkg import foo   ->  names_part = "foo"
+            let names_part = names_part
+                .trim_start_matches('(')
+                .trim_end_matches(')')
+                .trim();
             names = names_part
                 .split(',')
-                .map(|s| s.trim().to_string())
+                .map(|s| {
+                    s.trim()
+                        .trim_matches(|c: char| c == '(' || c == ')')
+                        .trim()
+                        .to_string()
+                })
                 .filter(|s| !s.is_empty())
                 .collect();
         }
@@ -2319,6 +2331,60 @@ from typing import (
         let sem = parse_and_build_semantics(src);
         // Should still collect the import
         assert!(!sem.imports.is_empty());
+    }
+
+    #[test]
+    fn multiline_import_names_parsed_correctly() {
+        // Parenthesised multi-line imports must not include the parentheses
+        // in the imported names. Previously "(\n    List" was stored instead of "List".
+        let src = r#"
+from typing import (
+    List,
+    Dict,
+    Optional,
+)
+"#;
+        let sem = parse_and_build_semantics(src);
+        assert_eq!(sem.imports.len(), 1);
+        let imp = &sem.imports[0];
+        assert_eq!(imp.module, "typing");
+        let names: Vec<&str> = imp.names.iter().map(|s| s.as_str()).collect();
+        assert!(names.contains(&"List"), "expected 'List', got: {:?}", names);
+        assert!(names.contains(&"Dict"), "expected 'Dict', got: {:?}", names);
+        assert!(
+            names.contains(&"Optional"),
+            "expected 'Optional', got: {:?}",
+            names
+        );
+        // No parentheses or whitespace should appear in names
+        assert!(
+            imp.names
+                .iter()
+                .all(|n| !n.contains('(') && !n.contains(')')),
+            "names should not contain parentheses: {:?}",
+            imp.names
+        );
+    }
+
+    #[test]
+    fn function_scoped_multiline_import_names_parsed_correctly() {
+        // The exact pattern from the reported bug: multi-line parenthesised import
+        // inside a function body. Names must be clean so cross-file call resolution works.
+        let src = r#"
+def handler():
+    from components.fr.internal.business_logic.company.actions.employment import (
+        attach_email_to_invitation,
+    )
+    attach_email_to_invitation(1, 2, "test@example.com")
+"#;
+        let sem = parse_and_build_semantics(src);
+        let imp = sem
+            .imports
+            .iter()
+            .find(|i| i.module.contains("employment"))
+            .expect("import not found");
+        assert_eq!(imp.names, vec!["attach_email_to_invitation"]);
+        assert!(!imp.is_module_level);
     }
 
     #[test]

@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.11] — 2026-05-29
+
+### Fixed
+
+- **Multi-line parenthesised imports had parentheses included in name strings**
+  - `from pkg import (\n    foo,\n    bar,\n)` was storing `"(\n    foo"` as the first name instead of `"foo"`
+  - This caused `imports_item("foo")` to return `false`, so cross-file `Calls` edges were never added for any function imported this way
+  - Fix: strip leading `(` / trailing `)` from `names_part` before splitting on `,`, and additionally trim `()`  from each individual name
+  - 2 new tests: `multiline_import_names_parsed_correctly`, `function_scoped_multiline_import_names_parsed_correctly`
+
 ## [0.9.10] — 2026-05-29
 
 ### Changed
