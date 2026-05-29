@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.7] — 2026-05-29
+
+### Fixed
+
+- **Version bump only** — `unfault-core` was not bumped in v0.9.6 despite changes to `core/src/graph/mod.rs` (`add_flask_nodes`, `handler_names_to_skip` update). Bumps: core 0.4.6, analysis 0.3.7, cli 0.9.7.
+
 ## [0.9.6] — 2026-05-29
 
 ### Fixed
