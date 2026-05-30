@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.3] — 2026-05-30
+
+### Added
+
+- **Spinner on all `unfault graph` commands while the graph is loading**
+  A braille spinner (`⠋⠙⠹…`) with "Building graph…" is shown on stderr
+  while `build_analysis_graph` runs (~2.7s on large workspaces). The spinner
+  is cleared before any output is printed, so it never interleaves with
+  results. Suppressed automatically in `--verbose` (TIMING lines already give
+  feedback) and `--json` (stdout must stay clean for piping).
+
 ## [1.0.2] — 2026-05-30
 
 ### Fixed

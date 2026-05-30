@@ -39,6 +39,39 @@ use colored::Colorize;
 
 use crate::exit_codes::*;
 
+/// Build the analysis graph with a spinner on stderr when not in verbose or
+/// JSON mode. The spinner is cleared before any output is printed, so it
+/// never interleaves with results.
+fn build_graph_with_spinner(
+    workspace_path: &std::path::Path,
+    verbose: bool,
+    json: bool,
+) -> Result<unfault_analysis::graph::CodeGraph, String> {
+    if verbose || json {
+        // Verbose already prints timing lines; JSON output must be clean.
+        return crate::local_graph::build_analysis_graph(workspace_path, verbose)
+            .map_err(|e| e.to_string());
+    }
+
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(
+        ProgressStyle::with_template("{spinner:.cyan} {msg}")
+            .unwrap()
+            .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+    );
+    spinner.set_message("Building graph…");
+    spinner.enable_steady_tick(Duration::from_millis(80));
+
+    let result =
+        crate::local_graph::build_analysis_graph(workspace_path, false).map_err(|e| e.to_string());
+
+    spinner.finish_and_clear();
+    result
+}
+
 /// Arguments for the graph impact command
 #[derive(Debug)]
 pub struct ImpactArgs {
@@ -149,7 +182,7 @@ pub async fn execute_impact(args: ImpactArgs) -> Result<i32> {
     }
 
     // Build local graph
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
@@ -212,7 +245,7 @@ pub async fn execute_library(args: LibraryArgs) -> Result<i32> {
         eprintln!("{} Finding files using: {}", "→".cyan(), args.library_name);
     }
 
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
@@ -264,7 +297,7 @@ pub async fn execute_deps(args: DepsArgs) -> Result<i32> {
         eprintln!("{} Finding dependencies of: {}", "→".cyan(), args.file_path);
     }
 
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
@@ -325,7 +358,7 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
         );
     }
 
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
@@ -409,7 +442,7 @@ pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
         eprintln!("{} Building graph statistics...", "→".cyan());
     }
 
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
@@ -490,7 +523,7 @@ pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
         eprintln!("{} Building code graph...", "→".cyan());
     }
 
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
@@ -612,7 +645,7 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
         eprintln!("{} Analyzing call flow of: {}", "→".cyan(), args.function);
     }
 
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
@@ -721,7 +754,7 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         eprintln!("{} Tracing callers of: {}", "→".cyan(), args.function);
     }
 
-    let graph = match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
             eprintln!(
