@@ -378,9 +378,22 @@ pub fn build_ir_cached(
         );
     }
 
-    // Parse and extract semantics from each file in parallel, using cache
+    // Parse and extract semantics from each file in parallel, using cache.
+    //
+    // On a warm cache this phase is I/O-bound (stat + msgpack read per file),
+    // not CPU-bound. Use a dedicated thread pool with more threads than logical
+    // CPUs so threads waiting on filesystem I/O don't block CPU-bound threads.
+    // 64 threads is a reasonable upper bound: beyond that macOS APFS and SSD
+    // queue depths saturate without further benefit.
+    let io_pool = rayon::ThreadPoolBuilder::new()
+        .num_threads(64.min(files.len()))
+        .thread_name(|i| format!("unfault-io-{}", i))
+        .build()
+        .unwrap_or_else(|_| rayon::ThreadPoolBuilder::new().build().unwrap());
+
     let parse_start = Instant::now();
-    let results: Vec<Option<(FileId, SourceSemantics)>> = files
+    let results: Vec<Option<(FileId, SourceSemantics)>> = io_pool.install(|| {
+    files
         .par_iter()
         .enumerate()
         .map(|(index, file_path)| {
@@ -575,7 +588,8 @@ pub fn build_ir_cached(
 
             Some((file_id, semantics))
         })
-        .collect();
+        .collect()
+    }); // end io_pool.install
     let parse_ms = parse_start.elapsed().as_millis();
 
     let mut semantics_entries: Vec<(FileId, Arc<SourceSemantics>)> = Vec::new();

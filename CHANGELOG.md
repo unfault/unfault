@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.1] — 2026-05-30
+
+### Performance
+
+- **Dedicated I/O thread pool for cache reads (up to 64 threads)**
+  The `par_iter` over 27k files uses Rayon's global pool which defaults to
+  `num_cpus` threads — optimal for CPU-bound work but leaves threads idle
+  while waiting on filesystem I/O. The cache read phase (stat + msgpack read
+  per file) is now run in a dedicated `rayon::ThreadPool` with up to 64
+  threads, allowing more concurrent I/O operations and better utilisation of
+  SSD queue depth.
+
 ## [1.0.0] — 2026-05-30
 
 ### Changed (breaking internal architecture — no CLI API changes)
