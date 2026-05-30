@@ -26,6 +26,36 @@ use colored::Colorize;
 use crate::exit_codes::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Egress target
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// An outbound dependency discovered by walking the call graph forward from
+/// the target function.
+#[derive(Debug, Clone)]
+pub struct EgressTarget {
+    /// Human-readable label, e.g. "requests.get(…)" or "SQLAlchemy query"
+    pub label: String,
+    /// Best-effort upstream URL for the `fault run --upstream` flag.
+    /// None when the URL could not be statically determined.
+    pub upstream_url: Option<String>,
+    /// Category — used to pick sensible defaults when URL is absent.
+    pub kind: EgressKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EgressKind {
+    Http,
+    Database(DatabaseKind),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DatabaseKind {
+    Postgres,
+    Mysql,
+    Other,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Template definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -247,13 +277,52 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
         None => (None, args.function.clone()),
     };
 
-    // ── Resolve HTTP routes via the code graph ────────────────────────────────
-    let routes = resolve_routes(
+    // ── Build graph (with spinner) ────────────────────────────────────────────
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    let spinner = if !args.verbose {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::with_template("{spinner:.cyan} {msg}")
+                .unwrap()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+        pb.set_message("Analysing call graph…");
+        pb.enable_steady_tick(Duration::from_millis(80));
+        Some(pb)
+    } else {
+        None
+    };
+
+    let (graph, semantics) = match crate::local_graph::build_analysis_graph_with_semantics(
         &workspace_path,
-        &function_name,
-        file_hint.as_deref(),
         args.verbose,
-    );
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            if let Some(pb) = spinner {
+                pb.finish_and_clear();
+            }
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    if let Some(pb) = &spinner {
+        pb.finish_and_clear();
+    }
+
+    // ── Resolve HTTP routes via the code graph ────────────────────────────────
+    let routes = resolve_routes(&graph, &function_name, file_hint.as_deref());
+
+    // ── Resolve egress targets (outbound HTTP + DB calls) ────────────────────
+    let egress_targets =
+        resolve_egress_targets(&graph, &semantics, &function_name, file_hint.as_deref());
 
     // ── Template selection ────────────────────────────────────────────────────
     let templates: Vec<FaultTemplate> = match &args.template {
@@ -272,27 +341,12 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
         None => FaultTemplate::all().to_vec(),
     };
 
-    let is_egress = args.mode.to_lowercase() == "egress";
     let proxy_port = args.port;
     let duration = &args.duration;
-
-    // ── Determine proxy target URL ────────────────────────────────────────────
-    let target_url = if is_egress {
-        match &args.url {
-            Some(u) => u.clone(),
-            None => {
-                eprintln!(
-                    "{} --url is required for egress mode (remote dependency base URL).",
-                    "Error:".red().bold()
-                );
-                return Ok(EXIT_ERROR);
-            }
-        }
-    } else {
-        args.url
-            .clone()
-            .unwrap_or_else(|| "http://127.0.0.1:8000".to_string())
-    };
+    let ingress_url = args
+        .url
+        .clone()
+        .unwrap_or_else(|| "http://127.0.0.1:8000".to_string());
 
     // ── Print header ──────────────────────────────────────────────────────────
     println!();
@@ -302,8 +356,13 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
         function_name.bright_white().bold()
     );
 
+    // ── INGRESS section ───────────────────────────────────────────────────────
+    println!();
+    println!("{}", "── Ingress".bold());
+    println!("  Inject faults on inbound requests to this function.");
+    println!();
+
     if !routes.is_empty() {
-        println!();
         println!("  Reachable routes:");
         for (method, path) in &routes {
             let method_colored = match method.as_str() {
@@ -315,71 +374,30 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
             };
             println!("    {} {}", method_colored, path);
         }
-    } else {
         println!();
-        println!(
-            "  {} No HTTP routes found for this function in the graph.",
-            "ℹ".cyan()
-        );
-        println!(
-            "  Generating commands anyway using proxy target: {}",
-            target_url.cyan()
-        );
-    }
-
-    println!();
-
-    // ── Mode explanation ──────────────────────────────────────────────────────
-    if is_egress {
-        println!(
-            "  Mode: {} (inject faults on outbound calls)",
-            "egress".yellow().bold()
-        );
-        println!(
-            "  Proxy: localhost:{} → {}",
-            proxy_port.to_string().yellow(),
-            target_url.cyan()
-        );
-        println!();
-        println!("  To use egress mode, point your app's outbound base URL to the proxy:");
-        println!(
-            "    {}  (then restart your app and trigger the route normally)",
-            format!("export SERVICE_URL=http://127.0.0.1:{}", proxy_port).bold()
-        );
-    } else {
-        println!(
-            "  Mode: {} (inject faults on inbound requests)",
-            "ingress".yellow().bold()
-        );
-        println!(
-            "  Proxy: localhost:{} → {}",
-            proxy_port.to_string().yellow(),
-            target_url.cyan()
-        );
-
-        if !routes.is_empty() {
-            println!();
-            println!("  Send test requests through the proxy:");
-            for (method, path) in &routes {
-                println!(
-                    "    {}",
-                    format!(
-                        "curl -i -X {} http://127.0.0.1:{}/{}",
-                        method,
-                        proxy_port,
-                        path.trim_start_matches('/')
-                    )
-                    .bold()
-                );
-            }
+        println!("  Send test requests through the proxy:");
+        for (method, path) in &routes {
+            println!(
+                "    {}",
+                format!(
+                    "curl -i -X {} http://127.0.0.1:{}/{}",
+                    method,
+                    proxy_port,
+                    path.trim_start_matches('/')
+                )
+                .bold()
+            );
         }
+    } else {
+        println!(
+            "  {} No HTTP routes found — generating commands for {}",
+            "ℹ".cyan(),
+            ingress_url.cyan()
+        );
     }
 
     println!();
     println!("{}", "─".repeat(60).dimmed());
-
-    // ── Emit `fault run` commands ─────────────────────────────────────────────
-    let direction = if is_egress { "egress" } else { "ingress" };
 
     for template in &templates {
         println!();
@@ -389,10 +407,60 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
             format!("— {}", template.description()).dimmed()
         );
         println!();
-
-        let flags = template.fault_flags(direction);
-        let cmd = build_fault_command(&target_url, proxy_port, duration, &flags);
+        let flags = template.fault_flags("ingress");
+        let cmd = build_fault_command(&ingress_url, proxy_port, duration, &flags);
         println!("    {}", cmd.bright_blue());
+    }
+
+    // ── EGRESS section ────────────────────────────────────────────────────────
+    if !egress_targets.is_empty() {
+        println!();
+        println!();
+        println!("{}", "── Egress".bold());
+        println!("  Inject faults on outbound calls made by this function.");
+
+        for (i, target) in egress_targets.iter().enumerate() {
+            let egress_port = proxy_port + 1 + i as u16;
+            let upstream = target
+                .upstream_url
+                .clone()
+                .unwrap_or_else(|| default_upstream(&target.kind));
+
+            println!();
+            println!("  {} {}", "→".cyan(), target.label.bright_white());
+            println!(
+                "    Proxy: localhost:{} → {}",
+                egress_port.to_string().yellow(),
+                upstream.cyan()
+            );
+
+            // Usage hint: how to wire the proxy
+            let env_hint = match &target.kind {
+                EgressKind::Http => format!("export SERVICE_URL=http://127.0.0.1:{}", egress_port),
+                EgressKind::Database(_) => {
+                    format!("export DATABASE_URL=postgresql://127.0.0.1:{}", egress_port)
+                }
+            };
+            println!(
+                "    {}  (restart your app, then trigger the route)",
+                env_hint.bold()
+            );
+            println!();
+            println!("{}", "─".repeat(60).dimmed());
+
+            for template in &templates {
+                println!();
+                println!(
+                    "  {} {}",
+                    template.name().bright_white().bold(),
+                    format!("— {}", template.description()).dimmed()
+                );
+                println!();
+                let flags = template.fault_flags("egress");
+                let cmd = build_fault_command(&upstream, egress_port, duration, &flags);
+                println!("    {}", cmd.bright_blue());
+            }
+        }
     }
 
     println!();
@@ -428,31 +496,23 @@ fn build_fault_command(target_url: &str, port: u16, duration: &str, flags: &[Str
     parts.join(" \\\n      ")
 }
 
-/// Resolve HTTP routes reachable from a function using the code graph.
-/// Returns (method, path) pairs. Falls back to empty vec on any error.
+/// Resolve HTTP routes reachable from a function using the pre-built graph.
+/// Returns (method, path) pairs.
 fn resolve_routes(
-    workspace_path: &std::path::Path,
+    graph: &unfault_analysis::graph::CodeGraph,
     function_name: &str,
     file_hint: Option<&str>,
-    verbose: bool,
 ) -> Vec<(String, String)> {
-    let graph = match crate::local_graph::build_analysis_graph(workspace_path, verbose) {
-        Ok(g) => g,
-        Err(_) => return vec![],
-    };
-
     let ctx = if let Some(hint) = file_hint {
-        unfault_analysis::graph::traversal::get_callers_in_file(&graph, function_name, hint, 10)
+        unfault_analysis::graph::traversal::get_callers_in_file(graph, function_name, hint, 10)
     } else {
-        unfault_analysis::graph::traversal::get_callers(&graph, function_name, 10)
+        unfault_analysis::graph::traversal::get_callers(graph, function_name, 10)
     };
 
     let mut routes: Vec<(String, String)> =
         ctx.routes.into_iter().map(|r| (r.method, r.path)).collect();
 
     // Also check if the function itself is a handler (direct route).
-    // get_callers only traverses *inbound* edges; if the function IS the handler
-    // it appears as the target, not a caller. So we inspect it directly.
     use petgraph::Direction;
     use petgraph::visit::EdgeRef;
     use unfault_analysis::graph::GraphEdgeKind;
@@ -465,9 +525,8 @@ fn resolve_routes(
         let node = &graph.graph[idx];
         let name = node.display_name().to_lowercase();
 
-        // When a file hint is present, skip nodes from other files.
         if let Some(ref hint) = lower_hint {
-            let node_file = unfault_analysis::graph::traversal::node_file_path_pub(&graph, node)
+            let node_file = unfault_analysis::graph::traversal::node_file_path_pub(graph, node)
                 .unwrap_or_default()
                 .to_lowercase();
             if !node_file.ends_with(hint.as_str()) {
@@ -479,7 +538,6 @@ fn resolve_routes(
             || name.ends_with(&format!(".{}", lower_target))
             || name.ends_with(&format!("/{}", lower_target))
         {
-            // Check if this node is a handler with route info.
             if let GraphNode::Function {
                 is_handler: true,
                 http_method: Some(method),
@@ -493,7 +551,6 @@ fn resolve_routes(
                 }
             }
 
-            // Check for FastApiRoute parent via Contains edge.
             for edge in graph.graph.edges_directed(idx, Direction::Incoming) {
                 if !matches!(edge.weight(), GraphEdgeKind::Contains) {
                     continue;
@@ -512,6 +569,212 @@ fn resolve_routes(
     }
 
     routes
+}
+
+/// Walk forward from `function_name` through `Calls` edges, collecting
+/// outbound HTTP calls and database queries from reachable functions.
+///
+/// Returns a de-duplicated list of `EgressTarget`s, each with the best
+/// upstream URL we could determine statically.
+fn resolve_egress_targets(
+    graph: &unfault_analysis::graph::CodeGraph,
+    semantics: &[unfault_core::semantics::SourceSemantics],
+    function_name: &str,
+    file_hint: Option<&str>,
+) -> Vec<EgressTarget> {
+    use petgraph::Direction;
+    use petgraph::visit::EdgeRef;
+    use std::collections::HashSet;
+    use unfault_analysis::graph::GraphEdgeKind;
+    use unfault_core::semantics::SourceSemantics;
+
+    // Build a map from file_id → semantics for fast lookup.
+    let sem_by_file: std::collections::HashMap<
+        unfault_core::parse::ast::FileId,
+        &unfault_core::semantics::SourceSemantics,
+    > = semantics
+        .iter()
+        .filter_map(|s| {
+            let fid = match s {
+                SourceSemantics::Python(py) => py.file_id,
+                SourceSemantics::Go(go) => go.file_id,
+                SourceSemantics::Rust(rs) => rs.file_id,
+                SourceSemantics::Typescript(ts) => ts.file_id,
+            };
+            Some((fid, s))
+        })
+        .collect();
+
+    // Find the start node(s) for the target function.
+    let lower_target = function_name.to_lowercase();
+    let lower_hint = file_hint.map(|h| h.to_lowercase());
+
+    let start_nodes: Vec<petgraph::graph::NodeIndex> = graph
+        .graph
+        .node_indices()
+        .filter(|&idx| {
+            let node = &graph.graph[idx];
+            let name = node.display_name().to_lowercase();
+            if !matches!(node, unfault_analysis::graph::GraphNode::Function { .. }) {
+                return false;
+            }
+            let name_matches = name == lower_target
+                || name.ends_with(&format!(".{}", lower_target))
+                || name.ends_with(&format!("/{}", lower_target));
+            if !name_matches {
+                return false;
+            }
+            if let Some(ref hint) = lower_hint {
+                let file = unfault_analysis::graph::traversal::node_file_path_pub(graph, node)
+                    .unwrap_or_default()
+                    .to_lowercase();
+                file.ends_with(hint.as_str())
+            } else {
+                true
+            }
+        })
+        .collect();
+
+    // Forward BFS through Calls edges, collecting file_ids of reachable nodes.
+    let mut visited: HashSet<petgraph::graph::NodeIndex> = HashSet::new();
+    let mut queue: std::collections::VecDeque<petgraph::graph::NodeIndex> =
+        start_nodes.iter().copied().collect();
+    visited.extend(start_nodes.iter().copied());
+
+    while let Some(current) = queue.pop_front() {
+        for edge in graph.graph.edges_directed(current, Direction::Outgoing) {
+            if !matches!(edge.weight(), GraphEdgeKind::Calls) {
+                continue;
+            }
+            let target = edge.target();
+            if visited.insert(target) {
+                queue.push_back(target);
+            }
+        }
+    }
+
+    // Collect file_ids of all visited function nodes.
+    let reachable_file_ids: HashSet<unfault_core::parse::ast::FileId> = visited
+        .iter()
+        .filter_map(|&idx| graph.graph[idx].file_id())
+        .collect();
+
+    // For each reachable file, inspect http_calls and orm_queries.
+    let mut targets: Vec<EgressTarget> = Vec::new();
+    let mut seen_upstreams: HashSet<String> = HashSet::new();
+
+    for file_id in &reachable_file_ids {
+        let sem = match sem_by_file.get(file_id) {
+            Some(s) => s,
+            None => continue,
+        };
+
+        if let SourceSemantics::Python(py) = sem {
+            // ── HTTP calls ────────────────────────────────────────────────────
+            for call in &py.http_calls {
+                let url = extract_url_from_call_text(&call.call_text);
+                let upstream = url
+                    .as_ref()
+                    .and_then(|u| extract_origin(u))
+                    .map(|o| o.to_string());
+
+                // De-duplicate by upstream origin (or call_text if no URL).
+                let dedup_key = upstream
+                    .clone()
+                    .unwrap_or_else(|| call.call_text.chars().take(60).collect());
+                if !seen_upstreams.insert(dedup_key) {
+                    continue;
+                }
+
+                let label = if let Some(ref u) = url {
+                    format!(
+                        "{}.{}(\"{}\")",
+                        call.client_kind.as_str(),
+                        call.method_name,
+                        u
+                    )
+                } else {
+                    format!("{}.{}(…)", call.client_kind.as_str(), call.method_name)
+                };
+
+                targets.push(EgressTarget {
+                    label,
+                    upstream_url: upstream,
+                    kind: EgressKind::Http,
+                });
+            }
+
+            // ── ORM / DB queries ──────────────────────────────────────────────
+            for query in &py.orm_queries {
+                let kind = orm_kind_from_library(&query.orm_kind);
+                let dedup_key = format!("db:{:?}", kind);
+                if !seen_upstreams.insert(dedup_key) {
+                    continue;
+                }
+                let label = match &query.model_name {
+                    Some(model) => {
+                        format!("{} query on {}", orm_library_name(&query.orm_kind), model)
+                    }
+                    None => format!("{} query", orm_library_name(&query.orm_kind)),
+                };
+                targets.push(EgressTarget {
+                    label,
+                    upstream_url: None, // connection string not available statically
+                    kind: EgressKind::Database(kind),
+                });
+            }
+        }
+    }
+
+    targets
+}
+
+/// Try to extract a URL string literal from a raw call expression like
+/// `requests.get("https://api.example.com/v1/users", timeout=5)`.
+fn extract_url_from_call_text(call_text: &str) -> Option<String> {
+    // Match the first quoted string argument.
+    let re = regex::Regex::new(r#"["'](?P<url>https?://[^"']+)["']"#).ok()?;
+    re.captures(call_text)
+        .and_then(|c| c.name("url"))
+        .map(|m| m.as_str().to_string())
+}
+
+/// Extract just the scheme+host[:port] from a URL, e.g.
+/// "https://api.example.com/v1/users" → "https://api.example.com"
+fn extract_origin(url: &str) -> Option<&str> {
+    // Find the end of the authority: after "scheme://host[:port]"
+    let after_scheme = url.find("://")?;
+    let host_start = after_scheme + 3;
+    let host_end = url[host_start..]
+        .find('/')
+        .map(|i| host_start + i)
+        .unwrap_or(url.len());
+    Some(&url[..host_end])
+}
+
+/// Default upstream URL when we couldn't extract one statically.
+fn default_upstream(kind: &EgressKind) -> String {
+    match kind {
+        EgressKind::Http => "http://downstream-service".to_string(),
+        EgressKind::Database(DatabaseKind::Postgres) => "postgresql://localhost:5432".to_string(),
+        EgressKind::Database(DatabaseKind::Mysql) => "mysql://localhost:3306".to_string(),
+        EgressKind::Database(DatabaseKind::Other) => "localhost:5432".to_string(),
+    }
+}
+
+fn orm_kind_from_library(kind: &unfault_core::semantics::python::orm::OrmKind) -> DatabaseKind {
+    use unfault_core::semantics::python::orm::OrmKind;
+    match kind {
+        OrmKind::SqlAlchemy | OrmKind::Django | OrmKind::Tortoise | OrmKind::SqlModel => {
+            DatabaseKind::Postgres // sensible default for Python ORMs
+        }
+        OrmKind::Peewee => DatabaseKind::Mysql,
+        _ => DatabaseKind::Other,
+    }
+}
+
+fn orm_library_name(kind: &unfault_core::semantics::python::orm::OrmKind) -> &'static str {
+    kind.as_str()
 }
 
 fn print_template_list() {

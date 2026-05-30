@@ -12,6 +12,17 @@ pub enum HttpClientKind {
     Other(String),
 }
 
+impl HttpClientKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Requests => "requests",
+            Self::Httpx => "httpx",
+            Self::Aiohttp => "aiohttp",
+            Self::Other(s) => s.as_str(),
+        }
+    }
+}
+
 /// Source of retry behavior detected around an HTTP call.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum RetrySource {

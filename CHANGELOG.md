@@ -10,6 +10,35 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.4] — 2026-05-30
+
+### Added
+
+- **`unfault fault` — automatic egress fault scenario generation**
+  - After the existing ingress section, the command now walks **forward** through
+    `Calls` edges from the target function, inspects `http_calls` and `orm_queries`
+    on every reachable function, and emits a separate egress `fault run` block for
+    each discovered outbound dependency
+  - For HTTP calls with a statically-determinable string literal URL (e.g.
+    `requests.get("https://payments.internal/charge", ...)`), the origin
+    (`https://payments.internal`) is extracted and used as `--upstream`
+  - For HTTP calls with a dynamic URL (env var, variable), a placeholder is
+    shown so the user knows a call exists even without a concrete URL
+  - For ORM queries (SQLAlchemy, Django ORM, Tortoise, Peewee, etc.), a
+    `fault run` targeting the default database port is generated
+    (`postgresql://localhost:5432` for Postgres-family ORMs, `mysql://localhost:3306`
+    for Peewee)
+  - Egress proxies are assigned ports starting at `--port + 1` so all ingress
+    and egress `fault run` commands can be run simultaneously without conflicts
+  - The `--mode egress` flag still works for manual override (e.g. when the URL
+    is not statically determinable)
+
+- **Spinner on `unfault fault` while the graph is loading**
+  - Same braille spinner as `unfault graph` commands; cleared before output,
+    suppressed in `--verbose`
+
+- **`HttpClientKind::as_str()`** added to `unfault-core` for use in labels
+
 ## [1.0.3] — 2026-05-30
 
 ### Added

@@ -6,6 +6,28 @@
 use anyhow::{Context, Result};
 use colored::Colorize;
 
+/// Build a CodeGraph and the per-file semantics together.
+///
+/// Like `build_analysis_graph` but also returns the semantics entries so
+/// callers can inspect `http_calls`, `orm_queries`, etc. per file.
+pub fn build_analysis_graph_with_semantics(
+    workspace_path: &std::path::Path,
+    verbose: bool,
+) -> Result<(
+    unfault_analysis::graph::CodeGraph,
+    Vec<unfault_core::semantics::SourceSemantics>,
+)> {
+    use crate::session::ir_builder::build_ir_cached;
+
+    let build_result = build_ir_cached(workspace_path, None, verbose)
+        .context("Failed to build IR for graph analysis")?;
+
+    let semantics = build_result.ir.semantics;
+    let graph = unfault_analysis::graph::CodeGraph::from(build_result.ir.graph);
+
+    Ok((graph, semantics))
+}
+
 /// Build a CodeGraph from the workspace by parsing all source files.
 ///
 /// This builds the same IR that the review command uses, then extracts
