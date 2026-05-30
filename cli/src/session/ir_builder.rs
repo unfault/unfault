@@ -393,202 +393,205 @@ pub fn build_ir_cached(
 
     let parse_start = Instant::now();
     let results: Vec<Option<(FileId, SourceSemantics)>> = io_pool.install(|| {
-    files
-        .par_iter()
-        .enumerate()
-        .map(|(index, file_path)| {
-            let Some(language) = detect_language(file_path) else {
-                return None;
-            };
-
-            let relative_path = file_path
-                .strip_prefix(workspace_path)
-                .unwrap_or(file_path)
-                .to_string_lossy()
-                .to_string();
-
-            let file_id = FileId((index + 1) as u64);
-
-            // Fast path: check mtime + size before reading file content.
-            // Phase 1 (under lock): check index, get cache file path if match.
-            // Phase 2 (outside lock): read msgpack — parallel I/O, no contention.
-            if let Ok(meta) = std::fs::metadata(file_path) {
-                let mtime_secs = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs())
-                    .unwrap_or(0);
-                let file_size = meta.len();
-
-                let cache_file_path = {
-                    let cache_guard = cache.lock().unwrap();
-                    cache_guard.check_metadata(&relative_path, mtime_secs, file_size)
+        files
+            .par_iter()
+            .enumerate()
+            .map(|(index, file_path)| {
+                let Some(language) = detect_language(file_path) else {
+                    return None;
                 };
 
-                if let Some((_hash, cache_path)) = cache_file_path {
-                    // Read msgpack outside the lock — parallel across threads
-                    if let Ok(file) = std::fs::File::open(&cache_path) {
-                        let reader = std::io::BufReader::new(file);
-                        if let Ok(semantics) = rmp_serde::from_read::<_, SourceSemantics>(reader) {
-                            cache.lock().unwrap().record_metadata_hit();
-                            return Some((file_id, semantics));
-                        }
-                    }
-                }
-            }
+                let relative_path = file_path
+                    .strip_prefix(workspace_path)
+                    .unwrap_or(file_path)
+                    .to_string_lossy()
+                    .to_string();
 
-            // Slow path: read file, compute content hash, check cache.
-            let content = match std::fs::read_to_string(file_path) {
-                Ok(c) => c,
-                Err(e) => {
-                    if verbose {
-                        eprintln!("Warning: Could not read {}: {}", file_path.display(), e);
-                    }
-                    return None;
-                }
-            };
+                let file_id = FileId((index + 1) as u64);
 
-            // Compute content hash
-            let content_hash = SemanticsCache::hash_content(&content);
+                // Fast path: check mtime + size before reading file content.
+                // Phase 1 (under lock): check index, get cache file path if match.
+                // Phase 2 (outside lock): read msgpack — parallel I/O, no contention.
+                if let Ok(meta) = std::fs::metadata(file_path) {
+                    let mtime_secs = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let file_size = meta.len();
 
-            // Try content-hash cache
-            {
-                let cache_guard = cache.lock().unwrap();
-                if let Some(cached_semantics) = cache_guard.get(&relative_path, content_hash) {
-                    return Some((file_id, cached_semantics));
-                }
-            }
-
-            let source_file = SourceFile {
-                path: relative_path.clone(),
-                language,
-                content: content.clone(),
-            };
-
-            // Parse and build semantics based on language
-            let semantics = match language {
-                Language::Python => {
-                    let parsed = match python::parse_python_file(file_id, &source_file) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            if verbose {
-                                eprintln!("Warning: Could not parse {}: {}", relative_path, e);
-                            }
-                            cache.lock().unwrap().record_miss();
-                            return None;
-                        }
+                    let cache_file_path = {
+                        let cache_guard = cache.lock().unwrap();
+                        cache_guard.check_metadata(&relative_path, mtime_secs, file_size)
                     };
-                    let mut sem = PyFileSemantics::from_parsed(&parsed);
-                    if let Err(e) = sem.analyze_frameworks(&parsed) {
+
+                    if let Some((_hash, cache_path)) = cache_file_path {
+                        // Read msgpack outside the lock — parallel across threads
+                        if let Ok(file) = std::fs::File::open(&cache_path) {
+                            let reader = std::io::BufReader::new(file);
+                            if let Ok(semantics) =
+                                rmp_serde::from_read::<_, SourceSemantics>(reader)
+                            {
+                                cache.lock().unwrap().record_metadata_hit();
+                                return Some((file_id, semantics));
+                            }
+                        }
+                    }
+                }
+
+                // Slow path: read file, compute content hash, check cache.
+                let content = match std::fs::read_to_string(file_path) {
+                    Ok(c) => c,
+                    Err(e) => {
+                        if verbose {
+                            eprintln!("Warning: Could not read {}: {}", file_path.display(), e);
+                        }
+                        return None;
+                    }
+                };
+
+                // Compute content hash
+                let content_hash = SemanticsCache::hash_content(&content);
+
+                // Try content-hash cache
+                {
+                    let cache_guard = cache.lock().unwrap();
+                    if let Some(cached_semantics) = cache_guard.get(&relative_path, content_hash) {
+                        return Some((file_id, cached_semantics));
+                    }
+                }
+
+                let source_file = SourceFile {
+                    path: relative_path.clone(),
+                    language,
+                    content: content.clone(),
+                };
+
+                // Parse and build semantics based on language
+                let semantics = match language {
+                    Language::Python => {
+                        let parsed = match python::parse_python_file(file_id, &source_file) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                if verbose {
+                                    eprintln!("Warning: Could not parse {}: {}", relative_path, e);
+                                }
+                                cache.lock().unwrap().record_miss();
+                                return None;
+                            }
+                        };
+                        let mut sem = PyFileSemantics::from_parsed(&parsed);
+                        if let Err(e) = sem.analyze_frameworks(&parsed) {
+                            if verbose {
+                                eprintln!(
+                                    "Warning: Framework analysis failed for {}: {}",
+                                    relative_path, e
+                                );
+                            }
+                        }
+                        SourceSemantics::Python(sem)
+                    }
+                    Language::Go => {
+                        let parsed = match go::parse_go_file(file_id, &source_file) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                if verbose {
+                                    eprintln!("Warning: Could not parse {}: {}", relative_path, e);
+                                }
+                                cache.lock().unwrap().record_miss();
+                                return None;
+                            }
+                        };
+                        let mut sem = GoFileSemantics::from_parsed(&parsed);
+                        if let Err(e) = sem.analyze_frameworks(&parsed) {
+                            if verbose {
+                                eprintln!(
+                                    "Warning: Framework analysis failed for {}: {}",
+                                    relative_path, e
+                                );
+                            }
+                        }
+                        SourceSemantics::Go(sem)
+                    }
+                    Language::Rust => {
+                        let parsed = match rust_parse::parse_rust_file(file_id, &source_file) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                if verbose {
+                                    eprintln!("Warning: Could not parse {}: {}", relative_path, e);
+                                }
+                                cache.lock().unwrap().record_miss();
+                                return None;
+                            }
+                        };
+                        let sem = match build_rust_semantics(&parsed) {
+                            Ok(s) => s,
+                            Err(_) => RustFileSemantics::from_parsed(&parsed),
+                        };
+                        SourceSemantics::Rust(sem)
+                    }
+                    Language::Typescript => {
+                        let parsed = match typescript::parse_typescript_file(file_id, &source_file)
+                        {
+                            Ok(p) => p,
+                            Err(e) => {
+                                if verbose {
+                                    eprintln!("Warning: Could not parse {}: {}", relative_path, e);
+                                }
+                                cache.lock().unwrap().record_miss();
+                                return None;
+                            }
+                        };
+                        let mut sem = TsFileSemantics::from_parsed(&parsed);
+                        if let Err(e) = sem.analyze_frameworks(&parsed) {
+                            if verbose {
+                                eprintln!(
+                                    "Warning: Framework analysis failed for {}: {}",
+                                    relative_path, e
+                                );
+                            }
+                        }
+                        SourceSemantics::Typescript(sem)
+                    }
+                    _ => {
                         if verbose {
                             eprintln!(
-                                "Warning: Framework analysis failed for {}: {}",
-                                relative_path, e
+                                "Skipping unsupported language for {}: {:?}",
+                                relative_path, language
                             );
                         }
+                        return None;
                     }
-                    SourceSemantics::Python(sem)
-                }
-                Language::Go => {
-                    let parsed = match go::parse_go_file(file_id, &source_file) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            if verbose {
-                                eprintln!("Warning: Could not parse {}: {}", relative_path, e);
-                            }
-                            cache.lock().unwrap().record_miss();
-                            return None;
-                        }
-                    };
-                    let mut sem = GoFileSemantics::from_parsed(&parsed);
-                    if let Err(e) = sem.analyze_frameworks(&parsed) {
-                        if verbose {
-                            eprintln!(
-                                "Warning: Framework analysis failed for {}: {}",
-                                relative_path, e
-                            );
-                        }
-                    }
-                    SourceSemantics::Go(sem)
-                }
-                Language::Rust => {
-                    let parsed = match rust_parse::parse_rust_file(file_id, &source_file) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            if verbose {
-                                eprintln!("Warning: Could not parse {}: {}", relative_path, e);
-                            }
-                            cache.lock().unwrap().record_miss();
-                            return None;
-                        }
-                    };
-                    let sem = match build_rust_semantics(&parsed) {
-                        Ok(s) => s,
-                        Err(_) => RustFileSemantics::from_parsed(&parsed),
-                    };
-                    SourceSemantics::Rust(sem)
-                }
-                Language::Typescript => {
-                    let parsed = match typescript::parse_typescript_file(file_id, &source_file) {
-                        Ok(p) => p,
-                        Err(e) => {
-                            if verbose {
-                                eprintln!("Warning: Could not parse {}: {}", relative_path, e);
-                            }
-                            cache.lock().unwrap().record_miss();
-                            return None;
-                        }
-                    };
-                    let mut sem = TsFileSemantics::from_parsed(&parsed);
-                    if let Err(e) = sem.analyze_frameworks(&parsed) {
-                        if verbose {
-                            eprintln!(
-                                "Warning: Framework analysis failed for {}: {}",
-                                relative_path, e
-                            );
-                        }
-                    }
-                    SourceSemantics::Typescript(sem)
-                }
-                _ => {
-                    if verbose {
-                        eprintln!(
-                            "Skipping unsupported language for {}: {:?}",
-                            relative_path, language
-                        );
-                    }
-                    return None;
-                }
-            };
+                };
 
-            // Store in cache (include mtime+size for fast metadata pre-check next run)
-            {
-                let (mtime_secs, file_size) = std::fs::metadata(file_path)
-                    .ok()
-                    .map(|m| {
-                        let mtime = m
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                            .map(|d| d.as_secs())
-                            .unwrap_or(0);
-                        (mtime, m.len())
-                    })
-                    .unwrap_or((0, 0));
-                let mut cache_guard = cache.lock().unwrap();
-                cache_guard.set(
-                    &relative_path,
-                    content_hash,
-                    mtime_secs,
-                    file_size,
-                    &semantics,
-                );
-            }
+                // Store in cache (include mtime+size for fast metadata pre-check next run)
+                {
+                    let (mtime_secs, file_size) = std::fs::metadata(file_path)
+                        .ok()
+                        .map(|m| {
+                            let mtime = m
+                                .modified()
+                                .ok()
+                                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                .map(|d| d.as_secs())
+                                .unwrap_or(0);
+                            (mtime, m.len())
+                        })
+                        .unwrap_or((0, 0));
+                    let mut cache_guard = cache.lock().unwrap();
+                    cache_guard.set(
+                        &relative_path,
+                        content_hash,
+                        mtime_secs,
+                        file_size,
+                        &semantics,
+                    );
+                }
 
-            Some((file_id, semantics))
-        })
-        .collect()
+                Some((file_id, semantics))
+            })
+            .collect()
     }); // end io_pool.install
     let parse_ms = parse_start.elapsed().as_millis();
 

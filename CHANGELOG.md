@@ -10,6 +10,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.2] — 2026-05-30
+
+### Fixed
+
+- `cargo fmt` cleanup of indentation inside `io_pool.install` closure (missed in v1.0.1)
+
 ## [1.0.1] — 2026-05-30
 
 ### Performance
