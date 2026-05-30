@@ -10,6 +10,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [0.9.16] — 2026-05-29
+
+### Fixed
+
+- **Revert msgpack IR round-trip (v0.9.15) — deserialization failure**
+  The analysis crate's `SourceSemantics::Python` carries extra fields
+  (e.g. `flask: Option<FlaskFileSummary>`) absent from the core crate's
+  version. JSON tolerates missing fields via serde's `#[serde(default)]`;
+  msgpack does not by default, causing `rmp_serde::from_slice` to fail
+  on every graph command. Reverted to `serde_json` for the round-trip.
+  The correct long-term fix (unifying the two IR types) is tracked separately.
+
 ## [0.9.15] — 2026-05-29
 
 ### Performance

@@ -29,13 +29,13 @@ pub fn build_analysis_graph(
     let build_result = build_ir_cached(workspace_path, None, verbose)
         .context("Failed to build IR for graph analysis")?;
 
-    // Convert from core's IR type to the analysis crate's IR type.
-    // Use msgpack (rmp_serde) instead of JSON — same round-trip but
-    // ~10x faster serialization and a fraction of the allocations.
-    let ir_bytes =
-        rmp_serde::to_vec(&build_result.ir).context("Failed to serialize IR (msgpack)")?;
+    // Convert from core's IR type to the analysis crate's IR type via JSON.
+    // The two types are structurally similar but not identical (the analysis
+    // crate's SourceSemantics carries extra fields like `flask`). JSON is
+    // tolerant of schema differences via serde's `#[serde(default)]`.
+    let ir_json = serde_json::to_string(&build_result.ir).context("Failed to serialize IR")?;
     let mut ir: unfault_analysis::ir::IntermediateRepresentation =
-        rmp_serde::from_slice(&ir_bytes).context("Failed to deserialize IR (msgpack)")?;
+        serde_json::from_str(&ir_json).context("Failed to deserialize IR")?;
 
     // Rebuild indexes (needed after deserialization)
     ir.rebuild_indexes();
