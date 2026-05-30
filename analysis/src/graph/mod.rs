@@ -36,232 +36,8 @@ use crate::semantics::python::model::PyFileSemantics;
 use crate::types::context::Language;
 use unfault_core::semantics::python::flask::FlaskFileSummary;
 
-/// The observability provider that sourced an SLO definition.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum SloProvider {
-    /// Google Cloud Monitoring
-    Gcp,
-    /// Datadog
-    Datadog,
-    /// Dynatrace
-    Dynatrace,
-}
-
-impl std::fmt::Display for SloProvider {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SloProvider::Gcp => write!(f, "GCP"),
-            SloProvider::Datadog => write!(f, "Datadog"),
-            SloProvider::Dynatrace => write!(f, "Dynatrace"),
-        }
-    }
-}
-
-/// Category of external modules for better organization
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum ModuleCategory {
-    /// HTTP client libraries (requests, httpx, axios, etc.)
-    HttpClient,
-    /// Database/ORM libraries (sqlalchemy, prisma, etc.)
-    Database,
-    /// Web frameworks (fastapi, express, gin, etc.)
-    WebFramework,
-    /// Async runtimes (asyncio, tokio, etc.)
-    AsyncRuntime,
-    /// Logging libraries
-    Logging,
-    /// Retry/resilience libraries
-    Resilience,
-    /// Standard library
-    StandardLib,
-    /// Other external library
-    Other,
-}
-
-impl Default for ModuleCategory {
-    fn default() -> Self {
-        Self::Other
-    }
-}
-
-/// Nodes in the code graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum GraphNode {
-    /// A source file
-    File {
-        file_id: FileId,
-        path: String,
-        language: Language,
-    },
-
-    /// A function or method definition
-    Function {
-        file_id: FileId,
-        name: String,
-        /// Qualified name including class (e.g., "MyClass.my_method")
-        qualified_name: String,
-        is_async: bool,
-        /// Whether this is an HTTP handler, event handler, etc.
-        is_handler: bool,
-        /// HTTP method if this is an HTTP route handler (e.g., "GET", "POST")
-        http_method: Option<String>,
-        /// HTTP path if this is an HTTP route handler (e.g., "/users/{user_id}")
-        http_path: Option<String>,
-    },
-
-    /// A class or type definition
-    Class {
-        file_id: FileId,
-        name: String,
-    },
-
-    /// An external module/library dependency
-    ExternalModule {
-        /// Module name (e.g., "requests", "fastapi", "gin")
-        name: String,
-        /// Category for grouping
-        category: ModuleCategory,
-    },
-
-    // === FastAPI-specific nodes (for backward compatibility) ===
-    FastApiApp {
-        file_id: FileId,
-        var_name: String,
-    },
-
-    FastApiRoute {
-        file_id: FileId,
-        http_method: String,
-        path: String,
-    },
-
-    FastApiMiddleware {
-        file_id: FileId,
-        app_var_name: String,
-        middleware_type: String,
-    },
-
-    /// A Service Level Objective fetched from an observability provider.
-    ///
-    /// SLO nodes are the top tier of the Hierarchical World Model: they
-    /// represent the Macro-Goals that the system's code must satisfy.
-    /// They are linked to HTTP route handlers via `MonitoredBy` edges.
-    Slo {
-        /// Provider-assigned unique ID (e.g. GCP resource name).
-        id: String,
-        /// Human-readable name (e.g. "Checkout API availability").
-        name: String,
-        /// The observability platform this SLO comes from.
-        provider: SloProvider,
-        /// URL path pattern this SLO monitors (e.g. "/api/checkout/*").
-        path_pattern: String,
-        /// HTTP method if specific (e.g. "POST"), empty string for all.
-        http_method: Option<String>,
-        /// Target availability percentage (e.g. 99.9).
-        target_percent: f64,
-        /// Current evaluated percentage if available.
-        current_percent: Option<f64>,
-        /// Error budget remaining as percentage if available.
-        error_budget_remaining: Option<f64>,
-        /// Evaluation timeframe (e.g. "30d").
-        timeframe: String,
-        /// Direct link to the SLO in the provider's dashboard.
-        dashboard_url: Option<String>,
-    },
-
-    /// A remote service observed in distributed traces (OTEL / Cloud Trace).
-    RemoteService {
-        name: String,
-        endpoint: String,
-        observed_call_count: u32,
-        p99_latency_ms: Option<f64>,
-    },
-}
-
-impl GraphNode {
-    /// Get the file_id if this node is associated with a file
-    pub fn file_id(&self) -> Option<FileId> {
-        match self {
-            GraphNode::File { file_id, .. } => Some(*file_id),
-            GraphNode::Function { file_id, .. } => Some(*file_id),
-            GraphNode::Class { file_id, .. } => Some(*file_id),
-            GraphNode::FastApiApp { file_id, .. } => Some(*file_id),
-            GraphNode::FastApiRoute { file_id, .. } => Some(*file_id),
-            GraphNode::FastApiMiddleware { file_id, .. } => Some(*file_id),
-            GraphNode::ExternalModule { .. }
-            | GraphNode::Slo { .. }
-            | GraphNode::RemoteService { .. } => None,
-        }
-    }
-
-    /// Get the display name for this node
-    pub fn display_name(&self) -> String {
-        match self {
-            GraphNode::File { path, .. } => path.clone(),
-            GraphNode::Function { qualified_name, .. } => qualified_name.clone(),
-            GraphNode::Class { name, .. } => name.clone(),
-            GraphNode::ExternalModule { name, .. } => name.clone(),
-            GraphNode::FastApiApp { var_name, .. } => format!("FastAPI({})", var_name),
-            GraphNode::FastApiRoute {
-                http_method, path, ..
-            } => format!("{} {}", http_method, path),
-            GraphNode::FastApiMiddleware {
-                middleware_type, ..
-            } => middleware_type.clone(),
-            GraphNode::Slo { name, provider, .. } => {
-                format!("SLO[{}]: {}", provider, name)
-            }
-            GraphNode::RemoteService { name, .. } => format!("remote:{}", name),
-        }
-    }
-
-    /// Check if this is a file node
-    pub fn is_file(&self) -> bool {
-        matches!(self, GraphNode::File { .. })
-    }
-}
-
-/// Edge kinds between nodes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum GraphEdgeKind {
-    /// A file "contains" a construct (function, class, app, route, middleware).
-    Contains,
-
-    /// File A imports File B (entire module)
-    /// Direction: importing file -> imported file
-    Imports,
-
-    /// File A imports specific items from File B
-    /// Contains the item names in the edge data
-    ImportsFrom {
-        /// Items imported (e.g., ["FastAPI", "HTTPException"])
-        items: Vec<String>,
-    },
-
-    /// Function A calls Function B
-    Calls,
-
-    /// Class A inherits from Class B
-    Inherits,
-
-    /// File or Function uses an external library
-    UsesLibrary,
-
-    // === FastAPI-specific edges (for backward compatibility) ===
-    /// A FastAPI app "owns" a route.
-    FastApiAppOwnsRoute,
-
-    /// A FastAPI app "has" a middleware attached.
-    FastApiAppHasMiddleware,
-
-    /// An HTTP route handler is monitored by an SLO.
-    /// Direction: Function (handler) → Slo node.
-    MonitoredBy,
-
-    /// A local file makes outbound calls to a remote service observed in traces.
-    /// Direction: File → RemoteService node.
-    RemoteCall,
-}
+// Re-export graph node/edge types from unfault-core — the types are identical.
+pub use unfault_core::graph::{GraphEdgeKind, GraphNode, ModuleCategory, SloProvider};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CodeGraph {
@@ -272,6 +48,14 @@ pub struct CodeGraph {
     /// Quick lookup: file path -> node index for the file node.
     #[serde(skip)]
     pub path_to_file: HashMap<String, NodeIndex>,
+    /// Quick lookup: path suffix -> node index (e.g. "auth/middleware.py" -> node).
+    /// Enables O(1) suffix matching for import resolution.
+    #[serde(skip)]
+    pub suffix_to_file: HashMap<String, NodeIndex>,
+    /// Quick lookup: module-style dotted path -> node index
+    /// (e.g. "auth.middleware" -> node for "auth/middleware.py").
+    #[serde(skip)]
+    pub module_to_file: HashMap<String, NodeIndex>,
     /// Quick lookup: external module name -> node index
     #[serde(skip)]
     pub external_modules: HashMap<String, NodeIndex>,
@@ -289,6 +73,8 @@ impl CodeGraph {
             graph: DiGraph::new(),
             file_nodes: HashMap::new(),
             path_to_file: HashMap::new(),
+            suffix_to_file: HashMap::new(),
+            module_to_file: HashMap::new(),
             external_modules: HashMap::new(),
             function_nodes: HashMap::new(),
             class_nodes: HashMap::new(),
@@ -312,30 +98,80 @@ impl CodeGraph {
         idx
     }
 
-    /// Find a file node by path (supports partial matching for relative imports)
+    /// Find a file node by path. Supports exact paths, suffix paths, and
+    /// module-style dotted paths (e.g. "auth.middleware" → "auth/middleware.py").
+    /// All lookups are O(1) via pre-built indexes.
     pub fn find_file_by_path(&self, path: &str) -> Option<NodeIndex> {
-        // Try exact match first
+        // 1. Exact match
         if let Some(&idx) = self.path_to_file.get(path) {
             return Some(idx);
         }
-
-        // Try suffix matching for relative imports
-        for (file_path, &idx) in &self.path_to_file {
-            if file_path.ends_with(path) {
-                return Some(idx);
+        // 2. Module-path lookup (e.g. "auth.middleware")
+        if let Some(&idx) = self.module_to_file.get(path) {
+            return Some(idx);
+        }
+        // 3. Suffix match (e.g. "middleware.py")
+        if let Some(&idx) = self.suffix_to_file.get(path) {
+            return Some(idx);
+        }
+        // 4. Convert dotted module path to file path and try suffix/module indexes
+        if path.contains('.') {
+            let file_path = path.replace('.', "/");
+            for ext in &[".py", ".ts", ".tsx", ".js", ".go", ".rs"] {
+                let full = format!("{}{}", file_path, ext);
+                if let Some(&idx) = self.suffix_to_file.get(&full) {
+                    return Some(idx);
+                }
             }
-            // Handle module-style paths (e.g., "auth.middleware" -> "auth/middleware.py")
-            let module_path = path.replace('.', "/");
-            if file_path.ends_with(&format!("{}.py", module_path))
-                || file_path.ends_with(&format!("{}/", module_path))
-                || file_path.ends_with(&format!("{}.ts", module_path))
-                || file_path.ends_with(&format!("{}.go", module_path))
-                || file_path.ends_with(&format!("{}.rs", module_path))
-            {
+            let init = format!("{}/__init__.py", file_path);
+            if let Some(&idx) = self.suffix_to_file.get(&init) {
                 return Some(idx);
             }
         }
         None
+    }
+
+    /// Add a file path to the suffix and module lookup indexes.
+    fn add_path_to_indexes(
+        path: &str,
+        node_idx: NodeIndex,
+        suffix_to_file: &mut HashMap<String, NodeIndex>,
+        module_to_file: &mut HashMap<String, NodeIndex>,
+    ) {
+        // Build suffix entries: "src/auth/middleware.py" → ["middleware.py", "auth/middleware.py", ...]
+        let parts: Vec<&str> = path.split('/').collect();
+        for i in 0..parts.len() {
+            let suffix = parts[i..].join("/");
+            suffix_to_file.entry(suffix).or_insert(node_idx);
+        }
+
+        // Build module-style entries: "src/auth/middleware.py" → "src.auth.middleware", "auth.middleware", ...
+        if let Some(without_ext) = path
+            .strip_suffix(".py")
+            .or_else(|| path.strip_suffix(".ts"))
+            .or_else(|| path.strip_suffix(".tsx"))
+            .or_else(|| path.strip_suffix(".js"))
+            .or_else(|| path.strip_suffix(".go"))
+            .or_else(|| path.strip_suffix(".rs"))
+        {
+            let module_path = without_ext.replace('/', ".");
+            module_to_file
+                .entry(module_path.clone())
+                .or_insert(node_idx);
+            let mod_parts: Vec<&str> = module_path.split('.').collect();
+            for i in 0..mod_parts.len() {
+                let partial = mod_parts[i..].join(".");
+                module_to_file.entry(partial).or_insert(node_idx);
+            }
+        }
+
+        // Special case: "src/auth/__init__.py" → "src.auth", "auth"
+        if path.ends_with("__init__.py") {
+            if let Some(dir_path) = path.strip_suffix("/__init__.py") {
+                let module_path = dir_path.replace('/', ".");
+                module_to_file.entry(module_path).or_insert(node_idx);
+            }
+        }
     }
 
     /// Get all files that directly import a given file
@@ -628,6 +464,8 @@ impl CodeGraph {
     pub fn rebuild_indexes(&mut self) {
         self.file_nodes.clear();
         self.path_to_file.clear();
+        self.suffix_to_file.clear();
+        self.module_to_file.clear();
         self.external_modules.clear();
         self.function_nodes.clear();
         self.class_nodes.clear();
@@ -637,6 +475,12 @@ impl CodeGraph {
                 GraphNode::File { file_id, path, .. } => {
                     self.file_nodes.insert(*file_id, node_idx);
                     self.path_to_file.insert(path.clone(), node_idx);
+                    Self::add_path_to_indexes(
+                        path,
+                        node_idx,
+                        &mut self.suffix_to_file,
+                        &mut self.module_to_file,
+                    );
                 }
                 GraphNode::Function { file_id, name, .. } => {
                     self.function_nodes
@@ -657,6 +501,29 @@ impl CodeGraph {
 impl Default for CodeGraph {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Convert a core `CodeGraph` into an analysis `CodeGraph` with zero copies.
+///
+/// Both types wrap the same petgraph `DiGraph<GraphNode, GraphEdgeKind>` —
+/// `GraphNode` and `GraphEdgeKind` are now re-exported from core, so they are
+/// literally the same types. The conversion moves the graph and rebuilds the
+/// O(1) lookup indexes, replacing the previous JSON/msgpack round-trip.
+impl From<unfault_core::graph::CodeGraph> for CodeGraph {
+    fn from(core: unfault_core::graph::CodeGraph) -> Self {
+        let mut cg = CodeGraph {
+            graph: core.graph,
+            file_nodes: HashMap::new(),
+            path_to_file: HashMap::new(),
+            suffix_to_file: HashMap::new(),
+            module_to_file: HashMap::new(),
+            external_modules: HashMap::new(),
+            function_nodes: HashMap::new(),
+            class_nodes: HashMap::new(),
+        };
+        cg.rebuild_indexes();
+        cg
     }
 }
 
@@ -693,6 +560,12 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
         });
 
         cg.file_nodes.insert(*file_id, node_index);
+        CodeGraph::add_path_to_indexes(
+            &path,
+            node_index,
+            &mut cg.suffix_to_file,
+            &mut cg.module_to_file,
+        );
         cg.path_to_file.insert(path, node_index);
     }
 

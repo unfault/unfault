@@ -29,25 +29,19 @@ pub fn build_analysis_graph(
     let build_result = build_ir_cached(workspace_path, None, verbose)
         .context("Failed to build IR for graph analysis")?;
 
-    // Convert from core's IR type to the analysis crate's IR type via JSON.
-    // The two types are structurally similar but not identical (the analysis
-    // crate's SourceSemantics carries extra fields like `flask`). JSON is
-    // tolerant of schema differences via serde's `#[serde(default)]`.
-    let ir_json = serde_json::to_string(&build_result.ir).context("Failed to serialize IR")?;
-    let mut ir: unfault_analysis::ir::IntermediateRepresentation =
-        serde_json::from_str(&ir_json).context("Failed to deserialize IR")?;
-
-    // Rebuild indexes (needed after deserialization)
-    ir.rebuild_indexes();
+    // Convert core's CodeGraph directly into the analysis CodeGraph — zero copies,
+    // no serialization. GraphNode and GraphEdgeKind are now the same types in both
+    // crates (analysis/src/graph/mod.rs re-exports them from unfault-core).
+    let graph = unfault_analysis::graph::CodeGraph::from(build_result.ir.graph);
 
     if verbose {
         eprintln!(
             "{} Graph: {} files, {} functions",
             "✓".green(),
-            ir.graph.file_nodes.len(),
-            ir.graph.function_nodes.len(),
+            graph.file_nodes.len(),
+            graph.function_nodes.len(),
         );
     }
 
-    Ok(ir.graph)
+    Ok(graph)
 }

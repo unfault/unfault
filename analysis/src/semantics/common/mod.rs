@@ -98,27 +98,9 @@ pub trait CommonSemantics: Send + Sync {
     }
 }
 
-/// Location information that can be converted from language-specific locations
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CommonLocation {
-    pub file_id: FileId,
-    pub line: u32,
-    pub column: u32,
-    pub start_byte: usize,
-    pub end_byte: usize,
-}
-
-impl From<&AstLocation> for CommonLocation {
-    fn from(loc: &AstLocation) -> Self {
-        Self {
-            file_id: loc.file_id,
-            line: loc.range.start_line + 1,
-            column: loc.range.start_col + 1,
-            start_byte: 0, // Would need byte info from node
-            end_byte: 0,
-        }
-    }
-}
+/// Location information that can be converted from language-specific locations.
+/// Re-exported from unfault-core — the type is identical.
+pub use unfault_core::semantics::common::CommonLocation;
 
 /// A common call site structure that can represent calls across languages
 #[derive(Debug, Clone)]

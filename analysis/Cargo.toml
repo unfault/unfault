@@ -1,6 +1,6 @@
 [package]
 name = "unfault-analysis"
-version = "0.3.15"
+version = "0.4.0"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

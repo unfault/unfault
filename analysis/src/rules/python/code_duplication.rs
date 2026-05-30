@@ -918,6 +918,8 @@ def transform_data(items):
             is_async: false,
             return_type: None,
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -953,6 +955,8 @@ def transform_data(items):
             is_async: false,
             return_type: None,
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -995,6 +999,8 @@ def transform_data(items):
             is_async: false,
             return_type: None,
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -1034,6 +1040,8 @@ def transform_data(items):
             is_async: true,
             return_type: None,
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -1070,6 +1078,8 @@ def transform_data(items):
             is_async: true,
             return_type: None,
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -1093,6 +1103,8 @@ def transform_data(items):
             is_async: true,
             return_type: None,
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -1145,6 +1157,8 @@ def transform_data(items):
             is_async: false,
             return_type: None,
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -1184,6 +1198,8 @@ def transform_data(items):
             is_async: false,
             return_type: Some("bool".to_string()),
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -1221,6 +1237,8 @@ def transform_data(items):
             is_async: false,
             return_type: Some("bool".to_string()),
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {
@@ -1245,6 +1263,8 @@ def transform_data(items):
             is_async: false,
             return_type: Some("dict[str, Any]".to_string()),
             body_hash: None,
+            start_byte: 0,
+            end_byte: 0,
             location: AstLocation {
                 file_id: FileId(1),
                 range: TextRange {

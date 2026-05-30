@@ -320,6 +320,15 @@ fn extract_http_call(
         _ => return None,
     };
 
+    // Filter out non-HTTP method calls (e.g., httpx.URL(), httpx.Headers())
+    let is_http_method = matches!(
+        method_name.to_lowercase().as_str(),
+        "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "request"
+    );
+    if !is_http_method {
+        return None;
+    }
+
     let call_text = file.text_for_node(&call_node);
     let args_text = if let Some(args) = call_node.child_by_field_name("arguments") {
         file.text_for_node(&args)

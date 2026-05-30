@@ -10,6 +10,62 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.0] — 2026-05-30
+
+### Changed (breaking internal architecture — no CLI API changes)
+
+- **Unified type system: analysis crate is now a thin façade over unfault-core**
+
+  The analysis crate previously maintained ~5000 lines of near-duplicate type
+  definitions that diverged from core over time, causing JSON round-trip failures,
+  missing bug fixes, and silent data loss. All shared types are now re-exported
+  from core. Specific changes:
+
+  **`analysis/src/semantics/python/model.rs`** (2771 lines → 24 lines)
+  - `PyFileSemantics`, `PyFunction`, `PyImport`, `PyCallSite`, `PyParam`,
+    `PyClass`, `PyAssignment`, `ImportInsertionType`, `ImportCategory`,
+    `ImportStyle`, `BareExceptClause`, `AsyncOperation`, `AsyncOperationType`,
+    `Decorator` are now `pub use unfault_core::semantics::python::model::*`
+  - Analysis `PyFileSemantics` gains the three previously missing fields:
+    `django`, `async_operations`, `decorators`
+  - `PyFunction` gains `start_byte` and `end_byte`
+  - `analyze_frameworks` now runs all seven analyzers (was four)
+  - Multi-line parenthesised import parsing fix (`from pkg import (\n    foo,\n)`)
+    now applies automatically (was only fixed in core)
+
+  **`analysis/src/semantics/python/http.rs`** (901 lines → 5 lines)
+  - `HttpCallSite`, `HttpClientKind`, `RetrySource`, `summarize_http_clients`
+    re-exported from core; non-HTTP method filter fix ported to core first
+
+  **`analysis/src/semantics/python/orm.rs`** (763 lines → 7 lines)
+  - All ORM types re-exported from core
+
+  **`analysis/src/semantics/common/calls.rs`** (33 lines → 2 lines)
+  **`analysis/src/semantics/common/imports.rs`** (771 lines → 6 lines)
+  **`analysis/src/semantics/common/http.rs`** (393 lines → 5 lines)
+  **`analysis/src/semantics/common/db.rs`** (453 lines → 5 lines)
+  - All re-exported from core; `CommonLocation` also re-exported from core
+
+  **`analysis/src/graph/mod.rs`**
+  - `GraphNode`, `GraphEdgeKind`, `ModuleCategory`, `SloProvider` are now
+    `pub use unfault_core::graph::*` — ~230 lines of duplicate definitions removed
+  - `CodeGraph` gains `suffix_to_file` and `module_to_file` index maps (matching
+    core), making `find_file_by_path` O(1) instead of O(n linear scan)
+  - `rebuild_indexes` now populates all 7 maps (was 5)
+  - New `From<unfault_core::graph::CodeGraph> for CodeGraph` impl: direct field
+    move + `rebuild_indexes`, zero copies, no serialization
+
+  **`cli/src/local_graph.rs`**
+  - JSON round-trip (`serde_json::to_string` + `serde_json::from_str`) replaced
+    with `unfault_analysis::graph::CodeGraph::from(build_result.ir.graph)` — the
+    ~300ms serialization cost is eliminated entirely on warm-cache runs
+
+### Fixed
+
+- `analysis/src/semantics/python/http.rs`: `httpx.URL()`, `httpx.Headers()` etc.
+  were incorrectly detected as HTTP calls; non-HTTP method names are now filtered
+  (fix already existed in analysis, now ported to core so both benefit)
+
 ## [0.9.16] — 2026-05-29
 
 ### Fixed
