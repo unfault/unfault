@@ -10,6 +10,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.6] — 2026-05-30
+
+### Added
+
+- **`unfault graph callers` query cache — near-instant repeat queries**
+  - BFS results (`CallersContext`) are cached to `.unfault/cache/query/` keyed
+    on `xxh3(function_name + file_hint) + "_" + git-HEAD-sha`
+  - On a cache hit the graph is never loaded — the result is served directly
+    from a tiny msgpack file (~100ms total vs ~2.7s)
+  - Cache is automatically invalidated whenever `git HEAD` changes (commit,
+    reset, branch switch) — no manual intervention needed
+  - `--debug` and `--verbose` bypass the cache and always run the full pipeline
+  - Suggestions (`suggest_callers_candidates`) are skipped on cache hits since
+    the graph is not loaded; this is fine because suggestions only appear when
+    `callers` is empty, and cached results are only stored when callers were found
+
+- **`unfault graph refresh`** — explicit cache reset + rebuild
+  - Deletes the query cache (`.unfault/cache/query/`)
+  - Deletes the graph cache (`graph.msgpack`)
+  - Rebuilds the full graph immediately with a spinner
+  - Reports the new HEAD commit SHA on completion
+  - Use after major refactors, branch switches, or any time you want a
+    guaranteed-fresh baseline before running `callers` or `routes`
+
 ## [1.0.5] — 2026-05-30
 
 ### Changed

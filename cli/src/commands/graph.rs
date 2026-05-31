@@ -754,6 +754,33 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         eprintln!("{} Tracing callers of: {}", "→".cyan(), args.function);
     }
 
+    // ── Query cache fast path ─────────────────────────────────────────────────
+    // Skip when --debug is set (debug needs the live graph) or --verbose
+    // (user wants timing info, so they want the full run).
+    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+
+    let cached_ctx = if !args.debug && !args.verbose {
+        crate::session::query_cache::get_callers(
+            &workspace_path,
+            &function_name,
+            file_hint.as_deref(),
+            &commit_sha,
+        )
+    } else {
+        None
+    };
+
+    if let Some(ctx) = cached_ctx {
+        if args.verbose {
+            eprintln!(
+                "{} Query cache hit (commit {})",
+                "→".cyan(),
+                &commit_sha[..8.min(commit_sha.len())]
+            );
+        }
+        return render_callers_output(ctx, &function_name, None, args.json);
+    }
+
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
@@ -906,7 +933,32 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         )
     };
 
-    if args.json {
+    // Save result to query cache (skipped in --debug mode where graph was required).
+    if !args.debug {
+        crate::session::query_cache::set_callers(
+            &workspace_path,
+            &function_name,
+            file_hint.as_deref(),
+            &commit_sha,
+            &ctx,
+        );
+    }
+
+    return render_callers_output(ctx, &function_name, Some(&graph), args.json);
+}
+
+/// Render the callers output — shared by the cache-hit and live-graph paths.
+///
+/// `graph` is `None` on a cache hit — suggestions are skipped in that case
+/// since we don't have the graph resident. The cache only hits when callers
+/// were found, so the "no results" suggestion path is never reached on a hit.
+fn render_callers_output(
+    ctx: unfault_core::types::graph_query::CallersContext,
+    function_name: &str,
+    graph: Option<&unfault_analysis::graph::CodeGraph>,
+    json: bool,
+) -> Result<i32> {
+    if json {
         println!("{}", serde_json::to_string_pretty(&ctx)?);
         return Ok(EXIT_SUCCESS);
     }
@@ -936,11 +988,15 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
             println!("  {}  in the same file directly.", " ".dimmed());
         }
 
-        let suggestions = unfault_analysis::graph::traversal::suggest_callers_candidates(
-            &graph,
-            &function_name,
-            ctx.target_file.as_deref(),
-        );
+        let suggestions = if let Some(g) = graph {
+            unfault_analysis::graph::traversal::suggest_callers_candidates(
+                g,
+                function_name,
+                ctx.target_file.as_deref(),
+            )
+        } else {
+            vec![]
+        };
 
         if !suggestions.is_empty() {
             println!();
@@ -1253,6 +1309,92 @@ pub fn execute_dump(args: DumpArgs) -> Result<i32> {
     } else {
         // Output full graph
         println!("{}", serde_json::to_string_pretty(&graph)?);
+    }
+
+    Ok(EXIT_SUCCESS)
+}
+
+// =============================================================================
+// Refresh
+// =============================================================================
+
+#[derive(Debug)]
+pub struct RefreshArgs {
+    pub workspace_path: Option<String>,
+    pub verbose: bool,
+}
+
+/// Clear all caches (query + graph) and rebuild the graph from scratch.
+///
+/// Use this after significant refactors, branch switches, or any time you
+/// want to ensure the graph and all cached query results are fully up to date.
+pub async fn execute_refresh(args: RefreshArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    // ── Clear query cache ────────────────────────────────────────────────────
+    eprintln!("{} Clearing query cache…", "→".cyan());
+    match crate::session::query_cache::clear(&workspace_path) {
+        Ok(()) => eprintln!("{} Query cache cleared.", "✓".green()),
+        Err(e) => eprintln!("{} Could not clear query cache: {}", "!".yellow(), e),
+    }
+
+    // ── Clear graph cache ────────────────────────────────────────────────────
+    let graph_cache = workspace_path
+        .join(".unfault")
+        .join("cache")
+        .join("graph.msgpack");
+    if graph_cache.exists() {
+        eprintln!("{} Clearing graph cache…", "→".cyan());
+        match std::fs::remove_file(&graph_cache) {
+            Ok(()) => eprintln!("{} Graph cache cleared.", "✓".green()),
+            Err(e) => eprintln!("{} Could not clear graph cache: {}", "!".yellow(), e),
+        }
+    }
+
+    // ── Rebuild graph ────────────────────────────────────────────────────────
+    eprintln!("{} Rebuilding graph…", "→".cyan());
+
+    use indicatif::{ProgressBar, ProgressStyle};
+    use std::time::Duration;
+
+    let spinner = if !args.verbose {
+        let pb = ProgressBar::new_spinner();
+        pb.set_style(
+            ProgressStyle::with_template("{spinner:.cyan} {msg}")
+                .unwrap()
+                .tick_strings(&["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]),
+        );
+        pb.set_message("Parsing and building graph…");
+        pb.enable_steady_tick(Duration::from_millis(80));
+        Some(pb)
+    } else {
+        None
+    };
+
+    match crate::local_graph::build_analysis_graph(&workspace_path, args.verbose) {
+        Ok(graph) => {
+            if let Some(pb) = spinner {
+                pb.finish_and_clear();
+            }
+            let commit = crate::session::query_cache::current_commit_sha(&workspace_path);
+            eprintln!(
+                "{} Graph ready — {} files, {} functions  (HEAD: {})",
+                "✓".green(),
+                graph.file_nodes.len(),
+                graph.function_nodes.len(),
+                &commit[..8.min(commit.len())]
+            );
+        }
+        Err(e) => {
+            if let Some(pb) = spinner {
+                pb.finish_and_clear();
+            }
+            eprintln!("{} Failed to build graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
+        }
     }
 
     Ok(EXIT_SUCCESS)

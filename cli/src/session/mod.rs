@@ -39,6 +39,7 @@ pub mod graph_builder;
 pub mod header_extractor;
 pub mod ir_builder;
 pub mod patch_applier;
+pub mod query_cache;
 pub mod semantics_cache;
 pub mod workspace;
 pub mod workspace_id;

@@ -378,6 +378,23 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Clear all caches and rebuild the graph from scratch
+    ///
+    /// Clears the query cache (cached BFS results) and the graph cache, then
+    /// rebuilds the full graph. Run this after major refactors, branch switches,
+    /// or whenever you want a guaranteed-fresh baseline.
+    ///
+    /// Examples:
+    ///   unfault graph refresh
+    ///   unfault graph refresh --verbose
+    Refresh {
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
 }
 
 /// Centrality sort metric options
@@ -970,6 +987,19 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Graph routes error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::Refresh { workspace, verbose } => {
+            let args = commands::graph::RefreshArgs {
+                workspace_path: workspace,
+                verbose,
+            };
+            match commands::graph::execute_refresh(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph refresh error: {}", e);
                     EXIT_ERROR
                 }
             }
