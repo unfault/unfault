@@ -10,6 +10,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.5] — 2026-05-30
+
+### Changed
+
+- **`unfault fault` is now interactive** — replacing the flat wall of commands with a two-step selection flow powered by `dialoguer`:
+
+  **Step 1 — target:** choose Ingress (the detected HTTP route) or any auto-detected Egress target (outbound HTTP call or DB query discovered by walking the call graph forward).
+
+  **Step 2 — scenario:** pick from the 12 templates; each item shows the template name alongside a "why would I use this?" rationale so you can make an informed choice without already knowing the template names.
+
+  **Output:** a single `fault run` command + the expected learning ("what will I confirm?") + the `curl` or `export` hint to wire the proxy, then exit.
+
+  - `--template <name>` still works non-interactively for scripting/CI
+  - Escape or `q` exits cleanly at either prompt
+  - `FaultTemplate::why()` and `FaultTemplate::expected_learning()` methods added with full descriptions for all 12 scenarios
+
 ## [1.0.4] — 2026-05-30
 
 ### Added

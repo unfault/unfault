@@ -1,6 +1,6 @@
 [package]
 name = "unfault"
-version = "1.0.4"
+version = "1.0.5"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
@@ -52,6 +52,7 @@ petgraph = { version = "0.8", features = ["serde-1"] }
 # Local crates
 unfault-core = { path = "../core", version = "0" }
 unfault-analysis = { path = "../analysis", version = "0" }
+dialoguer = "0.12.0"
 
 [dev-dependencies]
 tempfile = "3.8"

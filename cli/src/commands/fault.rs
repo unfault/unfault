@@ -131,6 +131,84 @@ impl FaultTemplate {
         }
     }
 
+    /// One-line "why would I use this?" shown in the interactive selector.
+    pub fn why(&self) -> &'static str {
+        match self {
+            Self::LatencyNormal => {
+                "Test whether your timeouts, retries, and user-facing degradation handle predictable slowness."
+            }
+            Self::LatencyPareto => {
+                "Reproduce the long-tail latency your p99 users actually experience."
+            }
+            Self::LatencyWindow => {
+                "Inject slowness mid-request to catch race conditions and partial-response bugs."
+            }
+            Self::JitterLight => {
+                "Simulate an unstable network without full packet loss — catches missing retry logic."
+            }
+            Self::JitterBidirectional => {
+                "Stress both upload and download paths simultaneously; useful for streaming or bidirectional APIs."
+            }
+            Self::Bandwidth64k => {
+                "Simulate a constrained pipe — catches missing pagination or oversized response bodies."
+            }
+            Self::Bandwidth48kLatency => {
+                "Combine throughput limit + latency to mimic a degraded WAN link or a slow upstream API."
+            }
+            Self::Mobile3g => {
+                "Reproduce mobile field conditions: slow + jittery + narrow bandwidth all at once."
+            }
+            Self::PacketLoss => {
+                "Verify that TCP retransmission and application-level retries handle sustained loss."
+            }
+            Self::PacketLossBurst => {
+                "Simulate a brief network brown-out mid-flow — catches requests that never retry."
+            }
+            Self::Blackhole => {
+                "Confirm your circuit breaker opens, your timeout fires, and callers get a clear error."
+            }
+            Self::BlackholeWindow => {
+                "Inject a temporary outage window to test recovery and re-connection behaviour."
+            }
+        }
+    }
+
+    /// One-line "what will I learn?" shown after the scenario is selected.
+    pub fn expected_learning(&self) -> &'static str {
+        match self {
+            Self::LatencyNormal => {
+                "Does the handler return a timeout error within the configured deadline?"
+            }
+            Self::LatencyPareto => "Does your p99 SLO hold, or do tail requests blow the budget?",
+            Self::LatencyWindow => {
+                "Are partial results handled gracefully when the upstream goes slow mid-flight?"
+            }
+            Self::JitterLight => {
+                "Does your retry strategy absorb brief instability without hammering the upstream?"
+            }
+            Self::JitterBidirectional => {
+                "Does bidirectional jitter cause checksum errors, stalls, or silent data corruption?"
+            }
+            Self::Bandwidth64k => {
+                "Does the response size stay within acceptable bounds for slow consumers?"
+            }
+            Self::Bandwidth48kLatency => {
+                "Does the combined pressure cause connection pool exhaustion or cascading timeouts?"
+            }
+            Self::Mobile3g => "Is your API usable from a mobile client on a poor connection?",
+            Self::PacketLoss => {
+                "Does the client retry and eventually succeed, or fail open/closed?"
+            }
+            Self::PacketLossBurst => "Does the application recover cleanly when the outage clears?",
+            Self::Blackhole => {
+                "Does the circuit breaker open fast enough to protect downstream callers?"
+            }
+            Self::BlackholeWindow => {
+                "Does the system reconnect automatically once the blackhole lifts?"
+            }
+        }
+    }
+
     /// Returns the `fault run` flags (excluding proxy/upstream/duration) for this template.
     pub fn fault_flags(&self, direction: &str) -> Vec<String> {
         match self {
@@ -324,23 +402,6 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
     let egress_targets =
         resolve_egress_targets(&graph, &semantics, &function_name, file_hint.as_deref());
 
-    // ── Template selection ────────────────────────────────────────────────────
-    let templates: Vec<FaultTemplate> = match &args.template {
-        Some(name) => match FaultTemplate::from_str(name) {
-            Some(t) => vec![t],
-            None => {
-                eprintln!(
-                    "{} Unknown template '{}'. Available templates:",
-                    "Error:".red().bold(),
-                    name
-                );
-                print_template_list();
-                return Ok(EXIT_ERROR);
-            }
-        },
-        None => FaultTemplate::all().to_vec(),
-    };
-
     let proxy_port = args.port;
     let duration = &args.duration;
     let ingress_url = args
@@ -348,124 +409,192 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
         .clone()
         .unwrap_or_else(|| "http://127.0.0.1:8000".to_string());
 
-    // ── Print header ──────────────────────────────────────────────────────────
+    // ── Non-interactive path: --template was supplied ─────────────────────────
+    if let Some(template_name) = &args.template {
+        let template = match FaultTemplate::from_str(template_name) {
+            Some(t) => t,
+            None => {
+                eprintln!(
+                    "{} Unknown template '{}'. Available:",
+                    "Error:".red().bold(),
+                    template_name
+                );
+                print_template_list();
+                return Ok(EXIT_ERROR);
+            }
+        };
+
+        let is_egress = args.mode.to_lowercase() == "egress";
+        let (upstream, port, direction) = if is_egress {
+            let url = match &args.url {
+                Some(u) => u.clone(),
+                None => {
+                    eprintln!(
+                        "{} --url is required for egress mode.",
+                        "Error:".red().bold()
+                    );
+                    return Ok(EXIT_ERROR);
+                }
+            };
+            (url, proxy_port, "egress")
+        } else {
+            (ingress_url.clone(), proxy_port, "ingress")
+        };
+
+        let flags = template.fault_flags(direction);
+        let cmd = build_fault_command(&upstream, port, duration, &flags);
+        println!();
+        println!("{}", cmd.bright_blue());
+        println!();
+        return Ok(EXIT_SUCCESS);
+    }
+
+    // ── Interactive path ──────────────────────────────────────────────────────
+    use dialoguer::{Select, theme::ColorfulTheme};
+
+    // Build the list of injection targets.
+    // Each entry: (display label, upstream URL, port offset, fault direction, curl hint)
+    struct InjectionTarget {
+        label: String,
+        upstream: String,
+        port: u16,
+        direction: &'static str,
+        usage_hint: Option<String>,
+    }
+
+    let mut injection_targets: Vec<InjectionTarget> = Vec::new();
+
+    // Ingress target
+    let ingress_label = if routes.is_empty() {
+        format!("Ingress  — {} (no route detected)", ingress_url)
+    } else {
+        let route_summary = routes
+            .iter()
+            .map(|(m, p)| format!("{} {}", m, p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("Ingress  — {}", route_summary)
+    };
+    let ingress_curl = routes.first().map(|(method, path)| {
+        format!(
+            "curl -i -X {} http://127.0.0.1:{}/{}",
+            method,
+            proxy_port,
+            path.trim_start_matches('/')
+        )
+    });
+    injection_targets.push(InjectionTarget {
+        label: ingress_label,
+        upstream: ingress_url.clone(),
+        port: proxy_port,
+        direction: "ingress",
+        usage_hint: ingress_curl,
+    });
+
+    // Egress targets
+    for (i, target) in egress_targets.iter().enumerate() {
+        let port = proxy_port + 1 + i as u16;
+        let upstream = target
+            .upstream_url
+            .clone()
+            .unwrap_or_else(|| default_upstream(&target.kind));
+        let hint = match &target.kind {
+            EgressKind::Http => Some(format!(
+                "export SERVICE_URL=http://127.0.0.1:{}  # then restart your app",
+                port
+            )),
+            EgressKind::Database(_) => Some(format!(
+                "export DATABASE_URL=postgresql://127.0.0.1:{}  # then restart your app",
+                port
+            )),
+        };
+        injection_targets.push(InjectionTarget {
+            label: format!("Egress   — {}", target.label),
+            upstream,
+            port,
+            direction: "egress",
+            usage_hint: hint,
+        });
+    }
+
+    // ── Step 1: select target ─────────────────────────────────────────────────
     println!();
     println!(
-        "{} Fault injection scenarios for {}",
+        "{} Fault injection for {}",
         "⚡".bright_yellow(),
         function_name.bright_white().bold()
     );
-
-    // ── INGRESS section ───────────────────────────────────────────────────────
-    println!();
-    println!("{}", "── Ingress".bold());
-    println!("  Inject faults on inbound requests to this function.");
     println!();
 
-    if !routes.is_empty() {
-        println!("  Reachable routes:");
-        for (method, path) in &routes {
-            let method_colored = match method.as_str() {
-                "GET" => method.bright_green(),
-                "POST" => method.bright_yellow(),
-                "PUT" | "PATCH" => method.bright_cyan(),
-                "DELETE" => method.bright_red(),
-                _ => method.normal(),
-            };
-            println!("    {} {}", method_colored, path);
-        }
+    let target_labels: Vec<&str> = injection_targets.iter().map(|t| t.label.as_str()).collect();
+
+    let target_idx = match Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select injection target")
+        .items(&target_labels)
+        .default(0)
+        .interact_opt()?
+    {
+        Some(i) => i,
+        None => return Ok(EXIT_SUCCESS), // user pressed Escape/q
+    };
+
+    let selected_target = &injection_targets[target_idx];
+
+    // ── Step 2: select scenario ───────────────────────────────────────────────
+    let templates = FaultTemplate::all();
+
+    // Build display strings: "name  — why"
+    let scenario_labels: Vec<String> = templates
+        .iter()
+        .map(|t| format!("{:<22}  {}", t.name(), t.why()))
+        .collect();
+
+    println!();
+
+    let scenario_idx = match Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select scenario")
+        .items(&scenario_labels)
+        .default(0)
+        .interact_opt()?
+    {
+        Some(i) => i,
+        None => return Ok(EXIT_SUCCESS),
+    };
+
+    let selected_template = &templates[scenario_idx];
+
+    // ── Final output ──────────────────────────────────────────────────────────
+    println!();
+    println!(
+        "{} {} — {}",
+        "⚡".bright_yellow(),
+        selected_template.name().bright_white().bold(),
+        selected_target.label.dimmed()
+    );
+    println!();
+
+    // What you'll learn
+    println!("  {} {}", "→".cyan(), selected_template.expected_learning());
+    println!();
+
+    // The fault run command
+    let flags = selected_template.fault_flags(selected_target.direction);
+    let cmd = build_fault_command(
+        &selected_target.upstream,
+        selected_target.port,
+        duration,
+        &flags,
+    );
+    println!("{}", cmd.bright_blue());
+    println!();
+
+    // Usage hint (curl or export)
+    if let Some(ref hint) = selected_target.usage_hint {
+        println!("  {}", hint.bold());
         println!();
-        println!("  Send test requests through the proxy:");
-        for (method, path) in &routes {
-            println!(
-                "    {}",
-                format!(
-                    "curl -i -X {} http://127.0.0.1:{}/{}",
-                    method,
-                    proxy_port,
-                    path.trim_start_matches('/')
-                )
-                .bold()
-            );
-        }
-    } else {
-        println!(
-            "  {} No HTTP routes found — generating commands for {}",
-            "ℹ".cyan(),
-            ingress_url.cyan()
-        );
     }
 
-    println!();
-    println!("{}", "─".repeat(60).dimmed());
-
-    for template in &templates {
-        println!();
-        println!(
-            "  {} {}",
-            template.name().bright_white().bold(),
-            format!("— {}", template.description()).dimmed()
-        );
-        println!();
-        let flags = template.fault_flags("ingress");
-        let cmd = build_fault_command(&ingress_url, proxy_port, duration, &flags);
-        println!("    {}", cmd.bright_blue());
-    }
-
-    // ── EGRESS section ────────────────────────────────────────────────────────
-    if !egress_targets.is_empty() {
-        println!();
-        println!();
-        println!("{}", "── Egress".bold());
-        println!("  Inject faults on outbound calls made by this function.");
-
-        for (i, target) in egress_targets.iter().enumerate() {
-            let egress_port = proxy_port + 1 + i as u16;
-            let upstream = target
-                .upstream_url
-                .clone()
-                .unwrap_or_else(|| default_upstream(&target.kind));
-
-            println!();
-            println!("  {} {}", "→".cyan(), target.label.bright_white());
-            println!(
-                "    Proxy: localhost:{} → {}",
-                egress_port.to_string().yellow(),
-                upstream.cyan()
-            );
-
-            // Usage hint: how to wire the proxy
-            let env_hint = match &target.kind {
-                EgressKind::Http => format!("export SERVICE_URL=http://127.0.0.1:{}", egress_port),
-                EgressKind::Database(_) => {
-                    format!("export DATABASE_URL=postgresql://127.0.0.1:{}", egress_port)
-                }
-            };
-            println!(
-                "    {}  (restart your app, then trigger the route)",
-                env_hint.bold()
-            );
-            println!();
-            println!("{}", "─".repeat(60).dimmed());
-
-            for template in &templates {
-                println!();
-                println!(
-                    "  {} {}",
-                    template.name().bright_white().bold(),
-                    format!("— {}", template.description()).dimmed()
-                );
-                println!();
-                let flags = template.fault_flags("egress");
-                let cmd = build_fault_command(&upstream, egress_port, duration, &flags);
-                println!("    {}", cmd.bright_blue());
-            }
-        }
-    }
-
-    println!();
-
-    // ── Installation hint ─────────────────────────────────────────────────────
+    // Installation tip
     println!(
         "  {}  Install fault: {}",
         "tip".dimmed(),
