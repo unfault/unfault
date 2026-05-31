@@ -10,6 +10,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.7] — 2026-05-30
+
+### Added
+
+- **Query cache extended to all graph commands**
+  The query cache introduced in v1.0.6 for `callers` now covers every graph
+  command that does a BFS/traversal query:
+  - `impact` — `GraphContext` keyed on file_path + max_depth + HEAD
+  - `function-impact` — `FlowContext` keyed on function + max_depth + HEAD
+  - `deps` — `GraphContext` keyed on file_path + HEAD
+  - `library` — `GraphContext` keyed on library_name + HEAD
+  - `stats` — `WorkspaceContext` keyed on HEAD only (workspace-level result)
+  - `critical` — `GraphContext` keyed on sort_metric + limit + HEAD
+  - `routes` — `Vec<RouteEntry>` keyed on method_filter + file_filter + HEAD
+
+  All commands skip graph loading entirely on a cache hit (~100ms vs ~2.7s).
+  `--verbose` bypasses the cache on all commands. `unfault graph refresh`
+  clears all cached results.
+
+  `query_cache` module generalised: `get<T>` and `set<T>` accept any
+  `Serialize + DeserializeOwned` type; typed convenience wrappers for each
+  command keep call sites concise.
+
+  `RouteEntry` now derives `Deserialize` (was `Serialize` only).
+
 ## [1.0.6] — 2026-05-30
 
 ### Added
