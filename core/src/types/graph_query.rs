@@ -108,6 +108,44 @@ pub struct FunctionSuggestion {
     pub reason: String,
 }
 
+/// Result of a point-to-point path query (is there a call path from A to B?).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct PathContext {
+    /// The starting function that was queried.
+    pub from: String,
+    /// The target function that was queried.
+    pub to: String,
+    /// Whether a path was found.
+    pub found: bool,
+    /// The shortest call path from `from` to `to`, as a sequence of hop nodes.
+    /// Empty when `found` is false.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path: Vec<FlowPathNode>,
+    /// HTTP routes that can trigger the start of this path.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub entry_routes: Vec<RouteInfo>,
+}
+
+/// A detected HTTP route handler.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HandlerInfo {
+    pub method: String,
+    pub path: String,
+    pub handler: String,
+    pub file: String,
+    pub is_async: bool,
+}
+
+/// Result of a route pattern query.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct HandlersContext {
+    /// The pattern that was searched.
+    pub pattern: String,
+    /// Matching route handlers.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub handlers: Vec<HandlerInfo>,
+}
+
 /// Workspace structural information.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceContext {

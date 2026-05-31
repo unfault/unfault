@@ -1066,16 +1066,13 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         }
     };
 
-    // Debug mode: dump raw graph information about the target node before
-    // running the callers query, so the user can see what's actually in the
-    // graph and whether Calls edges exist.
+    // Debug mode — dump raw graph diagnostics.
     if args.debug {
         use petgraph::Direction;
         use petgraph::visit::EdgeRef;
         use unfault_analysis::graph::{GraphEdgeKind, GraphNode};
 
         eprintln!("\n{} Debug: nodes matching '{}'", "→".cyan(), function_name);
-
         let lower = function_name.to_lowercase();
         let mut found = false;
         for idx in graph.graph.node_indices() {
@@ -1107,7 +1104,6 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
                 } else {
                     String::new()
                 };
-
                 let incoming_calls = graph
                     .graph
                     .edges_directed(idx, Direction::Incoming)
@@ -1118,7 +1114,6 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
                     .edges_directed(idx, Direction::Outgoing)
                     .filter(|e| matches!(e.weight(), GraphEdgeKind::Calls))
                     .count();
-
                 eprintln!(
                     "  node {:?}  name={}  file={}{}\n    incoming Calls edges: {}  outgoing Calls edges: {}",
                     idx,
@@ -1128,7 +1123,6 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
                     incoming_calls,
                     outgoing_calls
                 );
-
                 if incoming_calls > 0 {
                     for edge in graph
                         .graph
@@ -1148,8 +1142,6 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
             eprintln!("  (no nodes found with that name)");
         }
 
-        // Also show what the expected handler calls — find any handler node whose
-        // name starts with '_' followed by the target name, and print its outgoing edges.
         let handler_name = format!("_{}", lower);
         eprintln!(
             "\n{} Debug: outgoing Calls edges from nodes matching '{}'",
@@ -1206,7 +1198,6 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         )
     };
 
-    // Save result to query cache (skipped in --debug mode where graph was required).
     if !args.debug {
         crate::session::query_cache::set_callers(
             &workspace_path,
@@ -1217,7 +1208,248 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         );
     }
 
-    return render_callers_output(ctx, &function_name, Some(&graph), args.json);
+    render_callers_output(ctx, &function_name, Some(&graph), args.json)
+}
+
+// =============================================================================
+// Path
+// =============================================================================
+
+#[derive(Debug)]
+pub struct PathArgs {
+    pub workspace_path: Option<String>,
+    pub from: String,
+    pub to: String,
+    pub json: bool,
+    pub verbose: bool,
+}
+
+/// Find the shortest call path between two named functions.
+pub async fn execute_path(args: PathArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    let (from_hint, from_name) = match args.from.split_once(':') {
+        Some((f, n)) => (Some(f.to_string()), n.to_string()),
+        None => (None, args.from.clone()),
+    };
+    let (to_hint, to_name) = match args.to.split_once(':') {
+        Some((f, n)) => (Some(f.to_string()), n.to_string()),
+        None => (None, args.to.clone()),
+    };
+
+    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let cache_key = format!("{}|{}", args.from, args.to);
+
+    if !args.verbose {
+        if let Some(ctx) =
+            crate::session::query_cache::get_path(&workspace_path, &cache_key, "", &commit_sha)
+        {
+            return render_path_output(ctx, args.json);
+        }
+    }
+
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    let ctx = unfault_analysis::graph::traversal::find_path(
+        &graph,
+        &from_name,
+        from_hint.as_deref(),
+        &to_name,
+        to_hint.as_deref(),
+    );
+
+    crate::session::query_cache::set_path(&workspace_path, &cache_key, "", &commit_sha, &ctx);
+
+    render_path_output(ctx, args.json)
+}
+
+fn render_path_output(
+    ctx: unfault_core::types::graph_query::PathContext,
+    json: bool,
+) -> Result<i32> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&ctx)?);
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!();
+
+    if !ctx.found {
+        println!(
+            "  {} No call path found from {} to {}.",
+            "ℹ".cyan(),
+            ctx.from.bright_white(),
+            ctx.to.bright_white()
+        );
+        println!();
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!(
+        "{} Call path  {} → {}",
+        "→".cyan(),
+        ctx.from.bright_white().bold(),
+        ctx.to.bright_white().bold()
+    );
+    println!();
+
+    // Render entry routes if any.
+    if !ctx.entry_routes.is_empty() {
+        println!("  Reachable from:");
+        for route in &ctx.entry_routes {
+            let method_colored = match route.method.as_str() {
+                "GET" => route.method.bright_green(),
+                "POST" => route.method.bright_yellow(),
+                "PUT" | "PATCH" => route.method.bright_cyan(),
+                "DELETE" => route.method.bright_red(),
+                _ => route.method.normal(),
+            };
+            println!("    {} {}", method_colored, route.path.bold());
+        }
+        println!();
+    }
+
+    // Render the path as a chain.
+    for (i, node) in ctx.path.iter().enumerate() {
+        let is_last = i == ctx.path.len() - 1;
+        let connector = if is_last { "└─" } else { "├─" };
+        let file_info = node
+            .file_path
+            .as_deref()
+            .map(|p| format!("  ({})", p))
+            .unwrap_or_default();
+        let label = if i == 0 {
+            node.name.bright_white().bold().to_string()
+        } else if is_last {
+            node.name.bright_blue().bold().to_string()
+        } else {
+            node.name.white().to_string()
+        };
+        println!("  {} {}{}", connector.dimmed(), label, file_info.dimmed());
+    }
+
+    println!();
+    Ok(EXIT_SUCCESS)
+}
+
+// =============================================================================
+// Handlers
+// =============================================================================
+
+#[derive(Debug)]
+pub struct HandlersArgs {
+    pub workspace_path: Option<String>,
+    pub pattern: String,
+    pub json: bool,
+    pub verbose: bool,
+}
+
+/// Find all HTTP route handlers matching a path pattern.
+pub async fn execute_handlers(args: HandlersArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+
+    if !args.verbose {
+        if let Some(ctx) =
+            crate::session::query_cache::get_handlers(&workspace_path, &args.pattern, &commit_sha)
+        {
+            return render_handlers_output(ctx, args.json);
+        }
+    }
+
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    let ctx = unfault_analysis::graph::traversal::find_handlers(&graph, &args.pattern);
+
+    crate::session::query_cache::set_handlers(&workspace_path, &args.pattern, &commit_sha, &ctx);
+
+    render_handlers_output(ctx, args.json)
+}
+
+fn render_handlers_output(
+    ctx: unfault_core::types::graph_query::HandlersContext,
+    json: bool,
+) -> Result<i32> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(&ctx)?);
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!();
+
+    if ctx.handlers.is_empty() {
+        println!(
+            "  {} No handlers found matching '{}'.",
+            "ℹ".cyan(),
+            ctx.pattern
+        );
+        println!();
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!(
+        "{} {} handler{} matching '{}'\n",
+        "→".cyan(),
+        ctx.handlers.len().to_string().yellow(),
+        if ctx.handlers.len() == 1 { "" } else { "s" },
+        ctx.pattern.bright_white()
+    );
+
+    let mut current_file = String::new();
+    for h in &ctx.handlers {
+        if h.file != current_file {
+            current_file = h.file.clone();
+            println!("  {}", current_file.bright_blue());
+        }
+        let method_colored = match h.method.as_str() {
+            "GET" => h.method.bright_green(),
+            "POST" => h.method.bright_yellow(),
+            "PUT" | "PATCH" => h.method.bright_cyan(),
+            "DELETE" => h.method.bright_red(),
+            _ => h.method.normal(),
+        };
+        let async_marker = if h.is_async {
+            " async".dimmed().to_string()
+        } else {
+            String::new()
+        };
+        println!(
+            "    {:<8} {}  {}{}",
+            method_colored,
+            h.path,
+            format!("({})", h.handler).dimmed(),
+            async_marker
+        );
+    }
+    println!();
+    Ok(EXIT_SUCCESS)
 }
 
 /// Render the callers output — shared by the cache-hit and live-graph paths.

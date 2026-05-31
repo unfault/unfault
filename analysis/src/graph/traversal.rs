@@ -8,7 +8,7 @@ use petgraph::visit::EdgeRef;
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::graph_query::{
     CallerInfo, CallersContext, EnumerateContext, FlowContext, FlowPathNode, FunctionSuggestion,
-    GraphContext, RouteInfo, WorkspaceContext,
+    GraphContext, HandlerInfo, HandlersContext, PathContext, RouteInfo, WorkspaceContext,
 };
 
 pub fn extract_flow(graph: &CodeGraph, target: &str, max_depth: usize) -> FlowContext {
@@ -747,4 +747,224 @@ fn node_type_str(node: &GraphNode) -> &str {
         GraphNode::Slo { .. } => "slo",
         GraphNode::RemoteService { .. } => "remote_service",
     }
+}
+
+/// Find the shortest call path from one named function to another.
+///
+/// Uses BFS over outgoing `Calls` edges from `from_name`, stopping as soon as
+/// a node matching `to_name` is reached. Returns the path as an ordered list
+/// of `FlowPathNode`s from `from` to `to` (inclusive).
+///
+/// Also resolves any HTTP routes that can trigger `from_name` (via reverse BFS)
+/// so the caller knows the full ingress → egress chain.
+pub fn find_path(
+    graph: &CodeGraph,
+    from_name: &str,
+    from_hint: Option<&str>,
+    to_name: &str,
+    to_hint: Option<&str>,
+) -> PathContext {
+    let from_nodes = find_nodes_by_name_in_file(graph, from_name, from_hint);
+    let to_nodes: HashSet<petgraph::graph::NodeIndex> =
+        find_nodes_by_name_in_file(graph, to_name, to_hint)
+            .into_iter()
+            .collect();
+
+    if from_nodes.is_empty() || to_nodes.is_empty() {
+        return PathContext {
+            from: from_name.to_string(),
+            to: to_name.to_string(),
+            found: false,
+            ..Default::default()
+        };
+    }
+
+    // BFS: each queue entry is (current_node, path_so_far)
+    for start in &from_nodes {
+        let mut visited: HashSet<petgraph::graph::NodeIndex> = HashSet::new();
+        let mut queue: VecDeque<(petgraph::graph::NodeIndex, Vec<petgraph::graph::NodeIndex>)> =
+            VecDeque::new();
+
+        visited.insert(*start);
+        queue.push_back((*start, vec![*start]));
+
+        while let Some((current, path)) = queue.pop_front() {
+            if to_nodes.contains(&current) && current != *start {
+                // Found — convert node indices to FlowPathNodes.
+                let flow_path: Vec<FlowPathNode> = path
+                    .iter()
+                    .enumerate()
+                    .map(|(depth, &idx)| {
+                        let node = &graph.graph[idx];
+                        FlowPathNode {
+                            name: node.display_name(),
+                            file_path: node_file_path(graph, node),
+                            node_type: node_type_str(node).to_string(),
+                            depth,
+                        }
+                    })
+                    .collect();
+
+                // Resolve entry routes by walking inbound Calls edges from the
+                // start node upward (same logic as get_callers, depth=1 only).
+                let mut entry_routes: Vec<RouteInfo> = Vec::new();
+                let mut seen_routes: HashSet<String> = HashSet::new();
+                for edge in graph.graph.edges_directed(*start, Direction::Incoming) {
+                    if !matches!(edge.weight(), GraphEdgeKind::Calls) {
+                        continue;
+                    }
+                    let caller = &graph.graph[edge.source()];
+                    if let GraphNode::Function {
+                        is_handler: true,
+                        http_method,
+                        http_path: Some(p),
+                        ..
+                    } = caller
+                    {
+                        let key = format!("{} {}", http_method.as_deref().unwrap_or("*"), p);
+                        if seen_routes.insert(key) {
+                            entry_routes.push(RouteInfo {
+                                method: http_method.clone().unwrap_or_else(|| "*".to_string()),
+                                path: p.clone(),
+                            });
+                        }
+                    }
+                }
+
+                return PathContext {
+                    from: from_name.to_string(),
+                    to: to_name.to_string(),
+                    found: true,
+                    path: flow_path,
+                    entry_routes,
+                };
+            }
+
+            for edge in graph.graph.edges_directed(current, Direction::Outgoing) {
+                if !matches!(edge.weight(), GraphEdgeKind::Calls) {
+                    continue;
+                }
+                let next = edge.target();
+                if visited.insert(next) {
+                    let mut new_path = path.clone();
+                    new_path.push(next);
+                    queue.push_back((next, new_path));
+                }
+            }
+        }
+    }
+
+    PathContext {
+        from: from_name.to_string(),
+        to: to_name.to_string(),
+        found: false,
+        ..Default::default()
+    }
+}
+
+/// Find all HTTP route handlers whose path matches a glob-style pattern.
+///
+/// Pattern rules:
+/// - `*` matches any sequence of characters within a single path segment
+/// - `**` matches across segment boundaries (like a path prefix)
+/// - Plain strings match as substrings
+///
+/// Examples: `/users/*`, `/api/**`, `invite` (substring)
+pub fn find_handlers(graph: &CodeGraph, pattern: &str) -> HandlersContext {
+    let lower_pattern = pattern.to_lowercase();
+
+    let mut handlers: Vec<HandlerInfo> = graph
+        .graph
+        .node_indices()
+        .filter_map(|idx| {
+            let node = &graph.graph[idx];
+            if let GraphNode::Function {
+                is_handler: true,
+                http_method: Some(method),
+                http_path: Some(path),
+                name,
+                is_async,
+                ..
+            } = node
+            {
+                if path_matches_pattern(path, &lower_pattern) {
+                    let file = node_file_path(graph, node).unwrap_or_default();
+                    Some(HandlerInfo {
+                        method: method.clone(),
+                        path: path.clone(),
+                        handler: name.clone(),
+                        file,
+                        is_async: *is_async,
+                    })
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    handlers.sort_by(|a, b| a.path.cmp(&b.path).then(a.method.cmp(&b.method)));
+
+    HandlersContext {
+        pattern: pattern.to_string(),
+        handlers,
+    }
+}
+
+/// Check whether a route `path` matches a `pattern`.
+///
+/// Supports:
+/// - Exact substring match (no wildcards)
+/// - `*` — any characters within one segment (no `/`)
+/// - `**` — any characters including `/` (prefix/suffix)
+fn path_matches_pattern(path: &str, pattern: &str) -> bool {
+    let lower_path = path.to_lowercase();
+
+    // No wildcards — substring match.
+    if !pattern.contains('*') {
+        return lower_path.contains(pattern);
+    }
+
+    // `**` — treat pattern as a prefix/suffix glob by converting to a simple
+    // check: split on `**` and verify each part appears in order.
+    if pattern.contains("**") {
+        let parts: Vec<&str> = pattern.split("**").collect();
+        let mut remaining = lower_path.as_str();
+        for part in &parts {
+            if part.is_empty() {
+                continue;
+            }
+            if let Some(pos) = remaining.find(*part) {
+                remaining = &remaining[pos + part.len()..];
+            } else {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Single `*` — convert to a simple segment-aware match.
+    // Split pattern on `*` and verify each part appears in order
+    // without crossing a `/` boundary for single-star.
+    let parts: Vec<&str> = pattern.split('*').collect();
+    let mut remaining = lower_path.as_str();
+    for (i, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if let Some(pos) = remaining.find(*part) {
+            // For single `*`, the gap between parts must not contain `/`
+            // unless we're at the boundary.
+            let gap = &remaining[..pos];
+            if i > 0 && gap.contains('/') {
+                return false;
+            }
+            remaining = &remaining[pos + part.len()..];
+        } else {
+            return false;
+        }
+    }
+    true
 }

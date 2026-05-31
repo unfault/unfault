@@ -239,5 +239,34 @@ pub fn set_critical(
     set(workspace_path, "critical", &params, commit_sha, ctx);
 }
 
+use unfault_core::types::graph_query::{HandlersContext, PathContext};
+
+pub fn get_path(
+    workspace_path: &Path,
+    from: &str,
+    to: &str,
+    commit_sha: &str,
+) -> Option<PathContext> {
+    let params = format!("{}|{}", from, to);
+    get(workspace_path, "path", &params, commit_sha)
+}
+
+pub fn set_path(workspace_path: &Path, from: &str, to: &str, commit_sha: &str, ctx: &PathContext) {
+    let params = format!("{}|{}", from, to);
+    set(workspace_path, "path", &params, commit_sha, ctx);
+}
+
+pub fn get_handlers(
+    workspace_path: &Path,
+    pattern: &str,
+    commit_sha: &str,
+) -> Option<HandlersContext> {
+    get(workspace_path, "handlers", pattern, commit_sha)
+}
+
+pub fn set_handlers(workspace_path: &Path, pattern: &str, commit_sha: &str, ctx: &HandlersContext) {
+    set(workspace_path, "handlers", pattern, commit_sha, ctx);
+}
+
 // routes is a Vec<RouteEntry> which lives in the CLI crate, not core — use the
 // generic get/set directly from the call site rather than a typed wrapper here.

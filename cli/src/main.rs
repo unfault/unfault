@@ -378,6 +378,59 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Find the shortest call path between two functions
+    ///
+    /// Answers "is there any code path from A to B?" and shows the exact chain
+    /// of function calls that connects them, plus any HTTP routes that can
+    /// trigger the start of the chain.
+    ///
+    /// Use file:function to disambiguate when the same name appears in multiple files.
+    ///
+    /// Examples:
+    ///   unfault graph path validate_order place_order
+    ///   unfault graph path orders.py:validate charge_card
+    ///   unfault graph path validate_order send_confirmation --json
+    Path {
+        /// Starting function. Use "fn" or "file.py:fn" to disambiguate.
+        #[arg(value_name = "FROM")]
+        from: String,
+        /// Target function. Use "fn" or "file.py:fn" to disambiguate.
+        #[arg(value_name = "TO")]
+        to: String,
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
+    /// Find all HTTP route handlers matching a path pattern
+    ///
+    /// Filters by path pattern: plain strings match as substrings,
+    /// * matches within a path segment, ** matches across segments.
+    ///
+    /// Examples:
+    ///   unfault graph handlers /users
+    ///   unfault graph handlers "/users/*"
+    ///   unfault graph handlers "/api/**"
+    ///   unfault graph handlers invite_email
+    Handlers {
+        /// Path pattern to match against. Supports * and ** wildcards.
+        #[arg(value_name = "PATTERN")]
+        pattern: String,
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
     /// Clear all caches and rebuild the graph from scratch
     ///
     /// Clears the query cache (cached BFS results) and the graph cache, then
@@ -987,6 +1040,48 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Graph routes error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::Path {
+            from,
+            to,
+            workspace,
+            json,
+            verbose,
+        } => {
+            let args = commands::graph::PathArgs {
+                workspace_path: workspace,
+                from,
+                to,
+                json,
+                verbose,
+            };
+            match commands::graph::execute_path(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph path error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::Handlers {
+            pattern,
+            workspace,
+            json,
+            verbose,
+        } => {
+            let args = commands::graph::HandlersArgs {
+                workspace_path: workspace,
+                pattern,
+                json,
+                verbose,
+            };
+            match commands::graph::execute_handlers(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph handlers error: {}", e);
                     EXIT_ERROR
                 }
             }

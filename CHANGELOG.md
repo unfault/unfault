@@ -10,6 +10,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.8] — 2026-05-30
+
+### Added
+
+- **`unfault graph path <from> <to>`** — find the shortest call path between two functions
+  - Uses BFS over `Calls` edges from `from` to `to`; returns the exact chain of
+    function calls that connects them in order
+  - Also resolves any HTTP routes that can trigger `from` (via reverse BFS, depth 1)
+    so the full ingress → chain is visible in one command
+  - `from` and `to` accept plain function names or `file.py:function` to disambiguate
+  - Reports clearly when no path exists
+  - Result is query-cached keyed on `(from, to, HEAD SHA)` — instant on repeat runs
+  - `--json` output includes `found`, `path[]`, and `entry_routes[]`
+
+- **`unfault graph handlers <pattern>`** — find all HTTP route handlers matching a path pattern
+  - Pattern rules: plain string = substring match; `*` = within one segment;
+    `**` = across segment boundaries
+  - Examples: `/users`, `/users/*`, `/api/**`, `invite_email`
+  - Output grouped by source file, showing method, path, handler name, and async marker
+  - Result is query-cached keyed on `(pattern, HEAD SHA)`
+  - `--json` emits `handlers[]` with `{ method, path, handler, file, is_async }`
+
+- `PathContext` and `HandlersContext`/`HandlerInfo` added to `core/src/types/graph_query.rs`
+- `find_path` and `find_handlers` added to `analysis/src/graph/traversal.rs`
+
 ## [1.0.7] — 2026-05-30
 
 ### Added
