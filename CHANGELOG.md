@@ -10,6 +10,54 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.9] — 2026-06-23
+
+### Added
+
+- **Caller classification** — every entry in `callers[]` now carries a `kind` field
+  (`business_logic` | `blueprint_wiring` | `app_factory` | `app_entrypoint`).
+  Wiring-only callers (blueprint registration, `create_app`, `__init__.py` entry-points,
+  bootstrap files) are labelled so they can be skipped during triage.
+  `--exclude-wiring` flag on `graph callers` strips them from both human and JSON output.
+
+- **Decorator semantics on functions** — `GraphNode::Function` now carries a
+  `decorators: Vec<DecoratorSemantic>` field populated from the AST decorator list.
+  `DecoratorSemantic` is a tagged enum with 11 variants:
+  `auth | permission | rate_limit | cache | retry | tracing | validation |
+  transaction | feature_flag | deprecated | other`.
+  Decorators are surfaced on `HandlerInfo` (routes output) and on `CallerInfo`.
+  Routing decorators (`@router.get`, `@app.route`, …) are filtered out — only
+  cross-cutting decorators are kept.
+
+- **`is_writer` flag on functions** — `GraphNode::Function`, `CallerInfo`, and
+  `HandlerInfo` carry `is_writer: bool`. Set when the function's file contains at
+  least one ORM write call (INSERT / UPDATE / DELETE via SQLAlchemy, Django ORM,
+  Tortoise, Peewee). Omitted from JSON when false.
+
+- **Siblings in callers output** — `CallersContext` now includes `siblings[]`, a
+  list of all other functions defined in the same file as the queried target.
+  Each entry carries `name`, optional `http_method`, and optional `http_path`.
+  Visible in JSON and rendered under the call tree in human output.
+
+- **`target_line` / `target_column`** on `CallersContext` — 1-based source
+  location of the target function definition, when available.  Human output
+  renders it as `file.py:42:5` so no separate grep is needed to open the file.
+
+- **Caveats field on `CallersContext`** — `caveats: Vec<String>` surfaces known
+  static-analysis blind spots inline with results:
+  - Event-pipeline consumers not traced: emitted when the target file imports from
+    `events_pipeline*`, `kafka`, `celery`, `dramatiq`, `rq`, or `huey`.
+  - Disambiguation warning: emitted when multiple functions share the queried name
+    and no `file:function` hint was given, with instructions to disambiguate.
+
+### Fixed
+
+- **`graph function-impact` file hint silently discarded** — the `file` part of
+  `file.py:function_name` was parsed but never forwarded to the graph traversal,
+  meaning `function-impact` always searched all files regardless of hint.
+  `extract_flow` now accepts an `Option<&str>` file hint and uses
+  `find_nodes_by_name_in_file` for disambiguation.
+
 ## [1.0.8] — 2026-05-30
 
 ### Added

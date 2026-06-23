@@ -88,6 +88,178 @@ impl Default for ModuleCategory {
     }
 }
 
+/// Semantic role of a decorator attached to a function.
+///
+/// The variants are inferred from the decorator name and its arguments.
+/// `Other` is used when the decorator is present but its role is not
+/// recognised — the raw name is preserved for LLM consumption.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum DecoratorSemantic {
+    /// Authentication / authorisation gate (`@login_required`,
+    /// `@jwt_required`, `@require_auth`, `@enforce_policy`, …).
+    Auth {
+        /// Raw decorator text, e.g. `"enforce_policy(…)"`.
+        detail: String,
+    },
+    /// Permission / role check (`@permission_required`,
+    /// `@require_permission`, `@roles_required`, …).
+    Permission {
+        detail: String,
+    },
+    /// Rate-limiting (`@ratelimit`, `@throttle`, `@rate_limit`, …).
+    RateLimit {
+        detail: String,
+    },
+    /// Caching (`@cache`, `@cached`, `@lru_cache`, `@cache_control`, …).
+    Cache {
+        detail: String,
+    },
+    /// Retry / back-off (`@retry`, `@backoff`, `@tenacity.retry`, …).
+    Retry {
+        detail: String,
+    },
+    /// Tracing / observability (`@trace`, `@instrument`, `@span`, …).
+    Tracing {
+        detail: String,
+    },
+    /// Validation (`@validate`, `@validates`, `@validator`, …).
+    Validation {
+        detail: String,
+    },
+    /// Transaction boundary (`@transaction.atomic`, `@transactional`, …).
+    Transaction {
+        detail: String,
+    },
+    /// Feature flag / experiment gate (`@feature_flag`, `@experiment`, …).
+    FeatureFlag {
+        detail: String,
+    },
+    /// Deprecation marker (`@deprecated`, …).
+    Deprecated {
+        detail: String,
+    },
+    /// Decorator present but role not recognised.  The raw name is kept so
+    /// downstream consumers (LLMs, renderers) can still surface it.
+    Other {
+        name: String,
+        detail: String,
+    },
+}
+
+impl DecoratorSemantic {
+    /// Classify a decorator given its normalised name and full text.
+    pub fn classify(name: &str, text: &str) -> Self {
+        let lower = name.to_lowercase();
+        let detail = text.to_string();
+
+        // Auth / session gates
+        if lower.contains("login_required")
+            || lower.contains("jwt_required")
+            || lower.contains("token_required")
+            || lower.contains("require_auth")
+            || lower.contains("auth_required")
+            || lower.contains("enforce_policy")
+            || lower.contains("requires_auth")
+            || lower.contains("authenticated")
+            || lower == "login_required"
+            || lower == "auth"
+        {
+            return Self::Auth { detail };
+        }
+
+        // Permission / role checks
+        if lower.contains("permission_required")
+            || lower.contains("require_permission")
+            || lower.contains("roles_required")
+            || lower.contains("has_permission")
+            || lower.contains("permission_classes")
+            || lower.contains("access_policy")
+        {
+            return Self::Permission { detail };
+        }
+
+        // Rate limiting / throttling
+        if lower.contains("ratelimit")
+            || lower.contains("rate_limit")
+            || lower.contains("throttle")
+            || lower.contains("slowapi")
+        {
+            return Self::RateLimit { detail };
+        }
+
+        // Caching
+        if lower == "cache"
+            || lower.contains("cached")
+            || lower.contains("lru_cache")
+            || lower.contains("cache_control")
+            || lower.contains("cache_page")
+            || lower.contains("cache_response")
+        {
+            return Self::Cache { detail };
+        }
+
+        // Retry / resilience
+        if lower.contains("retry")
+            || lower.contains("backoff")
+            || lower.contains("tenacity")
+            || lower.contains("stamina")
+        {
+            return Self::Retry { detail };
+        }
+
+        // Tracing / instrumentation
+        if lower.contains("trace")
+            || lower.contains("instrument")
+            || lower.contains("span")
+            || lower.contains("telemetry")
+            || lower.contains("datadog")
+            || lower.contains("sentry")
+        {
+            return Self::Tracing { detail };
+        }
+
+        // Validation
+        if lower.contains("validates")
+            || lower.contains("validator")
+            || lower == "validate"
+            || lower.contains("validate_arguments")
+            || lower.contains("validate_call")
+        {
+            return Self::Validation { detail };
+        }
+
+        // Transaction
+        if lower.contains("transaction")
+            || lower.contains("transactional")
+            || lower.contains("atomic")
+        {
+            return Self::Transaction { detail };
+        }
+
+        // Feature flag / experiment
+        if lower.contains("feature_flag")
+            || lower.contains("feature")
+            || lower.contains("experiment")
+            || lower.contains("flag")
+            || lower.contains("rollout")
+            || lower.contains("launch_darkly")
+        {
+            return Self::FeatureFlag { detail };
+        }
+
+        // Deprecation
+        if lower.contains("deprecated") || lower.contains("deprecat") {
+            return Self::Deprecated { detail };
+        }
+
+        Self::Other {
+            name: name.to_string(),
+            detail,
+        }
+    }
+}
+
 /// Nodes in the code graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GraphNode {
@@ -111,6 +283,21 @@ pub enum GraphNode {
         http_method: Option<String>,
         /// HTTP path if this is an HTTP route handler (e.g., "/users/{user_id}")
         http_path: Option<String>,
+        /// Semantic roles inferred from the function's decorators.
+        /// Empty when no recognisable decorators were found.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        decorators: Vec<DecoratorSemantic>,
+        /// True when the function contains at least one write/mutation ORM call
+        /// (INSERT, UPDATE, or DELETE). False does not mean read-only — the
+        /// static graph may miss indirect writes.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_writer: bool,
+        /// 1-based line number of the function definition.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        line: Option<u32>,
+        /// 1-based column number of the function definition.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        column: Option<u32>,
     },
 
     /// A class or type definition
@@ -909,7 +1096,7 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
                     add_fastapi_nodes(&mut cg, file_node, *file_id, py, fastapi);
                 }
                 if let Some(flask) = &py.flask {
-                    add_flask_nodes(&mut cg, file_node, *file_id, flask);
+                    add_flask_nodes(&mut cg, file_node, *file_id, py, flask);
                 }
             }
             SourceSemantics::Go(go) => {
@@ -1523,6 +1710,42 @@ fn add_function_nodes(
         }
     };
 
+    // For Python files: build per-function decorator lookup and file-level ORM write flag.
+    let (py_decorators_by_fn, py_is_writer): (
+        std::collections::HashMap<String, Vec<DecoratorSemantic>>,
+        bool,
+    ) = if let SourceSemantics::Python(py) = sem.as_ref() {
+        use crate::semantics::python::orm::QueryType;
+        let is_writer = py.orm_queries.iter().any(|q| {
+            matches!(q.query_type, QueryType::Insert | QueryType::Update | QueryType::Delete)
+        });
+        let mut map: std::collections::HashMap<String, Vec<DecoratorSemantic>> =
+            std::collections::HashMap::new();
+        for dec in &py.decorators {
+            if let Some(ref fn_name) = dec.function_name {
+                // Skip routing decorators
+                let n = dec.name.to_lowercase();
+                if n.contains(".get")
+                    || n.contains(".post")
+                    || n.contains(".put")
+                    || n.contains(".patch")
+                    || n.contains(".delete")
+                    || n.contains(".route")
+                    || n.contains(".options")
+                    || n.contains(".head")
+                {
+                    continue;
+                }
+                map.entry(fn_name.clone())
+                    .or_default()
+                    .push(DecoratorSemantic::classify(&dec.name, &dec.text));
+            }
+        }
+        (map, is_writer)
+    } else {
+        (std::collections::HashMap::new(), false)
+    };
+
     for func in functions {
         // Skip framework route handlers - they're added by framework-specific functions with HTTP metadata
         if handler_names_to_skip.contains(func.name.as_str()) {
@@ -1534,6 +1757,24 @@ fn add_function_nodes(
             None => func.name.clone(),
         };
 
+        let func_decorators = py_decorators_by_fn
+            .get(&func.name)
+            .cloned()
+            .unwrap_or_default();
+
+        // CommonLocation.line/column are already 1-based (converted in From<&AstLocation>).
+        // A value of 0 means the location was not recorded.
+        let func_line = if func.location.line > 0 {
+            Some(func.location.line)
+        } else {
+            None
+        };
+        let func_col = if func.location.column > 0 {
+            Some(func.location.column)
+        } else {
+            None
+        };
+
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
             name: func.name.clone(),
@@ -1542,6 +1783,10 @@ fn add_function_nodes(
             is_handler: func.is_route_handler(),
             http_method: None,
             http_path: None,
+            decorators: func_decorators,
+            is_writer: py_is_writer,
+            line: func_line,
+            column: func_col,
         });
 
         // File contains function
@@ -1729,7 +1974,38 @@ fn add_fastapi_nodes(
                 .add_edge(*app_node, route_node, GraphEdgeKind::FastApiAppOwnsRoute);
         }
 
-        // Also create a function node for the route handler with HTTP metadata
+        // Also create a function node for the route handler with HTTP metadata.
+        // Resolve decorator semantics from the PyFileSemantics decorator list.
+        let handler_decorators: Vec<DecoratorSemantic> = py
+            .decorators
+            .iter()
+            .filter(|d| {
+                d.function_name
+                    .as_deref()
+                    .map(|fn_name| fn_name == route.handler_name)
+                    .unwrap_or(false)
+            })
+            // Skip the routing decorator itself (@router.get, @app.post, …)
+            .filter(|d| {
+                let n = d.name.to_lowercase();
+                !n.contains(".get")
+                    && !n.contains(".post")
+                    && !n.contains(".put")
+                    && !n.contains(".patch")
+                    && !n.contains(".delete")
+                    && !n.contains(".route")
+                    && !n.contains(".options")
+                    && !n.contains(".head")
+            })
+            .map(|d| DecoratorSemantic::classify(&d.name, &d.text))
+            .collect();
+
+        // Detect write operations in ORM calls belonging to this handler.
+        let handler_is_writer = py.orm_queries.iter().any(|q| {
+            use crate::semantics::python::orm::QueryType;
+            matches!(q.query_type, QueryType::Insert | QueryType::Update | QueryType::Delete)
+        });
+
         let qualified_name = route.handler_name.clone();
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -1739,6 +2015,10 @@ fn add_fastapi_nodes(
             is_handler: true,
             http_method: Some(route.http_method.clone()),
             http_path: Some(full_path.clone()),
+            decorators: handler_decorators,
+            is_writer: handler_is_writer,
+            line: None,
+            column: None,
         });
 
         // File contains function
@@ -1773,7 +2053,6 @@ fn add_fastapi_nodes(
         }
     }
 
-    let _ = py; // unused for now, but we'll likely need it later.
 }
 
 /// Add Flask route handlers as function nodes with `http_method` and `http_path` populated.
@@ -1786,9 +2065,44 @@ fn add_flask_nodes(
     cg: &mut CodeGraph,
     file_node: NodeIndex,
     file_id: FileId,
+    py: &PyFileSemantics,
     flask: &crate::semantics::python::flask::FlaskFileSummary,
 ) {
+    use crate::semantics::python::orm::QueryType;
+
+    // Determine if this file has any write ORM calls (file-level heuristic).
+    let file_is_writer = py.orm_queries.iter().any(|q| {
+        matches!(q.query_type, QueryType::Insert | QueryType::Update | QueryType::Delete)
+    });
+
     for route in &flask.routes {
+        // Resolve non-routing decorators for this handler.
+        let handler_decorators: Vec<DecoratorSemantic> = py
+            .decorators
+            .iter()
+            .filter(|d| {
+                d.function_name
+                    .as_deref()
+                    .map(|fn_name| fn_name == route.handler_name)
+                    .unwrap_or(false)
+            })
+            .filter(|d| {
+                let n = d.name.to_lowercase();
+                !n.contains(".get")
+                    && !n.contains(".post")
+                    && !n.contains(".put")
+                    && !n.contains(".patch")
+                    && !n.contains(".delete")
+                    && !n.contains(".route")
+                    && !n.contains(".options")
+                    && !n.contains(".head")
+                    && n != "app.route"
+                    && n != "bp.route"
+                    && n != "blp.route"
+            })
+            .map(|d| DecoratorSemantic::classify(&d.name, &d.text))
+            .collect();
+
         let qualified_name = route.handler_name.clone();
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -1798,6 +2112,10 @@ fn add_flask_nodes(
             is_handler: true,
             http_method: Some(route.http_method.clone()),
             http_path: Some(route.path.clone()),
+            decorators: handler_decorators,
+            is_writer: file_is_writer,
+            line: None,
+            column: None,
         });
 
         cg.graph
@@ -1849,6 +2167,10 @@ fn add_express_nodes(
             is_handler: true,
             http_method: Some(http_method),
             http_path,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         // File contains function
@@ -1897,6 +2219,10 @@ fn add_go_framework_nodes(
             is_handler: true,
             http_method: Some(route.http_method.clone()),
             http_path: Some(route.path.clone()),
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         // File contains function
@@ -1941,6 +2267,10 @@ fn add_rust_framework_nodes(
             is_handler: true,
             http_method: Some(route.method.clone()),
             http_path: Some(route.path.clone()),
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         // File contains function
@@ -2037,6 +2367,10 @@ mod tests {
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         };
         let debug_str = format!("{:?}", node);
         assert!(debug_str.contains("Function"));
@@ -2117,6 +2451,10 @@ mod tests {
             is_handler: true,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         };
         assert_eq!(func.display_name(), "Handler.process");
 
@@ -2160,6 +2498,10 @@ mod tests {
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         };
         assert!(!func.is_file());
     }
@@ -2600,6 +2942,10 @@ def bar():
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         let func_b = cg.graph.add_node(GraphNode::Function {
@@ -2610,6 +2956,10 @@ def bar():
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         // File contains both functions
@@ -2664,6 +3014,10 @@ def bar():
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
         cg.function_nodes
             .insert((file_id, "my_func".to_string()), func_node);

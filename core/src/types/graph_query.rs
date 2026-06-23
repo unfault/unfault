@@ -6,6 +6,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::graph::DecoratorSemantic;
+
 /// Context assembled from graph analysis.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct GraphContext {
@@ -55,6 +57,26 @@ pub struct EnumerateContext {
     pub items: Vec<String>,
 }
 
+/// Role of a caller in the call chain.
+///
+/// Distinguishes business-logic callers from structural wiring code (blueprint
+/// registration, app factory setup, router inclusion) that appears in the graph
+/// purely because of framework boilerplate.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CallerKind {
+    /// Regular business-logic caller.
+    BusinessLogic,
+    /// Flask/FastAPI blueprint or router registration (`register_blueprint`,
+    /// `include_router`, `app.include_router`).
+    BlueprintWiring,
+    /// Application factory / `create_app` / `create_server` setup code.
+    AppFactory,
+    /// Top-level app entry-point file (`__init__.py`, `app.py`, `main.py`)
+    /// that imports this module but does not call the function directly.
+    AppEntrypoint,
+}
+
 /// A single caller in an inbound call chain.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CallerInfo {
@@ -64,6 +86,17 @@ pub struct CallerInfo {
     pub file: Option<String>,
     /// Number of hops from the target function (1 = direct caller).
     pub depth: usize,
+    /// Structural role of this caller.
+    #[serde(skip_serializing_if = "is_business_logic")]
+    pub kind: CallerKind,
+    /// True if the caller contains ORM write operations (INSERT/UPDATE/DELETE).
+    /// Useful for identifying the write path without a separate grep.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_writer: bool,
+}
+
+fn is_business_logic(k: &CallerKind) -> bool {
+    *k == CallerKind::BusinessLogic
 }
 
 /// HTTP route information attached to a callers context.
@@ -83,12 +116,38 @@ pub struct CallersContext {
     /// File where the target function is defined.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target_file: Option<String>,
+    /// 1-based line number of the target function definition, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_line: Option<u32>,
+    /// 1-based column number of the target function definition, when available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_column: Option<u32>,
     /// All callers found, sorted by depth ascending.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub callers: Vec<CallerInfo>,
     /// HTTP routes that anchor the call chain.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub routes: Vec<RouteInfo>,
+    /// Other functions defined in the same file as the target — useful for
+    /// understanding sibling patterns without an extra Read.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub siblings: Vec<SiblingInfo>,
+    /// Known analysis caveats, e.g. blind spots the static graph cannot trace.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub caveats: Vec<String>,
+}
+
+/// A function in the same file as the queried target.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SiblingInfo {
+    /// Function name.
+    pub name: String,
+    /// HTTP method if this sibling is a route handler.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_method: Option<String>,
+    /// HTTP path if this sibling is a route handler.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_path: Option<String>,
 }
 
 /// A function suggested as a candidate when the queried name is not found or has no edges.
@@ -134,6 +193,18 @@ pub struct HandlerInfo {
     pub handler: String,
     pub file: String,
     pub is_async: bool,
+    /// 1-based line number of the handler definition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// 1-based column number of the handler definition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub column: Option<u32>,
+    /// Semantic roles of the decorators attached to this handler.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decorators: Vec<DecoratorSemantic>,
+    /// True if the handler contains at least one ORM write (INSERT/UPDATE/DELETE).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_writer: bool,
 }
 
 /// Result of a route pattern query.

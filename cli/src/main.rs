@@ -349,6 +349,10 @@ enum GraphCommands {
         /// Print raw graph diagnostics for the target node (edges, duplicates)
         #[arg(long)]
         debug: bool,
+        /// Exclude wiring/bootstrap callers (blueprint registration, app factories,
+        /// __init__.py entry-points) — show only business-logic callers
+        #[arg(long)]
+        exclude_wiring: bool,
     },
     /// List all HTTP routes detected across the workspace
     ///
@@ -1005,6 +1009,7 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
             json,
             verbose,
             debug,
+            exclude_wiring,
         } => {
             let args = commands::graph::CallersArgs {
                 workspace_path: workspace,
@@ -1013,6 +1018,7 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 json,
                 verbose,
                 debug,
+                exclude_wiring,
             };
             match commands::graph::execute_callers(args).await {
                 Ok(exit_code) => exit_code,

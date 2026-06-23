@@ -7,12 +7,18 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::graph_query::{
-    CallerInfo, CallersContext, EnumerateContext, FlowContext, FlowPathNode, FunctionSuggestion,
-    GraphContext, HandlerInfo, HandlersContext, PathContext, RouteInfo, WorkspaceContext,
+    CallerInfo, CallerKind, CallersContext, EnumerateContext, FlowContext, FlowPathNode,
+    FunctionSuggestion, GraphContext, HandlerInfo, HandlersContext, PathContext, RouteInfo,
+    SiblingInfo, WorkspaceContext,
 };
 
-pub fn extract_flow(graph: &CodeGraph, target: &str, max_depth: usize) -> FlowContext {
-    let start_indices = find_nodes_by_name(graph, target);
+pub fn extract_flow(
+    graph: &CodeGraph,
+    target: &str,
+    file_hint: Option<&str>,
+    max_depth: usize,
+) -> FlowContext {
+    let start_indices = find_nodes_by_name_in_file(graph, target, file_hint);
     if start_indices.is_empty() {
         return FlowContext::default();
     }
@@ -311,6 +317,49 @@ pub fn get_callers_in_file(
     get_callers_impl(graph, target, Some(file_hint), max_depth)
 }
 
+/// Heuristic: is this a wiring/bootstrap call rather than a business-logic call?
+///
+/// Returns `Some(CallerKind)` when the caller looks like infrastructure wiring;
+/// `None` when it is normal business logic.
+fn classify_caller_kind(caller_name: &str, caller_file: Option<&str>) -> CallerKind {
+    let name_lower = caller_name.to_lowercase();
+    let file_lower = caller_file.unwrap_or("").to_lowercase();
+
+    // App-factory patterns
+    if name_lower.contains("create_app")
+        || name_lower.contains("create_server")
+        || name_lower.contains("make_app")
+        || name_lower.contains("build_app")
+        || name_lower.contains("init_app")
+    {
+        return CallerKind::AppFactory;
+    }
+
+    // Blueprint / router registration
+    if name_lower.contains("register_blueprint")
+        || name_lower.contains("include_router")
+        || name_lower.contains("add_url_rule")
+        || name_lower.contains("mount")
+    {
+        return CallerKind::BlueprintWiring;
+    }
+
+    // Files that are structural entry-points: __init__.py, app.py, main.py,
+    // bootstrap/*.py, apps/<component>/__init__.py, etc.
+    let is_init = file_lower.ends_with("__init__.py");
+    let is_main =
+        file_lower.ends_with("app.py") || file_lower.ends_with("main.py") || file_lower.ends_with("wsgi.py");
+    let is_bootstrap = file_lower.contains("/bootstrap/")
+        || file_lower.contains("/components_config")
+        || file_lower.contains("_config.py");
+
+    if is_init || is_main || is_bootstrap {
+        return CallerKind::AppEntrypoint;
+    }
+
+    CallerKind::BusinessLogic
+}
+
 fn get_callers_impl(
     graph: &CodeGraph,
     target: &str,
@@ -321,6 +370,25 @@ fn get_callers_impl(
     if start_indices.is_empty() {
         return CallersContext::default();
     }
+
+    // Detect disambiguation situation: multiple functions share this name and no file
+    // hint was provided.  Surface this as a caveat so the caller can act on it.
+    let disambiguation_caveat: Option<String> = if file_hint.is_none() && start_indices.len() > 1 {
+        let locations: Vec<String> = start_indices
+            .iter()
+            .filter_map(|&idx| node_file_path(graph, &graph.graph[idx]))
+            .collect();
+        Some(format!(
+            "{} functions named '{}' found across {} files — results merged; use file:function syntax to disambiguate (e.g. {}:{})",
+            start_indices.len(),
+            target,
+            locations.len(),
+            locations.first().cloned().unwrap_or_default(),
+            target,
+        ))
+    } else {
+        None
+    };
 
     // Collect all callers via reverse BFS over Calls edges.
     let mut all_callers: Vec<CallerInfo> = Vec::new();
@@ -377,10 +445,18 @@ fn get_callers_impl(
                         }
                     }
 
+                    let kind = classify_caller_kind(&caller_name, file_path.as_deref());
+                    let caller_is_writer = if let GraphNode::Function { is_writer, .. } = caller_node {
+                        *is_writer
+                    } else {
+                        false
+                    };
                     all_callers.push(CallerInfo {
                         name: caller_name,
                         file: file_path,
                         depth: depth + 1,
+                        kind,
+                        is_writer: caller_is_writer,
                     });
                 }
 
@@ -433,21 +509,111 @@ fn get_callers_impl(
     // Sort callers by depth ascending so the direct callers appear first.
     all_callers.sort_by_key(|c| c.depth);
 
-    // Resolve target display name from the first matched node.
-    let target_name = start_indices
-        .first()
-        .map(|&idx| graph.graph[idx].display_name())
+    // Resolve target display name and location from the first matched node.
+    let first_idx = start_indices.first().copied();
+    let target_name = first_idx
+        .map(|idx| graph.graph[idx].display_name())
         .unwrap_or_else(|| target.to_string());
 
-    let target_file = start_indices
-        .first()
-        .and_then(|&idx| node_file_path(graph, &graph.graph[idx]));
+    let target_file = first_idx.and_then(|idx| node_file_path(graph, &graph.graph[idx]));
+
+    // Extract line/column from the target node if available.
+    let (target_line, target_column) = first_idx
+        .map(|idx| {
+            if let GraphNode::Function { line, column, .. } = &graph.graph[idx] {
+                (*line, *column)
+            } else {
+                (None, None)
+            }
+        })
+        .unwrap_or((None, None));
+
+    // Siblings: other functions in the same file as the target.
+    let siblings: Vec<SiblingInfo> = target_file
+        .as_deref()
+        .map(|tf| {
+            graph
+                .graph
+                .node_indices()
+                .filter_map(|idx| {
+                    // Skip the target itself.
+                    if first_idx == Some(idx) {
+                        return None;
+                    }
+                    let node = &graph.graph[idx];
+                    if let GraphNode::Function {
+                        name,
+                        http_method,
+                        http_path,
+                        ..
+                    } = node
+                    {
+                        if node_file_path(graph, node).as_deref() == Some(tf) {
+                            return Some(SiblingInfo {
+                                name: name.clone(),
+                                http_method: http_method.clone(),
+                                http_path: http_path.clone(),
+                            });
+                        }
+                    }
+                    None
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Caveats: flag known static-analysis blind spots.
+    let mut caveats: Vec<String> = disambiguation_caveat.into_iter().collect();
+
+    // If the target file imports from event-pipeline modules, note the gap.
+    if let Some(ref tf) = target_file {
+        let file_imports_event_pipeline = graph.graph.node_indices().any(|idx| {
+            if let GraphNode::File { path, .. } = &graph.graph[idx] {
+                if path != tf {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+            // Check UsesLibrary edges for event-pipeline modules.
+            graph
+                .graph
+                .edges_directed(idx, Direction::Outgoing)
+                .any(|e| {
+                    if !matches!(e.weight(), GraphEdgeKind::UsesLibrary) {
+                        return false;
+                    }
+                    if let GraphNode::ExternalModule { name, .. } = &graph.graph[e.target()] {
+                        let n = name.to_lowercase();
+                        n.contains("events_pipeline")
+                            || n.contains("event_pipeline")
+                            || n.contains("kafka")
+                            || n.contains("celery")
+                            || n.contains("dramatiq")
+                            || n.contains("rq")
+                            || n.contains("huey")
+                    } else {
+                        false
+                    }
+                })
+        });
+
+        if file_imports_event_pipeline {
+            caveats.push(
+                "event-pipeline consumers not traced: callers via message queue are invisible to the static graph".to_string(),
+            );
+        }
+    }
 
     CallersContext {
         target: target_name,
         target_file,
+        target_line,
+        target_column,
         callers: all_callers,
         routes,
+        siblings,
+        caveats,
     }
 }
 
@@ -884,6 +1050,10 @@ pub fn find_handlers(graph: &CodeGraph, pattern: &str) -> HandlersContext {
                 http_path: Some(path),
                 name,
                 is_async,
+                decorators,
+                is_writer,
+                line,
+                column,
                 ..
             } = node
             {
@@ -895,6 +1065,10 @@ pub fn find_handlers(graph: &CodeGraph, pattern: &str) -> HandlersContext {
                         handler: name.clone(),
                         file,
                         is_async: *is_async,
+                        line: *line,
+                        column: *column,
+                        decorators: decorators.clone(),
+                        is_writer: *is_writer,
                     })
                 } else {
                     None

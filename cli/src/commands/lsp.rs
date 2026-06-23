@@ -1309,7 +1309,7 @@ impl UnfaultLsp {
         let root = workspace_root.as_ref()?;
         let graph = crate::local_graph::build_analysis_graph(root, false).ok()?;
 
-        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, function_name, 5);
+        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, function_name, None, 5);
 
         // Format as markdown
         let mut markdown = String::new();
@@ -1957,7 +1957,7 @@ impl LanguageServer for UnfaultLsp {
             None => return Ok(None),
         };
 
-        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, 5);
+        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, None, 5);
 
         let callers: Vec<FunctionImpactCaller> = flow
             .paths
@@ -2028,7 +2028,7 @@ impl UnfaultLsp {
             None => return Ok(None),
         };
 
-        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, 5);
+        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, None, 5);
 
         let callers: Vec<FunctionImpactCaller> = flow
             .paths

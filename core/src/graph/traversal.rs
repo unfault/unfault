@@ -450,6 +450,10 @@ mod tests {
             is_handler: true,
             http_method: Some("POST".to_string()),
             http_path: Some("/login".to_string()),
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         let fn2 = graph.graph.add_node(GraphNode::Function {
@@ -460,6 +464,10 @@ mod tests {
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         let fn3 = graph.graph.add_node(GraphNode::Function {
@@ -470,6 +478,10 @@ mod tests {
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         // Contains edges

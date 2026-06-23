@@ -292,6 +292,7 @@ fn serialize_graph(graph: &CodeGraph) -> SerializableGraph {
                 file_id,
                 http_method,
                 http_path,
+                ..
             } => {
                 // Find the file path for this function
                 let file_path = file_id_to_path.get(file_id).cloned().unwrap_or_default();

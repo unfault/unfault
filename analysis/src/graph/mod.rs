@@ -940,6 +940,10 @@ fn add_function_nodes(
             is_handler: func.is_route_handler(),
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         // File contains function
@@ -1188,6 +1192,10 @@ fn add_flask_nodes(
             is_handler: true,
             http_method: Some(route.http_method.clone()),
             http_path: Some(route.path.clone()),
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
 
         cg.graph
@@ -1283,6 +1291,10 @@ mod tests {
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         };
         let debug_str = format!("{:?}", node);
         assert!(debug_str.contains("Function"));
@@ -1363,6 +1375,10 @@ mod tests {
             is_handler: true,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         };
         assert_eq!(func.display_name(), "Handler.process");
 
@@ -1406,6 +1422,10 @@ mod tests {
             is_handler: false,
             http_method: None,
             http_path: None,
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         };
         assert!(!func.is_file());
     }

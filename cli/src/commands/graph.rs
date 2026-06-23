@@ -842,8 +842,8 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
     };
 
     // Parse function argument (file:function)
-    let (_file_path, function_name) = match args.function.split_once(':') {
-        Some((file, func)) => (file.to_string(), func.to_string()),
+    let (file_hint, function_name) = match args.function.split_once(':') {
+        Some((file, func)) => (Some(file.to_string()), func.to_string()),
         None => {
             eprintln!(
                 "{} Function must be in format file:function (e.g., main.py:process_user)",
@@ -927,6 +927,7 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
     let flow = unfault_analysis::graph::traversal::extract_flow(
         &graph,
         &function_name,
+        file_hint.as_deref(),
         args.max_depth as usize,
     );
     crate::session::query_cache::set_function_impact(
@@ -1005,6 +1006,9 @@ pub struct CallersArgs {
     pub verbose: bool,
     /// Print raw graph diagnostics for the target node (edges, duplicates, etc.)
     pub debug: bool,
+    /// Exclude wiring/bootstrap callers (blueprint registration, app factories,
+    /// __init__.py entry-points) from the output.
+    pub exclude_wiring: bool,
 }
 
 /// Execute the graph callers command
@@ -1051,7 +1055,7 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
                 &commit_sha[..8.min(commit_sha.len())]
             );
         }
-        return render_callers_output(ctx, &function_name, None, args.json);
+        return render_callers_output(ctx, &function_name, None, args.json, args.exclude_wiring);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -1208,7 +1212,7 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         );
     }
 
-    render_callers_output(ctx, &function_name, Some(&graph), args.json)
+    render_callers_output(ctx, &function_name, Some(&graph), args.json, args.exclude_wiring)
 }
 
 // =============================================================================
@@ -1458,11 +1462,19 @@ fn render_handlers_output(
 /// since we don't have the graph resident. The cache only hits when callers
 /// were found, so the "no results" suggestion path is never reached on a hit.
 fn render_callers_output(
-    ctx: unfault_core::types::graph_query::CallersContext,
+    mut ctx: unfault_core::types::graph_query::CallersContext,
     function_name: &str,
     graph: Option<&unfault_analysis::graph::CodeGraph>,
     json: bool,
+    exclude_wiring: bool,
 ) -> Result<i32> {
+    use unfault_core::types::graph_query::CallerKind;
+
+    // Apply wiring filter before JSON serialisation so the JSON is also clean.
+    if exclude_wiring {
+        ctx.callers.retain(|c| c.kind == CallerKind::BusinessLogic);
+    }
+
     if json {
         println!("{}", serde_json::to_string_pretty(&ctx)?);
         return Ok(EXIT_SUCCESS);
@@ -1579,7 +1591,12 @@ fn render_callers_output(
         function_name.bright_white().bold()
     );
     if let Some(ref f) = ctx.target_file {
-        println!("  {}", f.dimmed());
+        let loc = match (ctx.target_line, ctx.target_column) {
+            (Some(l), Some(c)) => format!("{}:{}:{}", f, l, c),
+            (Some(l), None) => format!("{}:{}", f, l),
+            _ => f.clone(),
+        };
+        println!("  {}", loc.dimmed());
     }
     println!();
 
@@ -1696,6 +1713,34 @@ fn render_callers_output(
             ctx.target_file.as_deref(),
             "  ",
         );
+    }
+
+    // ── Siblings ──────────────────────────────────────────────────────────────
+    if !ctx.siblings.is_empty() {
+        println!("  {} Siblings in same file:", "ℹ".cyan().dimmed());
+        for sib in &ctx.siblings {
+            if let (Some(m), Some(p)) = (&sib.http_method, &sib.http_path) {
+                let method_colored = match m.as_str() {
+                    "GET" => m.bright_green(),
+                    "POST" => m.bright_yellow(),
+                    "PUT" | "PATCH" => m.bright_cyan(),
+                    "DELETE" => m.bright_red(),
+                    _ => m.normal(),
+                };
+                println!("    {} {} ({})", method_colored, p, sib.name.dimmed());
+            } else {
+                println!("    {}", sib.name.dimmed());
+            }
+        }
+        println!();
+    }
+
+    // ── Caveats ───────────────────────────────────────────────────────────────
+    if !ctx.caveats.is_empty() {
+        for caveat in &ctx.caveats {
+            println!("  {} {}", "⚠".yellow(), caveat.dimmed());
+        }
+        println!();
     }
 
     println!();

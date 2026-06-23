@@ -217,6 +217,10 @@ mod tests {
             is_handler: true,
             http_method: Some("POST".to_string()),
             http_path: Some("/checkout".to_string()),
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
         });
         graph
             .graph
