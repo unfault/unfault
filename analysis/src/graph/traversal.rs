@@ -7,9 +7,10 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::graph_query::{
-    CallerInfo, CallerKind, CallersContext, EnumerateContext, FlowContext, FlowPathNode,
-    FunctionSuggestion, GraphContext, HandlerInfo, HandlersContext, PathContext, RouteInfo,
-    SiblingInfo, WorkspaceContext,
+    BriefContext, BriefRoute, BriefSize, CallerInfo, CallerKind, CallersContext, EnumerateContext,
+    EntryPoint, EntryPointReason, ExportedSymbol, FlowContext, FlowPathNode, FunctionSuggestion,
+    GraphContext, HandlerInfo, HandlersContext, IncomingImport, PathContext, RouteInfo, SiblingInfo,
+    WorkspaceContext,
 };
 
 pub fn extract_flow(
@@ -1145,4 +1146,312 @@ fn path_matches_pattern(path: &str, pattern: &str) -> bool {
         }
     }
     true
+}
+
+/// Produce a structural brief for all code within a subtree path prefix.
+///
+/// `subtree` is matched as a path prefix/substring against every file node's
+/// path (same semantics as `routes --file`).  A file is considered "inside"
+/// when its path contains `subtree` as a substring, so both relative prefixes
+/// (`apps/payroll_tool`) and bare component names (`payroll_tool`) work.
+pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
+    // ── Classify every file node as inside / outside ─────────────────────────
+    // inside_files: set of NodeIndex for File nodes inside the subtree.
+    // inside_paths: set of path strings inside the subtree (for quick membership).
+    let mut inside_file_ids: HashSet<crate::parse::ast::FileId> = HashSet::new();
+    let mut inside_paths: HashSet<String> = HashSet::new();
+
+    for idx in graph.graph.node_indices() {
+        if let GraphNode::File { file_id, path, .. } = &graph.graph[idx] {
+            if path.contains(subtree) {
+                inside_file_ids.insert(*file_id);
+                inside_paths.insert(path.clone());
+            }
+        }
+    }
+
+    if inside_file_ids.is_empty() {
+        return BriefContext {
+            path: subtree.to_string(),
+            ..Default::default()
+        };
+    }
+
+    // ── Size ─────────────────────────────────────────────────────────────────
+    let mut size = BriefSize { files: 0, functions: 0 };
+    for idx in graph.graph.node_indices() {
+        match &graph.graph[idx] {
+            GraphNode::File { file_id, .. } if inside_file_ids.contains(file_id) => {
+                size.files += 1;
+            }
+            GraphNode::Function { file_id, .. } if inside_file_ids.contains(file_id) => {
+                size.functions += 1;
+            }
+            _ => {}
+        }
+    }
+
+    // ── Routes ───────────────────────────────────────────────────────────────
+    let mut routes: Vec<BriefRoute> = Vec::new();
+    for idx in graph.graph.node_indices() {
+        if let GraphNode::Function {
+            file_id,
+            name,
+            is_handler: true,
+            http_method: Some(method),
+            http_path: Some(path),
+            decorators,
+            is_writer,
+            line,
+            request_schema,
+            response_schema,
+            ..
+        } = &graph.graph[idx]
+        {
+            if inside_file_ids.contains(file_id) {
+                let file = node_file_path(graph, &graph.graph[idx]).unwrap_or_default();
+                routes.push(BriefRoute {
+                    method: method.clone(),
+                    path: path.clone(),
+                    handler: name.clone(),
+                    file,
+                    line: *line,
+                    decorators: decorators.clone(),
+                    is_writer: *is_writer,
+                    request_schema: request_schema.clone(),
+                    response_schema: response_schema.clone(),
+                });
+            }
+        }
+    }
+    routes.sort_by(|a, b| a.file.cmp(&b.file).then(a.path.cmp(&b.path)));
+
+    // ── Outgoing exports: symbols defined inside, imported from outside ───────
+    // Walk every ImportsFrom / Imports edge.  Source = importing file (outside),
+    // target = imported file (inside) → the items are exported symbols.
+    //
+    // key: (defined_in_path, symbol_name) → Vec<importer_path>
+    let mut exports_map: HashMap<(String, String), Vec<String>> = HashMap::new();
+
+    for edge_idx in graph.graph.edge_indices() {
+        let (source_idx, target_idx) = graph.graph.edge_endpoints(edge_idx).unwrap();
+        let edge = graph.graph.edge_weight(edge_idx).unwrap();
+
+        let source_path = match &graph.graph[source_idx] {
+            GraphNode::File { path, .. } => path.clone(),
+            _ => continue,
+        };
+        let target_path = match &graph.graph[target_idx] {
+            GraphNode::File { path, .. } => path.clone(),
+            _ => continue,
+        };
+
+        let source_inside = inside_paths.contains(&source_path);
+        let target_inside = inside_paths.contains(&target_path);
+
+        match edge {
+            GraphEdgeKind::ImportsFrom { items } if !source_inside && target_inside => {
+                // Outside code imports specific symbols from inside.
+                for sym in items {
+                    exports_map
+                        .entry((target_path.clone(), sym.clone()))
+                        .or_default()
+                        .push(source_path.clone());
+                }
+            }
+            GraphEdgeKind::Imports if !source_inside && target_inside => {
+                // Outside code does a whole-module import of an inside file.
+                // Treat the file itself as an exported symbol named "*".
+                exports_map
+                    .entry((target_path.clone(), "*".to_string()))
+                    .or_default()
+                    .push(source_path.clone());
+            }
+            _ => {}
+        }
+    }
+
+    let mut outgoing_exports: Vec<ExportedSymbol> = exports_map
+        .into_iter()
+        .map(|((defined_in, name), mut imported_by)| {
+            imported_by.sort();
+            imported_by.dedup();
+            ExportedSymbol { name, defined_in, imported_by }
+        })
+        .collect();
+    outgoing_exports.sort_by(|a, b| a.defined_in.cmp(&b.defined_in).then(a.name.cmp(&b.name)));
+
+    // ── Incoming imports: outside deps imported into the subtree ─────────────
+    // Walk edges where source is inside, target is outside (or ExternalModule).
+    // key: source_display (file path or module name) → (symbols, importers)
+    let mut imports_map: HashMap<String, (Vec<String>, Vec<String>)> = HashMap::new();
+
+    for edge_idx in graph.graph.edge_indices() {
+        let (source_idx, target_idx) = graph.graph.edge_endpoints(edge_idx).unwrap();
+        let edge = graph.graph.edge_weight(edge_idx).unwrap();
+
+        // Source must be a file inside the subtree.
+        let source_path = match &graph.graph[source_idx] {
+            GraphNode::File { path, .. } => path.clone(),
+            _ => continue,
+        };
+        if !inside_paths.contains(&source_path) {
+            continue;
+        }
+
+        match edge {
+            GraphEdgeKind::ImportsFrom { items } => {
+                let dep_name = match &graph.graph[target_idx] {
+                    GraphNode::File { path, .. } if !inside_paths.contains(path) => path.clone(),
+                    GraphNode::ExternalModule { name, .. } => name.clone(),
+                    _ => continue,
+                };
+                let entry = imports_map.entry(dep_name).or_default();
+                for sym in items {
+                    if !entry.0.contains(sym) {
+                        entry.0.push(sym.clone());
+                    }
+                }
+                if !entry.1.contains(&source_path) {
+                    entry.1.push(source_path.clone());
+                }
+            }
+            GraphEdgeKind::Imports => {
+                let dep_name = match &graph.graph[target_idx] {
+                    GraphNode::File { path, .. } if !inside_paths.contains(path) => path.clone(),
+                    GraphNode::ExternalModule { name, .. } => name.clone(),
+                    _ => continue,
+                };
+                let entry = imports_map.entry(dep_name).or_default();
+                if !entry.1.contains(&source_path) {
+                    entry.1.push(source_path.clone());
+                }
+            }
+            GraphEdgeKind::UsesLibrary => {
+                let lib_name = match &graph.graph[target_idx] {
+                    GraphNode::ExternalModule { name, .. } => name.clone(),
+                    _ => continue,
+                };
+                let entry = imports_map.entry(lib_name).or_default();
+                if !entry.1.contains(&source_path) {
+                    entry.1.push(source_path.clone());
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut incoming_imports: Vec<IncomingImport> = imports_map
+        .into_iter()
+        .map(|(source, (mut symbols, mut imported_by))| {
+            symbols.sort();
+            symbols.dedup();
+            imported_by.sort();
+            imported_by.dedup();
+            IncomingImport { source, symbols, imported_by }
+        })
+        .collect();
+    incoming_imports.sort_by(|a, b| a.source.cmp(&b.source));
+
+    // ── Internal entry points ─────────────────────────────────────────────────
+    // A function inside the subtree is an entry point when:
+    //   (a) it is an HTTP handler (is_handler: true), OR
+    //   (b) it has inbound Calls edges exclusively from outside the subtree, OR
+    //   (c) it has no inbound Calls edges at all but is exported (appears in outgoing_exports).
+    let exported_names: HashSet<String> = outgoing_exports
+        .iter()
+        .map(|e| e.name.clone())
+        .collect();
+
+    let mut entry_points: Vec<EntryPoint> = Vec::new();
+
+    for idx in graph.graph.node_indices() {
+        let node = &graph.graph[idx];
+        let (file_id, name, is_handler, http_method, http_path, line) = match node {
+            GraphNode::Function {
+                file_id,
+                name,
+                is_handler,
+                http_method,
+                http_path,
+                line,
+                ..
+            } => (file_id, name, *is_handler, http_method, http_path, line),
+            _ => continue,
+        };
+
+        if !inside_file_ids.contains(file_id) {
+            continue;
+        }
+
+        let file = node_file_path(graph, node).unwrap_or_default();
+
+        // (a) HTTP handler — already in routes, but also surface as entry point.
+        if is_handler {
+            entry_points.push(EntryPoint {
+                name: name.clone(),
+                file,
+                line: *line,
+                reason: EntryPointReason::HttpHandler,
+                http_method: http_method.clone(),
+                http_path: http_path.clone(),
+            });
+            continue;
+        }
+
+        // Examine inbound Calls edges.
+        let mut inside_callers = 0usize;
+        let mut outside_callers = 0usize;
+        for edge in graph.graph.edges_directed(idx, Direction::Incoming) {
+            if !matches!(edge.weight(), GraphEdgeKind::Calls) {
+                continue;
+            }
+            let caller_node = &graph.graph[edge.source()];
+            let caller_inside = caller_node
+                .file_id()
+                .map(|fid| inside_file_ids.contains(&fid))
+                .unwrap_or(false);
+            if caller_inside {
+                inside_callers += 1;
+            } else {
+                outside_callers += 1;
+            }
+        }
+
+        // (b) Has outside callers and no inside callers.
+        if outside_callers > 0 && inside_callers == 0 {
+            entry_points.push(EntryPoint {
+                name: name.clone(),
+                file,
+                line: *line,
+                reason: EntryPointReason::ExternalCallersOnly,
+                http_method: None,
+                http_path: None,
+            });
+            continue;
+        }
+
+        // (c) No callers at all but is exported.
+        if inside_callers == 0 && outside_callers == 0 && exported_names.contains(name.as_str()) {
+            entry_points.push(EntryPoint {
+                name: name.clone(),
+                file,
+                line: *line,
+                reason: EntryPointReason::ExportedUnused,
+                http_method: None,
+                http_path: None,
+            });
+        }
+    }
+
+    entry_points.sort_by(|a, b| a.file.cmp(&b.file).then(a.name.cmp(&b.name)));
+
+    BriefContext {
+        path: subtree.to_string(),
+        routes,
+        outgoing_exports,
+        incoming_imports,
+        internal_entry_points: entry_points,
+        size,
+    }
 }

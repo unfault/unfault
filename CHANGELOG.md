@@ -10,6 +10,40 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.12] — 2026-06-23
+
+### Added
+
+- **`unfault graph brief <path>`** — structural brief for any subtree or component
+
+  Pass any path prefix or bare component name; all files whose path contains
+  the string are included.  Returns five sections, all derived from the static
+  graph with no convention knowledge:
+
+  - **routes** — HTTP handlers inside the subtree, with the same decorator
+    badges, schema, and line-number annotations as `graph routes`.
+  - **outgoing_exports** — symbols defined inside the subtree that are imported
+    by code outside it (the de-facto public API regardless of folder layout).
+    Uses `ImportsFrom { items }` edges; whole-module imports are recorded as
+    `*`.  Grouped by defining file with a list of importers.
+  - **incoming_imports** — external packages and internal files imported into
+    the subtree.  Covers `ImportsFrom`, `Imports`, and `UsesLibrary` edges.
+    Named symbols are listed when available.
+  - **internal_entry_points** — functions inside the subtree that are called
+    exclusively from outside (`external_callers_only`), exported but never
+    called (`exported_unused`), or are HTTP handlers (`http_handler`).
+    Naturally surfaces the boundary without any folder conventions.
+  - **size** — file and function counts for the subtree.
+
+  Result is query-cached keyed on `(path, HEAD SHA)`.
+  `--json` emits the full `BriefContext` struct.
+
+  New types in `core/src/types/graph_query.rs`:
+  `BriefContext`, `BriefRoute`, `ExportedSymbol`, `IncomingImport`,
+  `EntryPoint`, `EntryPointReason`, `BriefSize`.
+
+  New traversal function: `get_brief()` in `analysis/src/graph/traversal.rs`.
+
 ## [1.0.11] — 2026-06-23
 
 ### Added

@@ -223,6 +223,109 @@ pub struct HandlersContext {
     pub handlers: Vec<HandlerInfo>,
 }
 
+/// A route handler inside a subtree, as returned by `graph brief`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BriefRoute {
+    pub method: String,
+    pub path: String,
+    pub handler: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decorators: Vec<DecoratorSemantic>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_writer: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_schema: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<String>,
+}
+
+/// A symbol exported from the subtree (imported by code outside).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExportedSymbol {
+    /// Symbol name, e.g. `"process_order"` or `"OrderSchema"`.
+    pub name: String,
+    /// File inside the subtree that defines this symbol.
+    pub defined_in: String,
+    /// Files outside the subtree that import this symbol.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imported_by: Vec<String>,
+}
+
+/// A dependency imported into the subtree from outside.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IncomingImport {
+    /// The module or file being imported (external package name or internal file path).
+    pub source: String,
+    /// Specific symbols imported, if known (`from x import a, b`).
+    /// Empty for whole-module imports (`import x`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub symbols: Vec<String>,
+    /// Files inside the subtree that import from this source.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub imported_by: Vec<String>,
+}
+
+/// A function inside the subtree that is only called from outside (or is an HTTP
+/// handler / CLI entry point) — the de-facto public boundary regardless of layout.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntryPoint {
+    pub name: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Why this was classified as an entry point.
+    pub reason: EntryPointReason,
+    /// HTTP method if this is a route handler.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_method: Option<String>,
+    /// HTTP path if this is a route handler.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_path: Option<String>,
+}
+
+/// Reason a function was classified as an internal entry point.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EntryPointReason {
+    /// HTTP route handler.
+    HttpHandler,
+    /// Called from outside the subtree but never called from inside.
+    ExternalCallersOnly,
+    /// No callers at all but exported (imported by outside code).
+    ExportedUnused,
+}
+
+/// Size metrics for the queried subtree.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BriefSize {
+    pub files: usize,
+    pub functions: usize,
+}
+
+/// Result of a `graph brief <path>` query.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct BriefContext {
+    /// The subtree path that was queried.
+    pub path: String,
+    /// HTTP route handlers whose source file lives inside the subtree.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<BriefRoute>,
+    /// Symbols defined inside the subtree imported by code outside it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub outgoing_exports: Vec<ExportedSymbol>,
+    /// Dependencies imported into the subtree from outside.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub incoming_imports: Vec<IncomingImport>,
+    /// Functions inside the subtree that are entry points from outside.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub internal_entry_points: Vec<EntryPoint>,
+    /// File and function counts for the subtree.
+    pub size: BriefSize,
+}
+
 /// Workspace structural information.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct WorkspaceContext {

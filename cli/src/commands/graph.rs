@@ -1312,6 +1312,192 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
 }
 
 // =============================================================================
+// Brief
+// =============================================================================
+
+/// Arguments for `graph brief <path>`.
+#[derive(Debug)]
+pub struct BriefArgs {
+    pub workspace_path: Option<String>,
+    /// Subtree path prefix / substring to analyse (e.g. `apps/payroll_tool`).
+    pub path: String,
+    pub json: bool,
+    pub verbose: bool,
+}
+
+/// Execute `unfault graph brief <path>`.
+pub async fn execute_brief(args: BriefArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+
+    if !args.verbose {
+        if let Some(ctx) = crate::session::query_cache::get::<
+            unfault_core::types::graph_query::BriefContext,
+        >(&workspace_path, "brief", &args.path, &commit_sha)
+        {
+            return render_brief_output(ctx, args.json);
+        }
+    }
+
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    let ctx = unfault_analysis::graph::traversal::get_brief(&graph, &args.path);
+
+    crate::session::query_cache::set::<unfault_core::types::graph_query::BriefContext>(
+        &workspace_path,
+        "brief",
+        &args.path,
+        &commit_sha,
+        &ctx,
+    );
+
+    render_brief_output(ctx, args.json)
+}
+
+fn render_brief_output(
+    ctx: unfault_core::types::graph_query::BriefContext,
+    json: bool,
+) -> Result<i32> {
+    use unfault_core::types::graph_query::EntryPointReason;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&ctx)?);
+        return Ok(EXIT_SUCCESS);
+    }
+
+    if ctx.size.files == 0 {
+        println!(
+            "\n  {} No files found matching '{}'.\n",
+            "ℹ".cyan(),
+            ctx.path
+        );
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!(
+        "\n{} Brief: {}\n",
+        "→".cyan(),
+        ctx.path.bright_white().bold()
+    );
+    println!(
+        "  {} files  {} functions\n",
+        ctx.size.files.to_string().yellow(),
+        ctx.size.functions.to_string().yellow(),
+    );
+
+    // ── Routes ────────────────────────────────────────────────────────────────
+    if !ctx.routes.is_empty() {
+        println!("{}", "  Routes".bold());
+        let mut current_file = String::new();
+        for r in &ctx.routes {
+            if r.file != current_file {
+                current_file = r.file.clone();
+                println!("    {}", current_file.bright_blue());
+            }
+            let method_colored = match r.method.as_str() {
+                "GET" => r.method.bright_green(),
+                "POST" => r.method.bright_yellow(),
+                "PUT" | "PATCH" => r.method.bright_cyan(),
+                "DELETE" => r.method.bright_red(),
+                _ => r.method.normal(),
+            };
+            let handler_loc = match r.line {
+                Some(l) => format!("({}:{})", r.handler, l),
+                None => format!("({})", r.handler),
+            };
+            println!("      {:<8} {}  {}", method_colored, r.path, handler_loc.dimmed());
+            render_route_annotations(
+                &r.decorators,
+                r.is_writer,
+                r.request_schema.as_deref(),
+                r.response_schema.as_deref(),
+            );
+        }
+        println!();
+    }
+
+    // ── Internal entry points (non-HTTP) ──────────────────────────────────────
+    let non_http_entries: Vec<_> = ctx
+        .internal_entry_points
+        .iter()
+        .filter(|e| !matches!(e.reason, EntryPointReason::HttpHandler))
+        .collect();
+
+    if !non_http_entries.is_empty() {
+        println!("{}", "  Internal entry points".bold());
+        for ep in &non_http_entries {
+            let reason_label = match ep.reason {
+                EntryPointReason::ExternalCallersOnly => "external callers only",
+                EntryPointReason::ExportedUnused => "exported, no callers",
+                EntryPointReason::HttpHandler => unreachable!(),
+            };
+            let loc = match ep.line {
+                Some(l) => format!("{}:{}", ep.file, l),
+                None => ep.file.clone(),
+            };
+            println!(
+                "    {}  {}  {}",
+                ep.name.bright_white(),
+                loc.dimmed(),
+                format!("[{}]", reason_label).dimmed()
+            );
+        }
+        println!();
+    }
+
+    // ── Outgoing exports ──────────────────────────────────────────────────────
+    if !ctx.outgoing_exports.is_empty() {
+        println!("{}", "  Outgoing exports  (used outside this subtree)".bold());
+        let mut current_file = String::new();
+        for ex in &ctx.outgoing_exports {
+            if ex.defined_in != current_file {
+                current_file = ex.defined_in.clone();
+                println!("    {}", current_file.bright_blue());
+            }
+            let importers = if ex.imported_by.len() == 1 {
+                ex.imported_by[0].clone()
+            } else {
+                format!("{} files", ex.imported_by.len())
+            };
+            println!(
+                "      {}  {}",
+                ex.name.bright_white(),
+                format!("← {}", importers).dimmed()
+            );
+        }
+        println!();
+    }
+
+    // ── Incoming imports ──────────────────────────────────────────────────────
+    if !ctx.incoming_imports.is_empty() {
+        println!("{}", "  Incoming imports  (dependencies from outside)".bold());
+        for imp in &ctx.incoming_imports {
+            let sym_part = if imp.symbols.is_empty() {
+                String::new()
+            } else if imp.symbols.len() <= 4 {
+                format!("  {}", imp.symbols.join(", ").dimmed())
+            } else {
+                format!("  {} symbols", imp.symbols.len()).dimmed().to_string()
+            };
+            println!("    {}{}", imp.source.bright_white(), sym_part);
+        }
+        println!();
+    }
+
+    Ok(EXIT_SUCCESS)
+}
+
+// =============================================================================
 // Path
 // =============================================================================
 

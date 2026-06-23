@@ -435,6 +435,35 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Structural brief for a subtree — routes, exports, imports, entry points, size.
+    ///
+    /// Pass any path prefix or component name. All files whose path contains
+    /// the given string are included in the analysis.
+    ///
+    /// Returns:
+    ///   - routes: HTTP handlers inside the subtree
+    ///   - outgoing_exports: symbols defined inside and imported from outside
+    ///   - incoming_imports: external dependencies used by the subtree
+    ///   - internal_entry_points: functions called only from outside (or HTTP/CLI)
+    ///   - size: file and function counts
+    ///
+    /// Examples:
+    ///   unfault graph brief apps/payroll_tool
+    ///   unfault graph brief payroll_tool --json
+    Brief {
+        /// Subtree path prefix or component name (substring match against file paths)
+        #[arg(value_name = "PATH")]
+        path: String,
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
     /// Clear all caches and rebuild the graph from scratch
     ///
     /// Clears the query cache (cached BFS results) and the graph cache, then
@@ -1088,6 +1117,26 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Graph handlers error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::Brief {
+            path,
+            workspace,
+            json,
+            verbose,
+        } => {
+            let args = commands::graph::BriefArgs {
+                workspace_path: workspace,
+                path,
+                json,
+                verbose,
+            };
+            match commands::graph::execute_brief(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph brief error: {}", e);
                     EXIT_ERROR
                 }
             }
