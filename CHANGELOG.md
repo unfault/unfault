@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.16] — 2026-06-23
+
+### Fixed
+
+- **Graph cache now saved after every build, not only on all-cache-hit runs**
+  `build_ir_cached` previously only wrote `graph.msgpack` when every file was
+  a semantics cache hit (`all_cache_hits`). Any run with even one changed file
+  skipped the save, causing the expensive petgraph rebuild (~1–3s) on every
+  subsequent run until a fully clean warm run occurred. The graph cache key is
+  the aggregate xxh3 hash of all file content hashes, which already guarantees
+  correctness — a stale cache is rejected by hash mismatch. Removed the
+  `all_cache_hits` gate; the graph cache is now saved unconditionally after
+  every build, so the second run is fast regardless of what changed in the first.
+
 ## [1.0.15] — 2026-06-23
 
 ### Fixed

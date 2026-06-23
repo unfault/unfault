@@ -662,11 +662,11 @@ pub fn build_ir_cached(
         build_code_graph(&semantics_entries)
     };
 
-    // Save graph cache when all entries were cache hits (graph is stable)
-    // and the cache file doesn't already match.
-    if all_cache_hits {
-        let _ = save_graph_cache(&graph_cache_path, aggregate_hash, &code_graph, verbose);
-    }
+    // Always save the graph cache after building so the next run can skip
+    // petgraph reconstruction even if this run had semantics cache misses.
+    // The aggregate hash guarantees correctness: if any file content changed
+    // between runs the hash won't match and the cache will be rebuilt.
+    let _ = save_graph_cache(&graph_cache_path, aggregate_hash, &code_graph, verbose);
 
     let graph_ms = graph_start.elapsed().as_millis();
 
