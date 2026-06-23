@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.17] — 2026-06-23
+
+### Fixed
+
+- **Semantics cache version bump to 5** — forces a full reparse of all files on
+  next run, flushing stale cached import names that were parsed before the
+  v1.0.15 `# noqa` comment-stripping fix. Files that had `# noqa`-commented
+  multi-line imports would continue to produce corrupt `ImportsFrom` symbol
+  names from the on-disk cache even after the parser was fixed, because the
+  cache is keyed on file content hash and the file content had not changed.
+
 ## [1.0.16] — 2026-06-23
 
 ### Fixed
