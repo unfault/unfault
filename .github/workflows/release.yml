@@ -152,6 +152,12 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      - name: Delete existing release for this tag (if any)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release delete "${{ github.ref_name }}" --repo "${{ github.repository }}" --yes || true
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
