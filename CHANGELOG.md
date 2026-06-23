@@ -10,6 +10,19 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.14] — 2026-06-23
+
+### Fixed
+
+- **Flask-smorest schema extraction: `# noqa` comments in decorator args**
+  `extract_first_identifier_arg` and `extract_second_identifier_arg` were
+  returning raw node text that could include a leading `# noqa …` comment
+  when tree-sitter's byte range for the identifier node spanned the comment
+  (e.g. `"# noqa ALN045\n     SomeSchema"`).
+  Added `clean_schema_name()` which strips comment lines and leading whitespace
+  before returning the identifier, and validates the result looks like a valid
+  Python name (`[a-zA-Z0-9_.]+`). Both extractors now route through it.
+
 ## [1.0.13] — 2026-06-23
 
 ### Fixed

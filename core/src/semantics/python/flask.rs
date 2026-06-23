@@ -612,7 +612,10 @@ fn extract_first_identifier_arg(file: &ParsedFile, args: Node) -> Option<String>
     for child in args.children(&mut cursor) {
         match child.kind() {
             "identifier" | "attribute" => {
-                return child.utf8_text(source_bytes).ok().map(|s| s.to_string());
+                return child
+                    .utf8_text(source_bytes)
+                    .ok()
+                    .and_then(clean_schema_name);
             }
             // Skip keyword args — we only want positional.
             "keyword_argument" => break,
@@ -636,7 +639,10 @@ fn extract_second_identifier_arg(file: &ParsedFile, args: Node) -> Option<String
             "identifier" | "attribute" => {
                 positional_count += 1;
                 if positional_count >= 2 {
-                    return child.utf8_text(source_bytes).ok().map(|s| s.to_string());
+                    return child
+                        .utf8_text(source_bytes)
+                        .ok()
+                        .and_then(clean_schema_name);
                 }
             }
             "keyword_argument" => break,
@@ -644,6 +650,31 @@ fn extract_second_identifier_arg(file: &ParsedFile, args: Node) -> Option<String
         }
     }
     None
+}
+
+/// Strip leading comments and whitespace from a raw node text to extract a
+/// clean Python identifier or dotted attribute.
+///
+/// When tree-sitter includes a `# noqa …` comment in the node's byte range
+/// (can happen in error-recovery or multi-line argument lists), the raw text
+/// looks like `"# noqa ALN045\n    SomeSchema"`.  We skip all lines that
+/// start with `#` and return the first remaining non-empty token.
+fn clean_schema_name(raw: &str) -> Option<String> {
+    let candidate = raw
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty() && !l.starts_with('#'))?;
+    // Take only the first whitespace-delimited token in case of trailing garbage.
+    let token = candidate.split_whitespace().next()?;
+    // Must look like a Python identifier (letters/digits/underscores/dots, no spaces).
+    if token
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+    {
+        Some(token.to_string())
+    } else {
+        None
+    }
 }
 
 fn collect_flask_error_handlers(file: &ParsedFile, node: Node, out: &mut Vec<FlaskErrorHandler>) {
