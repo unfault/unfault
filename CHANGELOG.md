@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.15] — 2026-06-23
+
+### Fixed
+
+- **Import name parsing: inline `# noqa` comments on multi-line imports**
+  `build_import` in `core/src/semantics/python/model.rs` splits `from x import
+  (a, b,  # noqa ALN045\n    c)` on commas.  The element after the comment
+  comma was `"  # noqa ALN045\n    c"`, which trimmed to `"# noqa ALN045\n    c"`.
+  This leaked into `ImportsFrom { items }` edges and from there into
+  `outgoing_exports[].name` in `graph brief` output.
+
+  The fix strips everything from `#` onwards on each line of each comma-delimited
+  token before trimming, so `"  # noqa ALN045\n    function_name"` → `"function_name"`.
+
+  The v1.0.14 fix to `clean_schema_name` in `flask.rs` was a symptom treatment;
+  this is the root cause fix in the import parser.
+
 ## [1.0.14] — 2026-06-23
 
 ### Fixed

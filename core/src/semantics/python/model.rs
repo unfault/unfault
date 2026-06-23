@@ -1287,7 +1287,22 @@ fn build_import(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<PyImpor
             names = names_part
                 .split(',')
                 .map(|s| {
-                    s.trim()
+                    // Strip inline comments (e.g. "foo  # noqa ALN045") and
+                    // any surrounding whitespace or stray parens.
+                    let stripped = s
+                        .lines()
+                        .map(|line| {
+                            // Remove everything from '#' onwards on each line.
+                            let line = if let Some(pos) = line.find('#') {
+                                &line[..pos]
+                            } else {
+                                line
+                            };
+                            line.trim()
+                        })
+                        .find(|l| !l.is_empty())
+                        .unwrap_or("");
+                    stripped
                         .trim_matches(|c: char| c == '(' || c == ')')
                         .trim()
                         .to_string()
