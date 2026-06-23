@@ -697,6 +697,21 @@ pub struct RouteEntry {
     pub path: String,
     pub handler: String,
     pub file: String,
+    /// 1-based line number of the handler definition.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// Semantic roles of the decorators on this handler (auth, rate_limit, …).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub decorators: Vec<unfault_core::graph::DecoratorSemantic>,
+    /// True if the handler contains ORM write operations.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_writer: bool,
+    /// Request body / query schema from `@blp.arguments(SchemaX)` or `@use_args`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_schema: Option<String>,
+    /// Response schema from `@blp.response(200, SchemaY)` or `@marshal_with`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<String>,
 }
 
 pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
@@ -750,6 +765,11 @@ pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
                 http_method: Some(method),
                 http_path: Some(path),
                 name,
+                decorators,
+                is_writer,
+                line,
+                request_schema,
+                response_schema,
                 ..
             } => {
                 let file = unfault_analysis::graph::traversal::node_file_path_pub(&graph, node)
@@ -759,6 +779,11 @@ pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
                     path: path.clone(),
                     handler: name.clone(),
                     file,
+                    line: *line,
+                    decorators: decorators.clone(),
+                    is_writer: *is_writer,
+                    request_schema: request_schema.clone(),
+                    response_schema: response_schema.clone(),
                 });
             }
             // FastApiRoute nodes carry method+path but not the handler name —
@@ -820,16 +845,87 @@ fn render_routes_output(routes: Vec<RouteEntry>, json: bool) -> Result<i32> {
                 current_file = route.file.clone();
                 println!("  {}", current_file.bright_blue());
             }
+            let method_colored = match route.method.as_str() {
+                "GET" => route.method.bright_green(),
+                "POST" => route.method.bright_yellow(),
+                "PUT" | "PATCH" => route.method.bright_cyan(),
+                "DELETE" => route.method.bright_red(),
+                _ => route.method.normal(),
+            };
+            let handler_loc = match route.line {
+                Some(l) => format!("({}:{})", route.handler, l),
+                None => format!("({})", route.handler),
+            };
             println!(
                 "    {:<8} {}  {}",
-                route.method.green(),
+                method_colored,
                 route.path,
-                format!("({})", route.handler).dimmed()
+                handler_loc.dimmed()
+            );
+            render_route_annotations(
+                &route.decorators,
+                route.is_writer,
+                route.request_schema.as_deref(),
+                route.response_schema.as_deref(),
             );
         }
         println!();
     }
     Ok(EXIT_SUCCESS)
+}
+
+/// Print decorator badges, writer flag, and schema info under a route line.
+fn render_route_annotations(
+    decorators: &[unfault_core::graph::DecoratorSemantic],
+    is_writer: bool,
+    request_schema: Option<&str>,
+    response_schema: Option<&str>,
+) {
+    use unfault_core::graph::DecoratorSemantic;
+
+    let has_badges = !decorators.is_empty() || is_writer;
+    let has_schemas = request_schema.is_some() || response_schema.is_some();
+
+    if !has_badges && !has_schemas {
+        return;
+    }
+
+    if has_badges {
+        let mut badges: Vec<colored::ColoredString> = decorators
+            .iter()
+            .map(|d| match d {
+                DecoratorSemantic::Auth { .. } => "auth".bright_red(),
+                DecoratorSemantic::Permission { .. } => "permission".red(),
+                DecoratorSemantic::RateLimit { .. } => "rate-limit".yellow(),
+                DecoratorSemantic::Cache { .. } => "cache".cyan(),
+                DecoratorSemantic::Retry { .. } => "retry".yellow(),
+                DecoratorSemantic::Tracing { .. } => "tracing".blue(),
+                DecoratorSemantic::Validation { .. } => "validation".cyan(),
+                DecoratorSemantic::Transaction { .. } => "transaction".magenta(),
+                DecoratorSemantic::FeatureFlag { .. } => "feature-flag".bright_blue(),
+                DecoratorSemantic::Deprecated { .. } => "deprecated".bright_red(),
+                DecoratorSemantic::Other { name, .. } => name.as_str().dimmed(),
+            })
+            .collect();
+
+        if is_writer {
+            badges.push("writes-db".bright_magenta());
+        }
+
+        let badge_line: Vec<String> = badges.iter().map(|b| format!("[{}]", b)).collect();
+        println!("             {}", badge_line.join(" "));
+    }
+
+    if has_schemas {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(req) = request_schema {
+            parts.push(format!("in:{}", req.cyan()));
+        }
+        if let Some(resp) = response_schema {
+            parts.push(format!("out:{}", resp.cyan()));
+        }
+        println!("             {}", parts.join("  ").dimmed());
+    }
 }
 
 // =============================================================================
@@ -1439,17 +1535,22 @@ fn render_handlers_output(
             "DELETE" => h.method.bright_red(),
             _ => h.method.normal(),
         };
-        let async_marker = if h.is_async {
-            " async".dimmed().to_string()
-        } else {
-            String::new()
+        let async_marker = if h.is_async { " async" } else { "" };
+        let handler_loc = match h.line {
+            Some(l) => format!("({}:{}){}",  h.handler, l, async_marker),
+            None => format!("({}){}", h.handler, async_marker),
         };
         println!(
-            "    {:<8} {}  {}{}",
+            "    {:<8} {}  {}",
             method_colored,
             h.path,
-            format!("({})", h.handler).dimmed(),
-            async_marker
+            handler_loc.dimmed()
+        );
+        render_route_annotations(
+            &h.decorators,
+            h.is_writer,
+            h.request_schema.as_deref(),
+            h.response_schema.as_deref(),
         );
     }
     println!();

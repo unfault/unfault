@@ -12,34 +12,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.0.10] — 2026-06-23
 
-### Fixed
+### Added
 
-- **LSP: `unfault/analysisComplete` never sent** — the extension relied on this
-  notification to refresh the sidebar and CodeLens after every analysis pass.
-  `analyze_document` now sends `unfault/analysisComplete` with the real
-  `finding_count` once diagnostics are published (`did_open`, `did_save`).
-  `did_change` sends the notification with `finding_count: 0` to immediately
-  clear stale findings from the sidebar without re-running analysis against
-  unsaved on-disk content.
+- **Decorator badges and writer flag in `routes` / `handlers` human output**
+  Route and handler lines now show an annotation row with coloured badges for
+  every recognised decorator (`[auth]` `[permission]` `[rate-limit]` `[cache]`
+  `[retry]` `[tracing]` `[validation]` `[transaction]` `[feature-flag]`
+  `[deprecated]`) and `[writes-db]` when the handler contains ORM writes.
+  The row is omitted when there are no annotations — plain routes are unaffected.
+  `RouteEntry` and `HandlerInfo` now carry `decorators`, `is_writer`, and `line`
+  in JSON output as well.
 
-- **LSP: four commands returning `method_not_found`** — `getFileCentrality`,
-  `getFileDependencies`, `getHttpCallAtPosition`, and `generateFaultScenarios`
-  were registered in the extension but not handled by the server.  All four are
-  now declared in `execute_command_provider` and dispatched in
-  `execute_command`.  `getFileCentrality` and `getFileDependencies` reuse the
-  existing local-graph helpers.  `getHttpCallAtPosition` walks IR semantics for
-  the file and matches the cursor byte offset against each `HttpCallSite`
-  (Python, Go, Rust, TypeScript).  `generateFaultScenarios` returns an empty
-  `createdFiles` list (stub until LLM wiring is in place).
-
-- **LSP: `getFunctionImpact` hardcoded `findings: []`** — findings from the
-  per-document `findings_cache` are now included in the response, giving the
-  sidebar up-to-date inline insights without an extra API round-trip.
-
-- **LSP: spurious "No API key configured" warning on startup** — the LSP server
-  is fully local and CLI-only; no API key is needed or expected.  The warning
-  has been removed.  The `config` field on `UnfaultLsp` (previously used only
-  for the key check) has been removed as well.
+- **Flask-smorest / webargs schema extraction**
+  `FlaskRoute` gains `request_schema: Option<String>` and
+  `response_schema: Option<String>` populated from the handler's decorator stack:
+  - `@blp.arguments(SchemaX, ...)` / `@use_args(SchemaX)` → `request_schema`
+  - `@blp.response(200, SchemaY)` / `@marshal_with(SchemaY)` → `response_schema`
+  Recognised on plain function routes, Flask-smorest `MethodView` methods, and
+  the custom `@ClassName.action_route(...)` pattern.
+  Only the bare class name is captured (e.g. `"PetSchema"`).
+  Both fields flow through `GraphNode::Function`, `HandlerInfo`, and `RouteEntry`
+  and appear in JSON output. Human output renders them as `in:SchemaX  out:SchemaY`
+  on the annotation row beneath the route line.
 
 ## [1.0.9] — 2026-06-23
 

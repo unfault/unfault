@@ -1054,6 +1054,8 @@ pub fn find_handlers(graph: &CodeGraph, pattern: &str) -> HandlersContext {
                 is_writer,
                 line,
                 column,
+                request_schema,
+                response_schema,
                 ..
             } = node
             {
@@ -1069,6 +1071,8 @@ pub fn find_handlers(graph: &CodeGraph, pattern: &str) -> HandlersContext {
                         column: *column,
                         decorators: decorators.clone(),
                         is_writer: *is_writer,
+                        request_schema: request_schema.clone(),
+                        response_schema: response_schema.clone(),
                     })
                 } else {
                     None

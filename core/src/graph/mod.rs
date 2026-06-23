@@ -298,6 +298,12 @@ pub enum GraphNode {
         /// 1-based column number of the function definition.
         #[serde(skip_serializing_if = "Option::is_none")]
         column: Option<u32>,
+        /// Request body / query schema from `@blp.arguments(SchemaX)` or `@use_args`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request_schema: Option<String>,
+        /// Response schema from `@blp.response(200, SchemaY)` or `@marshal_with`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        response_schema: Option<String>,
     },
 
     /// A class or type definition
@@ -1787,6 +1793,8 @@ fn add_function_nodes(
             is_writer: py_is_writer,
             line: func_line,
             column: func_col,
+            request_schema: None,
+            response_schema: None,
         });
 
         // File contains function
@@ -2019,6 +2027,8 @@ fn add_fastapi_nodes(
             is_writer: handler_is_writer,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         // File contains function
@@ -2116,6 +2126,8 @@ fn add_flask_nodes(
             is_writer: file_is_writer,
             line: None,
             column: None,
+            request_schema: route.request_schema.clone(),
+            response_schema: route.response_schema.clone(),
         });
 
         cg.graph
@@ -2171,6 +2183,8 @@ fn add_express_nodes(
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         // File contains function
@@ -2223,6 +2237,8 @@ fn add_go_framework_nodes(
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         // File contains function
@@ -2271,6 +2287,8 @@ fn add_rust_framework_nodes(
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         // File contains function
@@ -2371,6 +2389,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         };
         let debug_str = format!("{:?}", node);
         assert!(debug_str.contains("Function"));
@@ -2455,6 +2475,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         };
         assert_eq!(func.display_name(), "Handler.process");
 
@@ -2502,6 +2524,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         };
         assert!(!func.is_file());
     }
@@ -2946,6 +2970,8 @@ def bar():
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         let func_b = cg.graph.add_node(GraphNode::Function {
@@ -2960,6 +2986,8 @@ def bar():
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         // File contains both functions
@@ -3018,6 +3046,8 @@ def bar():
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
         cg.function_nodes
             .insert((file_id, "my_func".to_string()), func_node);

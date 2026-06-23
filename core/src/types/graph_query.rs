@@ -205,6 +205,12 @@ pub struct HandlerInfo {
     /// True if the handler contains at least one ORM write (INSERT/UPDATE/DELETE).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_writer: bool,
+    /// Request body / query schema name from `@blp.arguments(SchemaX)` or `@use_args(SchemaX)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_schema: Option<String>,
+    /// Response schema name from `@blp.response(200, SchemaY)` or `@marshal_with(SchemaY)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<String>,
 }
 
 /// Result of a route pattern query.

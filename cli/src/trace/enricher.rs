@@ -221,6 +221,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
         graph
             .graph

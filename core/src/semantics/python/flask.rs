@@ -40,6 +40,13 @@ pub struct FlaskRoute {
     pub decorator_location: AstLocation,
     pub body_start_byte: usize,
     pub body_end_byte: usize,
+    /// Schema name from `@blp.arguments(SchemaX, ...)` / `@use_args(SchemaX)`.
+    /// Only the class name is captured, not the full import path.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_schema: Option<String>,
+    /// Schema name from `@blp.response(200, SchemaY)` / `@marshal_with(SchemaY)`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -225,6 +232,9 @@ fn extract_flask_function_route(file: &ParsedFile, decorated_def: Node, out: &mu
     let fn_text = file.text_for_node(&func_def);
     let is_async = fn_text.trim_start().starts_with("async def");
 
+    // Extract smorest/webargs schema decorators from all decorators on this function.
+    let (request_schema, response_schema) = extract_smorest_schemas(file, &decorators);
+
     for decorator in &decorators {
         if let Some((app_var_name, http_method, path)) =
             extract_flask_route_decorator(file, *decorator)
@@ -255,6 +265,8 @@ fn extract_flask_function_route(file: &ParsedFile, decorated_def: Node, out: &mu
                 decorator_location,
                 body_start_byte: body.start_byte(),
                 body_end_byte: body.end_byte(),
+                request_schema: request_schema.clone(),
+                response_schema: response_schema.clone(),
             });
             // Only the first matching route decorator per function.
             return;
@@ -324,19 +336,21 @@ fn extract_flask_methodview_routes(
     for child in class_body.children(&mut body_cursor) {
         // Methods can appear as plain `function_definition` or `decorated_definition`
         // (e.g. with @blp.arguments / @blp.response decorators).
+        // Collect inner decorators for schema extraction when the method is decorated.
+        let mut inner_decorators: Vec<Node> = Vec::new();
         let method_node = match child.kind() {
             "function_definition" | "async_function_definition" => child,
             "decorated_definition" => {
-                // Find the inner function_definition inside the decorated method.
+                // Collect decorator nodes and find the inner function_definition.
                 let mut inner: Option<Node> = None;
                 let mut dc = child.walk();
                 for n in child.children(&mut dc) {
-                    if matches!(
-                        n.kind(),
-                        "function_definition" | "async_function_definition"
-                    ) {
-                        inner = Some(n);
-                        break;
+                    match n.kind() {
+                        "decorator" => inner_decorators.push(n),
+                        "function_definition" | "async_function_definition" => {
+                            inner = Some(n);
+                        }
+                        _ => {}
                     }
                 }
                 match inner {
@@ -388,6 +402,10 @@ fn extract_flask_methodview_routes(
             .map(|d| file.location_for_node(d))
             .unwrap_or_else(|| class_location.clone());
 
+        // Schema decorators are on the inner method, not the class-level @blp.route.
+        let (request_schema, response_schema) =
+            extract_smorest_schemas(file, &inner_decorators);
+
         out.push(FlaskRoute {
             app_var_name: app_var_name.clone(),
             http_method: http_method.to_string(),
@@ -399,6 +417,8 @@ fn extract_flask_methodview_routes(
             decorator_location,
             body_start_byte: body.start_byte(),
             body_end_byte: body.end_byte(),
+            request_schema,
+            response_schema,
         });
     }
 }
@@ -496,6 +516,137 @@ fn extract_route_methods(file: &ParsedFile, args: Node) -> String {
 
     // No `methods` kwarg — Flask defaults to GET only
     "GET".to_string()
+}
+
+/// Extract `(request_schema, response_schema)` from a list of decorator nodes.
+///
+/// Recognises:
+/// - `@blp.arguments(SchemaX, ...)` / `@bp.arguments(SchemaX, ...)` →
+///   first positional identifier = request schema
+/// - `@use_args(SchemaX)` / `@parser.use_args(SchemaX)` →
+///   first positional identifier = request schema
+/// - `@blp.response(200, SchemaY)` / `@bp.response(200, SchemaY)` →
+///   second positional identifier = response schema (first is status code)
+/// - `@marshal_with(SchemaY)` / `@blp.alt_response(...)` →
+///   first positional identifier = response schema
+///
+/// Only the bare class name is captured (e.g. `"PetSchema"`), not the full
+/// import path.  Returns `(None, None)` when neither decorator is present.
+fn extract_smorest_schemas(
+    file: &ParsedFile,
+    decorators: &[Node],
+) -> (Option<String>, Option<String>) {
+    let source_bytes = file.source.as_bytes();
+    let mut request_schema: Option<String> = None;
+    let mut response_schema: Option<String> = None;
+
+    for &dec in decorators {
+        // Each decorator node wraps a `call` node.
+        let call_node = {
+            let mut found = None;
+            let mut c = dec.walk();
+            for child in dec.children(&mut c) {
+                if child.kind() == "call" {
+                    found = Some(child);
+                    break;
+                }
+            }
+            match found {
+                Some(n) => n,
+                None => continue,
+            }
+        };
+
+        let func = match call_node.child_by_field_name("function") {
+            Some(f) => f,
+            None => continue,
+        };
+        let args = match call_node.child_by_field_name("arguments") {
+            Some(a) => a,
+            None => continue,
+        };
+
+        // Resolve the attribute name: `blp.arguments` → attr="arguments";
+        // bare `use_args` or `marshal_with` → attr=whole name.
+        let attr = if func.kind() == "attribute" {
+            func.child_by_field_name("attribute")
+                .and_then(|n| n.utf8_text(source_bytes).ok())
+                .unwrap_or("")
+                .to_string()
+        } else {
+            func.utf8_text(source_bytes)
+                .unwrap_or("")
+                .to_string()
+        };
+
+        match attr.as_str() {
+            // Request body / query schema
+            "arguments" | "use_args" | "use_kwargs" => {
+                if request_schema.is_none() {
+                    request_schema = extract_first_identifier_arg(file, args);
+                }
+            }
+            // Response schema
+            "response" => {
+                if response_schema.is_none() {
+                    // @blp.response(200, SchemaY) — skip the status-code first arg,
+                    // take the second positional identifier.
+                    response_schema = extract_second_identifier_arg(file, args);
+                }
+            }
+            "marshal_with" | "alt_response" => {
+                if response_schema.is_none() {
+                    response_schema = extract_first_identifier_arg(file, args);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (request_schema, response_schema)
+}
+
+/// Return the text of the first positional argument that is an identifier or
+/// attribute access (i.e. a schema class name like `PetSchema` or
+/// `schemas.PetSchema`).  Skips string literals and integer literals.
+fn extract_first_identifier_arg(file: &ParsedFile, args: Node) -> Option<String> {
+    let source_bytes = file.source.as_bytes();
+    let mut cursor = args.walk();
+    for child in args.children(&mut cursor) {
+        match child.kind() {
+            "identifier" | "attribute" => {
+                return child.utf8_text(source_bytes).ok().map(|s| s.to_string());
+            }
+            // Skip keyword args — we only want positional.
+            "keyword_argument" => break,
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Return the text of the second positional identifier argument.
+/// Used for `@blp.response(200, SchemaY)` where the first arg is a status int.
+fn extract_second_identifier_arg(file: &ParsedFile, args: Node) -> Option<String> {
+    let source_bytes = file.source.as_bytes();
+    let mut cursor = args.walk();
+    let mut positional_count = 0usize;
+    for child in args.children(&mut cursor) {
+        match child.kind() {
+            "integer" => {
+                positional_count += 1;
+            }
+            "identifier" | "attribute" => {
+                positional_count += 1;
+                if positional_count >= 2 {
+                    return child.utf8_text(source_bytes).ok().map(|s| s.to_string());
+                }
+            }
+            "keyword_argument" => break,
+            _ => {}
+        }
+    }
+    None
 }
 
 fn collect_flask_error_handlers(file: &ParsedFile, node: Node, out: &mut Vec<FlaskErrorHandler>) {
@@ -799,6 +950,9 @@ fn extract_action_route_handler(
         None => return,
     };
 
+    // Extract smorest schema decorators from all decorators on this function.
+    let (request_schema, response_schema) = extract_smorest_schemas(file, &decorators);
+
     // The outermost decorator is always listed first in `decorators`.
     // We scan all decorators and take the first that matches `action_route`.
     for decorator in &decorators {
@@ -846,6 +1000,8 @@ fn extract_action_route_handler(
                 decorator_location,
                 body_start_byte: body.start_byte(),
                 body_end_byte: body.end_byte(),
+                request_schema: request_schema.clone(),
+                response_schema: response_schema.clone(),
             });
             // Stop at first matching action_route decorator.
             return;

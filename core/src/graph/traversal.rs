@@ -454,6 +454,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         let fn2 = graph.graph.add_node(GraphNode::Function {
@@ -468,6 +470,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         let fn3 = graph.graph.add_node(GraphNode::Function {
@@ -482,6 +486,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         // Contains edges

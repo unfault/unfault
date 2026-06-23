@@ -944,6 +944,8 @@ fn add_function_nodes(
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         // File contains function
@@ -1196,6 +1198,8 @@ fn add_flask_nodes(
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         });
 
         cg.graph
@@ -1295,6 +1299,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         };
         let debug_str = format!("{:?}", node);
         assert!(debug_str.contains("Function"));
@@ -1379,6 +1385,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         };
         assert_eq!(func.display_name(), "Handler.process");
 
@@ -1426,6 +1434,8 @@ mod tests {
             is_writer: false,
             line: None,
             column: None,
+            request_schema: None,
+            response_schema: None,
         };
         assert!(!func.is_file());
     }
