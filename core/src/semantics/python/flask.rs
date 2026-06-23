@@ -403,8 +403,7 @@ fn extract_flask_methodview_routes(
             .unwrap_or_else(|| class_location.clone());
 
         // Schema decorators are on the inner method, not the class-level @blp.route.
-        let (request_schema, response_schema) =
-            extract_smorest_schemas(file, &inner_decorators);
+        let (request_schema, response_schema) = extract_smorest_schemas(file, &inner_decorators);
 
         out.push(FlaskRoute {
             app_var_name: app_var_name.clone(),
@@ -574,9 +573,7 @@ fn extract_smorest_schemas(
                 .unwrap_or("")
                 .to_string()
         } else {
-            func.utf8_text(source_bytes)
-                .unwrap_or("")
-                .to_string()
+            func.utf8_text(source_bytes).unwrap_or("").to_string()
         };
 
         match attr.as_str() {

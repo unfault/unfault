@@ -2068,12 +2068,8 @@ impl UnfaultLsp {
             None => return Ok(None),
         };
 
-        let flow = unfault_analysis::graph::traversal::extract_flow(
-            &graph,
-            &req.function_name,
-            None,
-            5,
-        );
+        let flow =
+            unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, None, 5);
 
         let callers: Vec<FunctionImpactCaller> = flow
             .paths
@@ -2088,28 +2084,27 @@ impl UnfaultLsp {
             .collect();
 
         // Populate findings from the cached diagnostics for this document URI
-        let findings: Vec<FunctionImpactFinding> =
-            if let Ok(uri) = Url::parse(&req.uri) {
-                self.findings_cache
-                    .get(&uri)
-                    .map(|cached| {
-                        cached
-                            .iter()
-                            .map(|c| FunctionImpactFinding {
-                                severity: c.finding.severity.clone(),
-                                message: if c.finding.message.is_empty() {
-                                    format!("{}: {}", c.finding.title, c.finding.description)
-                                } else {
-                                    c.finding.message.clone()
-                                },
-                                learn_more: None,
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            } else {
-                vec![]
-            };
+        let findings: Vec<FunctionImpactFinding> = if let Ok(uri) = Url::parse(&req.uri) {
+            self.findings_cache
+                .get(&uri)
+                .map(|cached| {
+                    cached
+                        .iter()
+                        .map(|c| FunctionImpactFinding {
+                            severity: c.finding.severity.clone(),
+                            message: if c.finding.message.is_empty() {
+                                format!("{}: {}", c.finding.title, c.finding.description)
+                            } else {
+                                c.finding.message.clone()
+                            },
+                            learn_more: None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
 
         Ok(Some(GetFunctionImpactResponse {
             name: req.function_name.clone(),
@@ -2186,7 +2181,10 @@ impl UnfaultLsp {
         let workspace_root = { self.workspace_root.read().await.clone() };
         let project_root = match &workspace_root {
             Some(r) => r.clone(),
-            None => file_path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+            None => file_path
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or_default(),
         };
 
         let relative_path = file_path

@@ -7,10 +7,10 @@ use petgraph::visit::EdgeRef;
 
 use crate::graph::{CodeGraph, GraphEdgeKind, GraphNode};
 use crate::types::graph_query::{
-    BriefContext, BriefRoute, BriefSize, CallerInfo, CallerKind, CallersContext, EnumerateContext,
-    EntryPoint, EntryPointReason, ExportedSymbol, FlowContext, FlowPathNode, FunctionSuggestion,
-    GraphContext, HandlerInfo, HandlersContext, IncomingImport, PathContext, RouteInfo, SiblingInfo,
-    WorkspaceContext,
+    BriefContext, BriefRoute, BriefSize, CallerInfo, CallerKind, CallersContext, EntryPoint,
+    EntryPointReason, EnumerateContext, ExportedSymbol, FlowContext, FlowPathNode,
+    FunctionSuggestion, GraphContext, HandlerInfo, HandlersContext, IncomingImport, PathContext,
+    RouteInfo, SiblingInfo, WorkspaceContext,
 };
 
 pub fn extract_flow(
@@ -348,8 +348,9 @@ fn classify_caller_kind(caller_name: &str, caller_file: Option<&str>) -> CallerK
     // Files that are structural entry-points: __init__.py, app.py, main.py,
     // bootstrap/*.py, apps/<component>/__init__.py, etc.
     let is_init = file_lower.ends_with("__init__.py");
-    let is_main =
-        file_lower.ends_with("app.py") || file_lower.ends_with("main.py") || file_lower.ends_with("wsgi.py");
+    let is_main = file_lower.ends_with("app.py")
+        || file_lower.ends_with("main.py")
+        || file_lower.ends_with("wsgi.py");
     let is_bootstrap = file_lower.contains("/bootstrap/")
         || file_lower.contains("/components_config")
         || file_lower.contains("_config.py");
@@ -447,11 +448,12 @@ fn get_callers_impl(
                     }
 
                     let kind = classify_caller_kind(&caller_name, file_path.as_deref());
-                    let caller_is_writer = if let GraphNode::Function { is_writer, .. } = caller_node {
-                        *is_writer
-                    } else {
-                        false
-                    };
+                    let caller_is_writer =
+                        if let GraphNode::Function { is_writer, .. } = caller_node {
+                            *is_writer
+                        } else {
+                            false
+                        };
                     all_callers.push(CallerInfo {
                         name: caller_name,
                         file: file_path,
@@ -1178,7 +1180,10 @@ pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
     }
 
     // ── Size ─────────────────────────────────────────────────────────────────
-    let mut size = BriefSize { files: 0, functions: 0 };
+    let mut size = BriefSize {
+        files: 0,
+        functions: 0,
+    };
     for idx in graph.graph.node_indices() {
         match &graph.graph[idx] {
             GraphNode::File { file_id, .. } if inside_file_ids.contains(file_id) => {
@@ -1276,7 +1281,11 @@ pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
         .map(|((defined_in, name), mut imported_by)| {
             imported_by.sort();
             imported_by.dedup();
-            ExportedSymbol { name, defined_in, imported_by }
+            ExportedSymbol {
+                name,
+                defined_in,
+                imported_by,
+            }
         })
         .collect();
     outgoing_exports.sort_by(|a, b| a.defined_in.cmp(&b.defined_in).then(a.name.cmp(&b.name)));
@@ -1348,7 +1357,11 @@ pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
             symbols.dedup();
             imported_by.sort();
             imported_by.dedup();
-            IncomingImport { source, symbols, imported_by }
+            IncomingImport {
+                source,
+                symbols,
+                imported_by,
+            }
         })
         .collect();
     incoming_imports.sort_by(|a, b| a.source.cmp(&b.source));
@@ -1358,10 +1371,7 @@ pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
     //   (a) it is an HTTP handler (is_handler: true), OR
     //   (b) it has inbound Calls edges exclusively from outside the subtree, OR
     //   (c) it has no inbound Calls edges at all but is exported (appears in outgoing_exports).
-    let exported_names: HashSet<String> = outgoing_exports
-        .iter()
-        .map(|e| e.name.clone())
-        .collect();
+    let exported_names: HashSet<String> = outgoing_exports.iter().map(|e| e.name.clone()).collect();
 
     let mut entry_points: Vec<EntryPoint> = Vec::new();
 

@@ -104,47 +104,26 @@ pub enum DecoratorSemantic {
     },
     /// Permission / role check (`@permission_required`,
     /// `@require_permission`, `@roles_required`, …).
-    Permission {
-        detail: String,
-    },
+    Permission { detail: String },
     /// Rate-limiting (`@ratelimit`, `@throttle`, `@rate_limit`, …).
-    RateLimit {
-        detail: String,
-    },
+    RateLimit { detail: String },
     /// Caching (`@cache`, `@cached`, `@lru_cache`, `@cache_control`, …).
-    Cache {
-        detail: String,
-    },
+    Cache { detail: String },
     /// Retry / back-off (`@retry`, `@backoff`, `@tenacity.retry`, …).
-    Retry {
-        detail: String,
-    },
+    Retry { detail: String },
     /// Tracing / observability (`@trace`, `@instrument`, `@span`, …).
-    Tracing {
-        detail: String,
-    },
+    Tracing { detail: String },
     /// Validation (`@validate`, `@validates`, `@validator`, …).
-    Validation {
-        detail: String,
-    },
+    Validation { detail: String },
     /// Transaction boundary (`@transaction.atomic`, `@transactional`, …).
-    Transaction {
-        detail: String,
-    },
+    Transaction { detail: String },
     /// Feature flag / experiment gate (`@feature_flag`, `@experiment`, …).
-    FeatureFlag {
-        detail: String,
-    },
+    FeatureFlag { detail: String },
     /// Deprecation marker (`@deprecated`, …).
-    Deprecated {
-        detail: String,
-    },
+    Deprecated { detail: String },
     /// Decorator present but role not recognised.  The raw name is kept so
     /// downstream consumers (LLMs, renderers) can still surface it.
-    Other {
-        name: String,
-        detail: String,
-    },
+    Other { name: String, detail: String },
 }
 
 impl DecoratorSemantic {
@@ -1723,7 +1702,10 @@ fn add_function_nodes(
     ) = if let SourceSemantics::Python(py) = sem.as_ref() {
         use crate::semantics::python::orm::QueryType;
         let is_writer = py.orm_queries.iter().any(|q| {
-            matches!(q.query_type, QueryType::Insert | QueryType::Update | QueryType::Delete)
+            matches!(
+                q.query_type,
+                QueryType::Insert | QueryType::Update | QueryType::Delete
+            )
         });
         let mut map: std::collections::HashMap<String, Vec<DecoratorSemantic>> =
             std::collections::HashMap::new();
@@ -2011,7 +1993,10 @@ fn add_fastapi_nodes(
         // Detect write operations in ORM calls belonging to this handler.
         let handler_is_writer = py.orm_queries.iter().any(|q| {
             use crate::semantics::python::orm::QueryType;
-            matches!(q.query_type, QueryType::Insert | QueryType::Update | QueryType::Delete)
+            matches!(
+                q.query_type,
+                QueryType::Insert | QueryType::Update | QueryType::Delete
+            )
         });
 
         let qualified_name = route.handler_name.clone();
@@ -2062,7 +2047,6 @@ fn add_fastapi_nodes(
                 .add_edge(*app_node, mw_node, GraphEdgeKind::FastApiAppHasMiddleware);
         }
     }
-
 }
 
 /// Add Flask route handlers as function nodes with `http_method` and `http_path` populated.
@@ -2082,7 +2066,10 @@ fn add_flask_nodes(
 
     // Determine if this file has any write ORM calls (file-level heuristic).
     let file_is_writer = py.orm_queries.iter().any(|q| {
-        matches!(q.query_type, QueryType::Insert | QueryType::Update | QueryType::Delete)
+        matches!(
+            q.query_type,
+            QueryType::Insert | QueryType::Update | QueryType::Delete
+        )
     });
 
     for route in &flask.routes {

@@ -1308,7 +1308,13 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
         );
     }
 
-    render_callers_output(ctx, &function_name, Some(&graph), args.json, args.exclude_wiring)
+    render_callers_output(
+        ctx,
+        &function_name,
+        Some(&graph),
+        args.json,
+        args.exclude_wiring,
+    )
 }
 
 // =============================================================================
@@ -1346,7 +1352,11 @@ pub async fn execute_brief(args: BriefArgs) -> Result<i32> {
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
         Ok(g) => g,
         Err(e) => {
-            eprintln!("{} Failed to build code graph: {}", "Error:".red().bold(), e);
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
             return Ok(EXIT_ERROR);
         }
     };
@@ -1415,7 +1425,12 @@ fn render_brief_output(
                 Some(l) => format!("({}:{})", r.handler, l),
                 None => format!("({})", r.handler),
             };
-            println!("      {:<8} {}  {}", method_colored, r.path, handler_loc.dimmed());
+            println!(
+                "      {:<8} {}  {}",
+                method_colored,
+                r.path,
+                handler_loc.dimmed()
+            );
             render_route_annotations(
                 &r.decorators,
                 r.is_writer,
@@ -1457,7 +1472,10 @@ fn render_brief_output(
 
     // ── Outgoing exports ──────────────────────────────────────────────────────
     if !ctx.outgoing_exports.is_empty() {
-        println!("{}", "  Outgoing exports  (used outside this subtree)".bold());
+        println!(
+            "{}",
+            "  Outgoing exports  (used outside this subtree)".bold()
+        );
         let mut current_file = String::new();
         for ex in &ctx.outgoing_exports {
             if ex.defined_in != current_file {
@@ -1480,14 +1498,19 @@ fn render_brief_output(
 
     // ── Incoming imports ──────────────────────────────────────────────────────
     if !ctx.incoming_imports.is_empty() {
-        println!("{}", "  Incoming imports  (dependencies from outside)".bold());
+        println!(
+            "{}",
+            "  Incoming imports  (dependencies from outside)".bold()
+        );
         for imp in &ctx.incoming_imports {
             let sym_part = if imp.symbols.is_empty() {
                 String::new()
             } else if imp.symbols.len() <= 4 {
                 format!("  {}", imp.symbols.join(", ").dimmed())
             } else {
-                format!("  {} symbols", imp.symbols.len()).dimmed().to_string()
+                format!("  {} symbols", imp.symbols.len())
+                    .dimmed()
+                    .to_string()
             };
             println!("    {}{}", imp.source.bright_white(), sym_part);
         }
@@ -1723,7 +1746,7 @@ fn render_handlers_output(
         };
         let async_marker = if h.is_async { " async" } else { "" };
         let handler_loc = match h.line {
-            Some(l) => format!("({}:{}){}",  h.handler, l, async_marker),
+            Some(l) => format!("({}:{}){}", h.handler, l, async_marker),
             None => format!("({}){}", h.handler, async_marker),
         };
         println!(
