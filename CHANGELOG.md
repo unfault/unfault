@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.13] — 2026-06-23
+
+### Fixed
+
+- `cargo fmt` — 24 formatting violations across `analysis/src/graph/traversal.rs`,
+  `cli/src/commands/graph.rs`, `cli/src/commands/lsp.rs`, `core/src/graph/mod.rs`,
+  `core/src/semantics/python/flask.rs`. No logic changes.
+
 ## [1.0.12] — 2026-06-23
 
 ### Added
