@@ -10,6 +10,37 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.10] — 2026-06-23
+
+### Fixed
+
+- **LSP: `unfault/analysisComplete` never sent** — the extension relied on this
+  notification to refresh the sidebar and CodeLens after every analysis pass.
+  `analyze_document` now sends `unfault/analysisComplete` with the real
+  `finding_count` once diagnostics are published (`did_open`, `did_save`).
+  `did_change` sends the notification with `finding_count: 0` to immediately
+  clear stale findings from the sidebar without re-running analysis against
+  unsaved on-disk content.
+
+- **LSP: four commands returning `method_not_found`** — `getFileCentrality`,
+  `getFileDependencies`, `getHttpCallAtPosition`, and `generateFaultScenarios`
+  were registered in the extension but not handled by the server.  All four are
+  now declared in `execute_command_provider` and dispatched in
+  `execute_command`.  `getFileCentrality` and `getFileDependencies` reuse the
+  existing local-graph helpers.  `getHttpCallAtPosition` walks IR semantics for
+  the file and matches the cursor byte offset against each `HttpCallSite`
+  (Python, Go, Rust, TypeScript).  `generateFaultScenarios` returns an empty
+  `createdFiles` list (stub until LLM wiring is in place).
+
+- **LSP: `getFunctionImpact` hardcoded `findings: []`** — findings from the
+  per-document `findings_cache` are now included in the response, giving the
+  sidebar up-to-date inline insights without an extra API round-trip.
+
+- **LSP: spurious "No API key configured" warning on startup** — the LSP server
+  is fully local and CLI-only; no API key is needed or expected.  The warning
+  has been removed.  The `config` field on `UnfaultLsp` (previously used only
+  for the key check) has been removed as well.
+
 ## [1.0.9] — 2026-06-23
 
 ### Added

@@ -60,7 +60,6 @@ use tower_lsp::jsonrpc::Result as RpcResult;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
-use crate::config::Config;
 use crate::exit_codes::*;
 use crate::output::{FileCentrality, FunctionInfo, IrFinding};
 use crate::session::{WorkspaceScanner, build_ir_cached, compute_workspace_id, get_git_remote};
@@ -161,6 +160,53 @@ pub struct GetFunctionImpactResponse {
     pub findings: Vec<FunctionImpactFinding>,
 }
 
+/// Request for unfault/getFileCentrality
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetFileCentralityRequest {
+    pub uri: String,
+}
+
+/// Request for unfault/getFileDependencies
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetFileDependenciesRequest {
+    pub uri: String,
+}
+
+/// Request for unfault/getHttpCallAtPosition
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GetHttpCallAtPositionRequest {
+    pub uri: String,
+    pub position: Position,
+}
+
+/// Response for unfault/getHttpCallAtPosition — mirrors HttpCallAtPositionData in the extension
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HttpCallAtPositionResponse {
+    pub library: String,
+    pub method: String,
+    pub url: Option<String>,
+    #[serde(rename = "startByte")]
+    pub start_byte: u32,
+    #[serde(rename = "endByte")]
+    pub end_byte: u32,
+}
+
+/// Request for unfault/generateFaultScenarios
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateFaultScenariosRequest {
+    pub uri: String,
+    #[serde(rename = "functionName")]
+    pub function_name: String,
+    pub position: Position,
+}
+
+/// Response for unfault/generateFaultScenarios
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateFaultScenariosResponse {
+    #[serde(rename = "createdFiles")]
+    pub created_files: Vec<String>,
+}
+
 #[cfg(test)]
 fn normalize_severity(severity: &str) -> String {
     match severity.to_lowercase().as_str() {
@@ -174,8 +220,6 @@ fn normalize_severity(severity: &str) -> String {
 struct UnfaultLsp {
     /// LSP client for sending notifications
     client: Client,
-    /// Configuration (LLM, embeddings)
-    config: Option<Config>,
     /// Workspace root path
     workspace_root: Arc<tokio::sync::RwLock<Option<PathBuf>>>,
     /// Workspace ID (for identification)
@@ -195,15 +239,8 @@ struct UnfaultLsp {
 
 impl UnfaultLsp {
     fn new(client: Client, verbose: bool) -> Self {
-        let config = crate::config::Config::load().ok();
-
-        if verbose {
-            eprintln!("[unfault-lsp] Config loaded: {}", config.is_some());
-        }
-
         Self {
             client,
-            config,
             workspace_root: Arc::new(tokio::sync::RwLock::new(None)),
             workspace_id: Arc::new(tokio::sync::RwLock::new(None)),
             findings_cache: DashMap::new(),
@@ -467,6 +504,16 @@ impl UnfaultLsp {
             "Published {} diagnostics for {}",
             diagnostics_count, uri
         ));
+
+        // Notify the extension that analysis is complete so it can refresh
+        // the sidebar and CodeLens provider.
+        let _ = self
+            .client
+            .send_notification::<AnalysisCompleteNotificationType>(AnalysisCompleteNotification {
+                uri: uri.to_string(),
+                finding_count: diagnostics_count as u32,
+            })
+            .await;
     }
 
     /// Convert a finding to an LSP diagnostic
@@ -1563,7 +1610,13 @@ impl LanguageServer for UnfaultLsp {
                 code_action_provider: Some(CodeActionProviderCapability::Simple(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 execute_command_provider: Some(ExecuteCommandOptions {
-                    commands: vec!["unfault/getFunctionImpact".to_string()],
+                    commands: vec![
+                        "unfault/getFunctionImpact".to_string(),
+                        "unfault/getFileCentrality".to_string(),
+                        "unfault/getFileDependencies".to_string(),
+                        "unfault/getHttpCallAtPosition".to_string(),
+                        "unfault/generateFaultScenarios".to_string(),
+                    ],
                     ..Default::default()
                 }),
                 ..Default::default()
@@ -1577,20 +1630,9 @@ impl LanguageServer for UnfaultLsp {
 
     async fn initialized(&self, _: InitializedParams) {
         self.log_debug("LSP initialized");
-
-        // Log whether we have authentication
-        if self.config.is_some() {
-            self.client
-                .log_message(MessageType::INFO, "Unfault LSP ready")
-                .await;
-        } else {
-            self.client
-                .log_message(
-                    MessageType::WARNING,
-                    "Unfault: No API key configured. Run 'unfault login' to authenticate.",
-                )
-                .await;
-        }
+        self.client
+            .log_message(MessageType::INFO, "Unfault LSP ready")
+            .await;
     }
 
     async fn shutdown(&self) -> RpcResult<()> {
@@ -1729,23 +1771,25 @@ impl LanguageServer for UnfaultLsp {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         self.log_debug(&format!("Document changed: {}", params.text_document.uri));
 
-        // Get the full text from the last change event (since we use FULL sync)
-        // This fires on every edit including Ctrl-Z (undo), keeping the cache current
+        // Update the document cache with the latest in-memory content.
+        // We do NOT re-run analysis here: analysis reads files from disk so
+        // running it against unsaved in-memory content would re-surface stale
+        // on-disk findings.  Instead we signal the extension to clear the
+        // sidebar immediately by sending analysisComplete with finding_count=0.
         if let Some(change) = params.content_changes.last() {
-            // Update the document cache with the new content
             let _ = self
                 .document_cache
                 .insert_async(params.text_document.uri.clone(), change.text.clone())
                 .await;
-
-            self.analyze_document(
-                &params.text_document.uri,
-                &change.text,
-                params.text_document.version,
-                None, // No pre-built IR on change
-            )
-            .await;
         }
+
+        let _ = self
+            .client
+            .send_notification::<AnalysisCompleteNotificationType>(AnalysisCompleteNotification {
+                uri: params.text_document.uri.to_string(),
+                finding_count: 0,
+            })
+            .await;
     }
 
     async fn did_save(&self, params: DidSaveTextDocumentParams) {
@@ -1922,65 +1966,64 @@ impl LanguageServer for UnfaultLsp {
         &self,
         params: ExecuteCommandParams,
     ) -> RpcResult<Option<serde_json::Value>> {
-        if params.command != "unfault/getFunctionImpact" {
-            return Err(tower_lsp::jsonrpc::Error::method_not_found());
-        }
-        if params.arguments.is_empty() {
-            return Ok(None);
-        }
         let args_value = params
             .arguments
             .first()
             .cloned()
             .unwrap_or(serde_json::Value::Null);
-        let req: GetFunctionImpactRequest = serde_json::from_value(args_value)
-            .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
 
-        let uri = Url::parse(&req.uri).ok();
-        let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
-        let workspace_root = { self.workspace_root.read().await.clone() };
-        let _relative_path = match (&file_path, &workspace_root) {
-            (Some(fp), Some(ws)) => fp
-                .strip_prefix(ws)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| fp.to_string_lossy().to_string()),
-            (Some(fp), None) => fp.to_string_lossy().to_string(),
-            _ => return Ok(None),
-        };
-        // Build local graph and extract flow
-        let graph = match &workspace_root {
-            Some(root) => crate::local_graph::build_analysis_graph(root, false).ok(),
-            None => None,
-        };
-        let graph = match graph {
-            Some(g) => g,
-            None => return Ok(None),
-        };
-
-        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, None, 5);
-
-        let callers: Vec<FunctionImpactCaller> = flow
-            .paths
-            .iter()
-            .flat_map(|path| {
-                path.iter().skip(1).map(|node| FunctionImpactCaller {
-                    name: node.name.clone(),
-                    file: node.file_path.clone().unwrap_or_default(),
-                    depth: node.depth as i32,
-                })
-            })
-            .collect();
-
-        Ok(Some(
-            serde_json::to_value(GetFunctionImpactResponse {
-                name: req.function_name.clone(),
-                callers,
-                routes: vec![],
-                findings: vec![],
-            })
-            .unwrap(),
-        ))
+        match params.command.as_str() {
+            "unfault/getFunctionImpact" => {
+                let req: GetFunctionImpactRequest = serde_json::from_value(args_value)
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+                let result = self.exec_get_function_impact(req).await?;
+                Ok(result.map(|r| serde_json::to_value(r).unwrap()))
+            }
+            "unfault/getFileCentrality" => {
+                let req: GetFileCentralityRequest = serde_json::from_value(args_value)
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+                let result = self.exec_get_file_centrality(req).await?;
+                Ok(result.map(|r| serde_json::to_value(r).unwrap()))
+            }
+            "unfault/getFileDependencies" => {
+                let req: GetFileDependenciesRequest = serde_json::from_value(args_value)
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+                let result = self.exec_get_file_dependencies(req).await?;
+                Ok(result.map(|r| serde_json::to_value(r).unwrap()))
+            }
+            "unfault/getHttpCallAtPosition" => {
+                let req: GetHttpCallAtPositionRequest = serde_json::from_value(args_value)
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+                let result = self.exec_get_http_call_at_position(req).await?;
+                Ok(result.map(|r| serde_json::to_value(r).unwrap()))
+            }
+            "unfault/generateFaultScenarios" => {
+                let req: GenerateFaultScenariosRequest = serde_json::from_value(args_value)
+                    .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+                let result = self.exec_generate_fault_scenarios(req).await?;
+                Ok(result.map(|r| serde_json::to_value(r).unwrap()))
+            }
+            _ => Err(tower_lsp::jsonrpc::Error::method_not_found()),
+        }
     }
+}
+
+/// Payload for the unfault/analysisComplete notification
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalysisCompleteNotification {
+    /// Document URI that was just analysed
+    pub uri: String,
+    /// Number of findings found (0 means analysis produced no findings, or
+    /// this is a stale-invalidation signal from did_change)
+    pub finding_count: u32,
+}
+
+/// Custom notification type for analysis complete
+struct AnalysisCompleteNotificationType;
+
+impl tower_lsp::lsp_types::notification::Notification for AnalysisCompleteNotificationType {
+    type Params = AnalysisCompleteNotification;
+    const METHOD: &'static str = "unfault/analysisComplete";
 }
 
 /// Custom notification type for file centrality
@@ -2000,25 +2043,22 @@ impl tower_lsp::lsp_types::notification::Notification for FileDependenciesNotifi
 }
 
 impl UnfaultLsp {
+    /// Custom-method handler for unfault/getFunctionImpact (tower-lsp custom_method route)
     async fn handle_get_function_impact(
         &self,
         params: serde_json::Value,
     ) -> RpcResult<Option<GetFunctionImpactResponse>> {
         let req: GetFunctionImpactRequest = serde_json::from_value(params)
             .map_err(|e| tower_lsp::jsonrpc::Error::invalid_params(e.to_string()))?;
+        self.exec_get_function_impact(req).await
+    }
 
-        let uri = Url::parse(&req.uri).ok();
-        let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
+    /// Shared logic for getFunctionImpact (used by both execute_command and custom_method)
+    async fn exec_get_function_impact(
+        &self,
+        req: GetFunctionImpactRequest,
+    ) -> RpcResult<Option<GetFunctionImpactResponse>> {
         let workspace_root = { self.workspace_root.read().await.clone() };
-        let _relative_path = match (&file_path, &workspace_root) {
-            (Some(fp), Some(ws)) => fp
-                .strip_prefix(ws)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| fp.to_string_lossy().to_string()),
-            (Some(fp), None) => fp.to_string_lossy().to_string(),
-            _ => return Ok(None),
-        };
-        // Build local graph and extract flow
         let graph = match &workspace_root {
             Some(root) => crate::local_graph::build_analysis_graph(root, false).ok(),
             None => None,
@@ -2028,7 +2068,12 @@ impl UnfaultLsp {
             None => return Ok(None),
         };
 
-        let flow = unfault_analysis::graph::traversal::extract_flow(&graph, &req.function_name, None, 5);
+        let flow = unfault_analysis::graph::traversal::extract_flow(
+            &graph,
+            &req.function_name,
+            None,
+            5,
+        );
 
         let callers: Vec<FunctionImpactCaller> = flow
             .paths
@@ -2042,11 +2087,221 @@ impl UnfaultLsp {
             })
             .collect();
 
+        // Populate findings from the cached diagnostics for this document URI
+        let findings: Vec<FunctionImpactFinding> =
+            if let Ok(uri) = Url::parse(&req.uri) {
+                self.findings_cache
+                    .get(&uri)
+                    .map(|cached| {
+                        cached
+                            .iter()
+                            .map(|c| FunctionImpactFinding {
+                                severity: c.finding.severity.clone(),
+                                message: if c.finding.message.is_empty() {
+                                    format!("{}: {}", c.finding.title, c.finding.description)
+                                } else {
+                                    c.finding.message.clone()
+                                },
+                                learn_more: None,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            } else {
+                vec![]
+            };
+
         Ok(Some(GetFunctionImpactResponse {
             name: req.function_name.clone(),
             callers,
             routes: vec![],
-            findings: vec![],
+            findings,
+        }))
+    }
+
+    /// Handler for unfault/getFileCentrality execute_command
+    async fn exec_get_file_centrality(
+        &self,
+        req: GetFileCentralityRequest,
+    ) -> RpcResult<Option<FileCentralityNotification>> {
+        let uri = Url::parse(&req.uri).ok();
+        let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
+        let workspace_root = { self.workspace_root.read().await.clone() };
+
+        let relative_path = match (&file_path, &workspace_root) {
+            (Some(fp), Some(ws)) => fp
+                .strip_prefix(ws)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| fp.to_string_lossy().to_string()),
+            (Some(fp), None) => fp.to_string_lossy().to_string(),
+            _ => return Ok(None),
+        };
+
+        Ok(self.get_file_centrality(&relative_path).await)
+    }
+
+    /// Handler for unfault/getFileDependencies execute_command
+    async fn exec_get_file_dependencies(
+        &self,
+        req: GetFileDependenciesRequest,
+    ) -> RpcResult<Option<FileDependenciesNotification>> {
+        let uri = Url::parse(&req.uri).ok();
+        let file_path = uri.as_ref().and_then(|u| u.to_file_path().ok());
+        let workspace_root = { self.workspace_root.read().await.clone() };
+
+        let relative_path = match (&file_path, &workspace_root) {
+            (Some(fp), Some(ws)) => fp
+                .strip_prefix(ws)
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| fp.to_string_lossy().to_string()),
+            (Some(fp), None) => fp.to_string_lossy().to_string(),
+            _ => return Ok(None),
+        };
+
+        // Build IR to get the graph
+        let project_root = match &workspace_root {
+            Some(r) => r.clone(),
+            None => return Ok(None),
+        };
+        let ir = match build_ir_cached(&project_root, None, self.verbose) {
+            Ok(result) => result.ir,
+            Err(_) => return Ok(None),
+        };
+
+        Ok(self.compute_local_dependencies(&ir, &relative_path))
+    }
+
+    /// Handler for unfault/getHttpCallAtPosition execute_command
+    async fn exec_get_http_call_at_position(
+        &self,
+        req: GetHttpCallAtPositionRequest,
+    ) -> RpcResult<Option<HttpCallAtPositionResponse>> {
+        use unfault_core::semantics::SourceSemantics;
+
+        let uri = Url::parse(&req.uri).ok();
+        let file_path = match uri.as_ref().and_then(|u| u.to_file_path().ok()) {
+            Some(p) => p,
+            None => return Ok(None),
+        };
+        let workspace_root = { self.workspace_root.read().await.clone() };
+        let project_root = match &workspace_root {
+            Some(r) => r.clone(),
+            None => file_path.parent().map(|p| p.to_path_buf()).unwrap_or_default(),
+        };
+
+        let relative_path = file_path
+            .strip_prefix(&project_root)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| file_path.to_string_lossy().to_string());
+
+        let ir = match build_ir_cached(&project_root, None, self.verbose) {
+            Ok(result) => result.ir,
+            Err(_) => return Ok(None),
+        };
+
+        // Get the document text to compute byte offset for the cursor position
+        let lsp_uri = Url::from_file_path(&file_path).ok();
+        let source_text = if let Some(ref u) = lsp_uri {
+            self.document_cache
+                .get_async(u)
+                .await
+                .map(|e| e.get().clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+
+        // Convert LSP position (line/character) to byte offset
+        let cursor_byte: usize = {
+            let mut offset = 0usize;
+            for (i, line) in source_text.lines().enumerate() {
+                if i == req.position.line as usize {
+                    offset += req.position.character.min(line.len() as u32) as usize;
+                    break;
+                }
+                offset += line.len() + 1; // +1 for newline
+            }
+            offset
+        };
+
+        // Search for an HTTP call whose byte range contains the cursor
+        for sem in &ir.semantics {
+            if sem.file_path() != relative_path {
+                continue;
+            }
+
+            let found: Option<HttpCallAtPositionResponse> = match sem {
+                SourceSemantics::Python(py) => py.http_calls.iter().find_map(|call| {
+                    if cursor_byte >= call.start_byte && cursor_byte <= call.end_byte {
+                        Some(HttpCallAtPositionResponse {
+                            library: format!("{:?}", call.client_kind),
+                            method: call.method_name.clone(),
+                            url: None,
+                            start_byte: call.start_byte as u32,
+                            end_byte: call.end_byte as u32,
+                        })
+                    } else {
+                        None
+                    }
+                }),
+                SourceSemantics::Go(go) => go.http_calls.iter().find_map(|call| {
+                    if cursor_byte >= call.start_byte && cursor_byte <= call.end_byte {
+                        Some(HttpCallAtPositionResponse {
+                            library: format!("{:?}", call.client_kind),
+                            method: call.method_name.clone(),
+                            url: None,
+                            start_byte: call.start_byte as u32,
+                            end_byte: call.end_byte as u32,
+                        })
+                    } else {
+                        None
+                    }
+                }),
+                SourceSemantics::Rust(rs) => rs.http_calls.iter().find_map(|call| {
+                    if cursor_byte >= call.start_byte && cursor_byte <= call.end_byte {
+                        Some(HttpCallAtPositionResponse {
+                            library: format!("{:?}", call.library),
+                            method: format!("{:?}", call.method),
+                            url: call.url.clone(),
+                            start_byte: call.start_byte as u32,
+                            end_byte: call.end_byte as u32,
+                        })
+                    } else {
+                        None
+                    }
+                }),
+                SourceSemantics::Typescript(ts) => ts.http_calls.iter().find_map(|call| {
+                    if cursor_byte >= call.start_byte && cursor_byte <= call.end_byte {
+                        Some(HttpCallAtPositionResponse {
+                            library: format!("{:?}", call.client_kind),
+                            method: call.method.clone(),
+                            url: call.url.clone(),
+                            start_byte: call.start_byte as u32,
+                            end_byte: call.end_byte as u32,
+                        })
+                    } else {
+                        None
+                    }
+                }),
+            };
+
+            if found.is_some() {
+                return Ok(found);
+            }
+        }
+
+        Ok(None)
+    }
+
+    /// Handler for unfault/generateFaultScenarios execute_command
+    /// Returns an empty list of created files (scenario generation requires
+    /// LLM integration that is not yet wired up locally).
+    async fn exec_generate_fault_scenarios(
+        &self,
+        _req: GenerateFaultScenariosRequest,
+    ) -> RpcResult<Option<GenerateFaultScenariosResponse>> {
+        Ok(Some(GenerateFaultScenariosResponse {
+            created_files: vec![],
         }))
     }
 }
