@@ -382,6 +382,39 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Check trace and metrics coverage for a route subtree
+    ///
+    /// Accepts either a route prefix (`/api/orders`) or a wildcard pattern
+    /// (`/api/**`). Traces are inferred from recent Cloud Trace spans; metrics
+    /// coverage is inferred from route-matched SLOs.
+    ///
+    /// Examples:
+    ///   unfault graph coverage /api
+    ///   unfault graph coverage "/api/**" --method POST
+    ///   unfault graph coverage /checkout --offline
+    Coverage {
+        /// Route prefix or wildcard pattern to inspect.
+        #[arg(value_name = "ROUTE")]
+        route: String,
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Filter by HTTP method (case-insensitive, e.g. GET, POST)
+        #[arg(long, value_name = "METHOD")]
+        method: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Force a live refresh of observability data
+        #[arg(long)]
+        refresh_cache: bool,
+        /// Use cached observability data only
+        #[arg(long)]
+        offline: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
     /// Find the shortest call path between two functions
     ///
     /// Answers "is there any code path from A to B?" and shows the exact chain
@@ -1075,6 +1108,32 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Graph routes error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::Coverage {
+            route,
+            workspace,
+            method,
+            json,
+            refresh_cache,
+            offline,
+            verbose,
+        } => {
+            let args = commands::graph::CoverageArgs {
+                workspace_path: workspace,
+                route,
+                method,
+                json,
+                refresh_cache,
+                offline,
+                verbose,
+            };
+            match commands::graph::execute_coverage(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph coverage error: {}", e);
                     EXIT_ERROR
                 }
             }

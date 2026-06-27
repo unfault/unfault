@@ -20,5 +20,5 @@
 
 pub mod enricher;
 
-pub use crate::integration::gcp::trace::{GcpTraceProvider, RemoteCallPattern};
+pub use crate::integration::gcp::trace::{GcpTraceProvider, ObservedRoute, RemoteCallPattern};
 pub use enricher::{TraceEnrichmentResult, enrich_graph};

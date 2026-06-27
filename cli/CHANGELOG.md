@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.18] - 2026-06-27
+
+### Added
+
+- **`unfault graph coverage <route>`** — walk an HTTP route subtree and report
+  OpenTelemetry trace and SLO/metrics coverage for every matched handler.
+
+  Usage:
+  ```
+  unfault graph coverage /api
+  unfault graph coverage "/api/**" --method POST
+  unfault graph coverage /checkout --offline
+  unfault graph coverage /api --refresh-cache --json
+  ```
+
+  Each route receives an independent trace status (`observed`, `instrumented_only`,
+  `missing`, `unknown`) and metrics status (`covered`, `missing`, `unknown`),
+  which roll up to an overall status of `full`, `partial`, `missing`, or `unknown`.
+
+  Human output renders a path-prefix tree so coverage gaps are visible at a
+  glance. `--json` emits a fully structured `CoverageContext` document suitable
+  for CI diffing or dashboarding.
+
+  Results are stored in the query cache (keyed on route + method + git commit
+  SHA) so repeated calls in the same session are instant.
+
+- **Route observations cached during `unfault review`** — the review enrichment
+  pass now co-fetches inbound HTTP route observations from GCP Cloud Trace
+  alongside the existing outbound call patterns. These are stored in the
+  enrichment cache so that `unfault graph coverage` can serve results without
+  an extra network round-trip after a `review` run.
+
+### Fixed
+
+- **45-second outer timeout on live observability fetches** — SLO and Cloud
+  Trace fetches in `unfault graph coverage` are now guarded by a
+  `tokio::time::timeout(45s)` deadline. A clear warning is printed if the
+  deadline fires rather than hanging the command indefinitely.
+
+- **`normalize_route_path` deduplicated** — the SLO matcher's implementation
+  is now the single canonical source (`slo::matcher::normalize_route_path`),
+  removing a prior duplication in the coverage command.
+
 ## [0.8.2] - 2026-05-28
 
 ### Added

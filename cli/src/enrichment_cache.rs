@@ -23,6 +23,7 @@
 //!
 //! - `Vec<SloDefinition>` — SLO definitions from all configured providers
 //! - `Vec<RemoteCallPattern>` — cross-service call patterns from Cloud Trace
+//! - `Vec<ObservedRoute>` — inbound HTTP routes observed in recent traces
 //!
 //! Both are stored together in a single cache entry per (project, workspace)
 //! pair. If either is missing (e.g. no trace credentials), only the available
@@ -35,7 +36,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::slo::types::SloDefinition;
-use crate::trace::RemoteCallPattern;
+use crate::trace::{ObservedRoute, RemoteCallPattern};
 
 /// Default TTL for enrichment cache entries: 5 minutes.
 pub const DEFAULT_TTL_SECS: u64 = 5 * 60;
@@ -55,6 +56,9 @@ pub struct EnrichmentSnapshot {
     pub slos: Vec<SloDefinition>,
     /// Observed cross-service call patterns from traces. Empty if no traces.
     pub trace_patterns: Vec<CachedRemoteCallPattern>,
+    /// Observed inbound HTTP routes from traces. Empty if unavailable.
+    #[serde(default)]
+    pub observed_routes: Vec<CachedObservedRoute>,
 }
 
 impl EnrichmentSnapshot {
@@ -105,6 +109,37 @@ impl From<CachedRemoteCallPattern> for RemoteCallPattern {
     }
 }
 
+/// A serialisable mirror of `ObservedRoute`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedObservedRoute {
+    pub http_method: Option<String>,
+    pub route_path: String,
+    pub observed_count: u32,
+    pub sample_span_names: Vec<String>,
+}
+
+impl From<&ObservedRoute> for CachedObservedRoute {
+    fn from(route: &ObservedRoute) -> Self {
+        Self {
+            http_method: route.http_method.clone(),
+            route_path: route.route_path.clone(),
+            observed_count: route.observed_count,
+            sample_span_names: route.sample_span_names.clone(),
+        }
+    }
+}
+
+impl From<CachedObservedRoute> for ObservedRoute {
+    fn from(route: CachedObservedRoute) -> Self {
+        Self {
+            http_method: route.http_method,
+            route_path: route.route_path,
+            observed_count: route.observed_count,
+            sample_span_names: route.sample_span_names,
+        }
+    }
+}
+
 /// File-based enrichment cache.
 pub struct EnrichmentCache {
     cache_dir: PathBuf,
@@ -138,8 +173,8 @@ impl EnrichmentCache {
         if snapshot.is_fresh() {
             Some(snapshot)
         } else {
-            // Stale — remove silently
-            let _ = std::fs::remove_file(&path);
+            // Stale — best-effort cleanup; ignore if the file is already gone.
+            let _ = std::fs::remove_file(&path); // unfault-ignore: rust.ignored_result
             None
         }
     }
@@ -151,6 +186,7 @@ impl EnrichmentCache {
         workspace_slug: &str,
         slos: Vec<SloDefinition>,
         trace_patterns: Vec<CachedRemoteCallPattern>,
+        observed_routes: Vec<CachedObservedRoute>,
     ) -> Result<()> {
         let snapshot = EnrichmentSnapshot {
             created_at: now_unix_secs(),
@@ -159,6 +195,7 @@ impl EnrichmentCache {
             workspace_slug: workspace_slug.to_string(),
             slos,
             trace_patterns,
+            observed_routes,
         };
 
         let path = self.cache_path(project_id, workspace_slug);
@@ -174,7 +211,7 @@ impl EnrichmentCache {
     /// Used by `--refresh-cache` to force a live fetch on the next run.
     pub fn invalidate(&self, project_id: &str, workspace_slug: &str) {
         let path = self.cache_path(project_id, workspace_slug);
-        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(path); // unfault-ignore: rust.ignored_result — intentional best-effort delete
     }
 
     /// Derive a stable file path for a given (project_id, workspace_slug) pair.
@@ -214,7 +251,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let cache = EnrichmentCache::open(dir.path(), 300).unwrap();
 
-        cache.save("proj-123", "app-a", vec![], vec![]).unwrap();
+        cache
+            .save("proj-123", "app-a", vec![], vec![], vec![])
+            .unwrap();
 
         let snapshot = cache.load("proj-123", "app-a").unwrap();
         assert!(snapshot.is_fresh());
@@ -222,6 +261,7 @@ mod tests {
         assert_eq!(snapshot.workspace_slug, "app-a");
         assert!(snapshot.slos.is_empty());
         assert!(snapshot.trace_patterns.is_empty());
+        assert!(snapshot.observed_routes.is_empty());
     }
 
     #[test]
@@ -229,7 +269,9 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let cache = EnrichmentCache::open(dir.path(), 0).unwrap(); // TTL = 0s
 
-        cache.save("proj-123", "app-a", vec![], vec![]).unwrap();
+        cache
+            .save("proj-123", "app-a", vec![], vec![], vec![])
+            .unwrap();
 
         // Sleep not needed — TTL=0 means any positive age is stale
         // (created_at + 0 <= now)
@@ -249,8 +291,12 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let cache = EnrichmentCache::open(dir.path(), 300).unwrap();
 
-        cache.save("proj-123", "app-a", vec![], vec![]).unwrap();
-        cache.save("proj-123", "app-b", vec![], vec![]).unwrap();
+        cache
+            .save("proj-123", "app-a", vec![], vec![], vec![])
+            .unwrap();
+        cache
+            .save("proj-123", "app-b", vec![], vec![], vec![])
+            .unwrap();
 
         assert!(cache.load("proj-123", "app-a").is_some());
         assert!(cache.load("proj-123", "app-b").is_some());

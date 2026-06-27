@@ -36,6 +36,7 @@
 
 use anyhow::Result;
 use colored::Colorize;
+use std::collections::BTreeMap;
 
 use crate::exit_codes::*;
 
@@ -691,6 +692,24 @@ pub struct RoutesArgs {
     pub verbose: bool,
 }
 
+/// Arguments for the graph coverage command
+#[derive(Debug)]
+pub struct CoverageArgs {
+    pub workspace_path: Option<String>,
+    /// Route prefix or wildcard pattern (e.g. "/api", "/api/**")
+    pub route: String,
+    /// Optional HTTP method filter (e.g. "GET", "POST")
+    pub method: Option<String>,
+    /// Output as JSON
+    pub json: bool,
+    /// Force a live refresh of observability data
+    pub refresh_cache: bool,
+    /// Use cached observability data only
+    pub offline: bool,
+    /// Enable verbose output
+    pub verbose: bool,
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct RouteEntry {
     pub method: String,
@@ -712,6 +731,113 @@ pub struct RouteEntry {
     /// Response schema from `@blp.response(200, SchemaY)` or `@marshal_with`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_schema: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CoverageDataSources {
+    pub traces_available: bool,
+    pub metrics_available: bool,
+    pub from_cache: bool,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CoverageSummary {
+    pub total_routes: usize,
+    pub fully_covered: usize,
+    pub partial: usize,
+    pub missing_both: usize,
+    pub unknown: usize,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SloCoverageEntry {
+    pub name: String,
+    pub provider: String,
+    pub target_percent: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dashboard_url: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TraceCoverage {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub instrumented: bool,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub observed_count: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sample_span_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MetricsCoverage {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub slos: Vec<SloCoverageEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RouteCoverageEntry {
+    pub method: String,
+    pub path: String,
+    pub handler: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    pub overall_status: String,
+    pub traces: TraceCoverage,
+    pub metrics: MetricsCoverage,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CoverageContext {
+    pub target: String,
+    pub root: String,
+    pub data_sources: CoverageDataSources,
+    pub summary: CoverageSummary,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub routes: Vec<RouteCoverageEntry>,
+}
+
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+fn collect_route_entries(graph: &unfault_analysis::graph::CodeGraph) -> Vec<RouteEntry> {
+    let mut routes: Vec<RouteEntry> = Vec::new();
+
+    for node_idx in graph.graph.node_indices() {
+        let node = &graph.graph[node_idx];
+        if let unfault_analysis::graph::GraphNode::Function {
+            is_handler: true,
+            http_method: Some(method),
+            http_path: Some(path),
+            name,
+            decorators,
+            is_writer,
+            line,
+            request_schema,
+            response_schema,
+            ..
+        } = node
+        {
+            let file = unfault_analysis::graph::traversal::node_file_path_pub(graph, node)
+                .unwrap_or_default();
+            routes.push(RouteEntry {
+                method: method.clone(),
+                path: path.clone(),
+                handler: name.clone(),
+                file,
+                line: *line,
+                decorators: decorators.clone(),
+                is_writer: *is_writer,
+                request_schema: request_schema.clone(),
+                response_schema: response_schema.clone(),
+            });
+        }
+    }
+
+    routes
 }
 
 pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
@@ -754,44 +880,7 @@ pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
         }
     };
 
-    // Collect all route entries from the graph.
-    let mut routes: Vec<RouteEntry> = Vec::new();
-
-    for node_idx in graph.graph.node_indices() {
-        let node = &graph.graph[node_idx];
-        match node {
-            unfault_analysis::graph::GraphNode::Function {
-                is_handler: true,
-                http_method: Some(method),
-                http_path: Some(path),
-                name,
-                decorators,
-                is_writer,
-                line,
-                request_schema,
-                response_schema,
-                ..
-            } => {
-                let file = unfault_analysis::graph::traversal::node_file_path_pub(&graph, node)
-                    .unwrap_or_default();
-                routes.push(RouteEntry {
-                    method: method.clone(),
-                    path: path.clone(),
-                    handler: name.clone(),
-                    file,
-                    line: *line,
-                    decorators: decorators.clone(),
-                    is_writer: *is_writer,
-                    request_schema: request_schema.clone(),
-                    response_schema: response_schema.clone(),
-                });
-            }
-            // FastApiRoute nodes carry method+path but not the handler name —
-            // those are already captured via their companion Function node above,
-            // so skip them to avoid duplicates.
-            _ => {}
-        }
-    }
+    let mut routes = collect_route_entries(&graph);
 
     // Apply filters.
     if let Some(ref method_filter) = args.method {
@@ -925,6 +1014,665 @@ fn render_route_annotations(
             parts.push(format!("out:{}", resp.cyan()));
         }
         println!("             {}", parts.join("  ").dimmed());
+    }
+}
+
+pub async fn execute_coverage(args: CoverageArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    // Query-cache key encodes the route, optional method filter, and
+    // whether a live refresh was requested.  A refresh bypasses the cache.
+    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let cache_params = format!(
+        "{}|{}|{}",
+        args.route,
+        args.method.as_deref().unwrap_or(""),
+        if args.refresh_cache { "refresh" } else { "" },
+    );
+
+    if !args.verbose && !args.refresh_cache {
+        if let Some(ctx) = crate::session::query_cache::get::<CoverageContext>(
+            &workspace_path,
+            "coverage",
+            &cache_params,
+            &commit_sha,
+        ) {
+            return render_coverage_output(&ctx, args.json);
+        }
+    }
+
+    if args.verbose {
+        eprintln!("{} Building code graph...", "→".cyan());
+    }
+
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    let workspace_label = workspace_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("workspace");
+
+    let observability = load_observability_data(
+        &workspace_path,
+        workspace_label,
+        args.refresh_cache,
+        args.offline,
+        args.verbose,
+    )
+    .await?;
+
+    let mut routes = collect_route_entries(&graph);
+    routes.retain(|route| route_matches_target(&args.route, &route.path));
+    if let Some(ref method_filter) = args.method {
+        let upper = method_filter.to_uppercase();
+        routes.retain(|route| route.method.to_uppercase() == upper);
+    }
+    routes.sort_by(|a, b| a.path.cmp(&b.path).then(a.method.cmp(&b.method)));
+
+    let context = build_coverage_context(
+        &args.route,
+        workspace_label,
+        routes,
+        &observability.slos,
+        &observability.observed_routes,
+        observability.traces_available,
+        observability.metrics_available,
+        observability.from_cache,
+    );
+
+    crate::session::query_cache::set::<CoverageContext>(
+        &workspace_path,
+        "coverage",
+        &cache_params,
+        &commit_sha,
+        &context,
+    );
+
+    render_coverage_output(&context, args.json)
+}
+
+#[derive(Debug, Default)]
+struct ObservabilityData {
+    slos: Vec<crate::slo::SloDefinition>,
+    observed_routes: Vec<crate::trace::ObservedRoute>,
+    traces_available: bool,
+    metrics_available: bool,
+    from_cache: bool,
+}
+
+async fn load_observability_data(
+    workspace_path: &std::path::Path,
+    workspace_label: &str,
+    refresh_cache: bool,
+    offline: bool,
+    verbose: bool,
+) -> Result<ObservabilityData> {
+    let mut data = ObservabilityData::default();
+
+    let slo_enricher = crate::slo::SloEnricher::new(verbose);
+    let trace_provider = crate::trace::GcpTraceProvider::from_env();
+
+    data.metrics_available = slo_enricher.any_provider_available();
+    data.traces_available = trace_provider.is_some();
+
+    let gcp_creds = crate::integration::gcp::GcpCredentials::from_env();
+    let project_id = gcp_creds
+        .as_ref()
+        .map(|c| c.project_id.clone())
+        .unwrap_or_default();
+    let cache = crate::enrichment_cache::EnrichmentCache::open(
+        workspace_path,
+        crate::enrichment_cache::DEFAULT_TTL_SECS,
+    )?;
+
+    if refresh_cache && !project_id.is_empty() {
+        cache.invalidate(&project_id, workspace_label);
+    }
+
+    if !project_id.is_empty() {
+        if let Some(snapshot) = cache.load(&project_id, workspace_label) {
+            data.slos = snapshot.slos;
+            data.observed_routes = snapshot
+                .observed_routes
+                .into_iter()
+                .map(crate::trace::ObservedRoute::from)
+                .collect();
+            data.from_cache = true;
+            data.metrics_available = data.metrics_available || !data.slos.is_empty();
+            data.traces_available = data.traces_available || !data.observed_routes.is_empty();
+
+            let need_live_slos = data.slos.is_empty() && slo_enricher.any_provider_available();
+            let need_live_traces = data.observed_routes.is_empty() && trace_provider.is_some();
+            if !need_live_slos && !need_live_traces {
+                return Ok(data);
+            }
+        }
+    }
+
+    if offline {
+        return Ok(data);
+    }
+
+    // Hard deadline for all live network fetches. Each individual HTTP call
+    // already has a 20s per-request timeout; this outer deadline ensures the
+    // whole enrichment block (potentially several paged API calls) never stalls
+    // an interactive `unfault graph coverage` invocation beyond 45 seconds.
+    const LIVE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
+
+    if slo_enricher.any_provider_available() {
+        match tokio::time::timeout(LIVE_FETCH_TIMEOUT, slo_enricher.fetch_all()).await {
+            Ok(Ok(result)) => {
+                if result.credentials_expired {
+                    eprintln!(
+                        "{} SLO credentials appear expired — run `unfault config integrations verify`",
+                        "warn:".yellow().bold()
+                    );
+                }
+                data.slos = result.slos;
+            }
+            Ok(Err(e)) => {
+                if verbose {
+                    eprintln!("{} Could not fetch SLOs: {}", "warn:".yellow().bold(), e);
+                }
+            }
+            Err(_) => {
+                eprintln!(
+                    "{} SLO fetch timed out after {}s",
+                    "warn:".yellow().bold(),
+                    LIVE_FETCH_TIMEOUT.as_secs()
+                );
+            }
+        }
+    }
+
+    if let Some(trace_provider) = trace_provider {
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(20))
+            .build()
+            .unwrap_or_default();
+
+        match tokio::time::timeout(
+            LIVE_FETCH_TIMEOUT,
+            trace_provider.fetch_route_observations(&http_client, 60, 200),
+        )
+        .await
+        {
+            Ok(Ok(routes)) => {
+                data.observed_routes = routes;
+            }
+            Ok(Err(e)) => {
+                if verbose {
+                    eprintln!(
+                        "{} Could not fetch Cloud Trace route observations: {}",
+                        "warn:".yellow().bold(),
+                        e
+                    );
+                }
+            }
+            Err(_) => {
+                eprintln!(
+                    "{} Cloud Trace fetch timed out after {}s",
+                    "warn:".yellow().bold(),
+                    LIVE_FETCH_TIMEOUT.as_secs()
+                );
+            }
+        }
+    }
+
+    if !project_id.is_empty() {
+        let cached_routes: Vec<_> = data
+            .observed_routes
+            .iter()
+            .map(crate::enrichment_cache::CachedObservedRoute::from)
+            .collect();
+        // Best-effort — a failed cache write must never abort the command.
+        let _ = cache.save(
+            // unfault-ignore: rust.ignored_result
+            &project_id,
+            workspace_label,
+            data.slos.clone(),
+            vec![],
+            cached_routes,
+        );
+    }
+
+    Ok(data)
+}
+
+fn build_coverage_context(
+    target: &str,
+    workspace_label: &str,
+    routes: Vec<RouteEntry>,
+    slos: &[crate::slo::SloDefinition],
+    observed_routes: &[crate::trace::ObservedRoute],
+    traces_available: bool,
+    metrics_available: bool,
+    from_cache: bool,
+) -> CoverageContext {
+    let root = normalize_target_root(target);
+    let mut entries = Vec::new();
+    let mut summary = CoverageSummary {
+        total_routes: routes.len(),
+        fully_covered: 0,
+        partial: 0,
+        missing_both: 0,
+        unknown: 0,
+    };
+
+    for route in routes {
+        let trace_entry = build_trace_coverage(&route, observed_routes, traces_available);
+        let metrics_entry =
+            build_metrics_coverage(&route, slos, workspace_label, metrics_available);
+        let overall_status = overall_coverage_status(&trace_entry, &metrics_entry);
+
+        match overall_status.as_str() {
+            "full" => summary.fully_covered += 1,
+            "partial" => summary.partial += 1,
+            "missing" => summary.missing_both += 1,
+            _ => summary.unknown += 1,
+        }
+
+        entries.push(RouteCoverageEntry {
+            method: route.method,
+            path: route.path,
+            handler: route.handler,
+            file: route.file,
+            line: route.line,
+            overall_status,
+            traces: trace_entry,
+            metrics: metrics_entry,
+        });
+    }
+
+    CoverageContext {
+        target: target.to_string(),
+        root,
+        data_sources: CoverageDataSources {
+            traces_available,
+            metrics_available,
+            from_cache,
+        },
+        summary,
+        routes: entries,
+    }
+}
+
+fn build_trace_coverage(
+    route: &RouteEntry,
+    observed_routes: &[crate::trace::ObservedRoute],
+    traces_available: bool,
+) -> TraceCoverage {
+    let instrumented = route.decorators.iter().any(|decorator| {
+        matches!(
+            decorator,
+            unfault_core::graph::DecoratorSemantic::Tracing { .. }
+        )
+    });
+
+    let normalized_path = normalize_route_path(&route.path);
+    let mut observed_count = 0;
+    let mut sample_span_names = Vec::new();
+
+    for observed in observed_routes {
+        let method_matches = observed
+            .http_method
+            .as_deref()
+            .map(|m| m.eq_ignore_ascii_case(&route.method))
+            .unwrap_or(true);
+        if method_matches && observed.route_path == normalized_path {
+            observed_count += observed.observed_count;
+            for sample in &observed.sample_span_names {
+                if !sample_span_names.contains(sample) && sample_span_names.len() < 3 {
+                    sample_span_names.push(sample.clone());
+                }
+            }
+        }
+    }
+
+    let status = if observed_count > 0 {
+        "observed"
+    } else if instrumented {
+        "instrumented_only"
+    } else if traces_available {
+        "missing"
+    } else {
+        "unknown"
+    };
+
+    TraceCoverage {
+        status: status.to_string(),
+        instrumented,
+        observed_count,
+        sample_span_names,
+    }
+}
+
+fn build_metrics_coverage(
+    route: &RouteEntry,
+    slos: &[crate::slo::SloDefinition],
+    workspace_label: &str,
+    metrics_available: bool,
+) -> MetricsCoverage {
+    let mut matches = Vec::new();
+
+    for slo in slos {
+        if slo_matches_route(slo, route, workspace_label) {
+            matches.push(SloCoverageEntry {
+                name: slo.name.clone(),
+                provider: slo.provider.to_string(),
+                target_percent: slo.target_percent,
+                dashboard_url: slo.dashboard_url.clone(),
+            });
+        }
+    }
+
+    let status = if !matches.is_empty() {
+        "covered"
+    } else if metrics_available {
+        "missing"
+    } else {
+        "unknown"
+    };
+
+    MetricsCoverage {
+        status: status.to_string(),
+        slos: matches,
+    }
+}
+
+fn overall_coverage_status(traces: &TraceCoverage, metrics: &MetricsCoverage) -> String {
+    let trace_present = matches!(traces.status.as_str(), "observed" | "instrumented_only");
+    let metric_present = metrics.status == "covered";
+    let trace_unknown = traces.status == "unknown";
+    let metrics_unknown = metrics.status == "unknown";
+
+    if trace_present && metric_present {
+        "full".to_string()
+    } else if trace_present || metric_present {
+        "partial".to_string()
+    } else if trace_unknown && metrics_unknown {
+        "unknown".to_string()
+    } else {
+        "missing".to_string()
+    }
+}
+
+fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
+    if ctx.routes.is_empty() {
+        if json {
+            println!("{}", serde_json::to_string_pretty(ctx)?);
+        } else {
+            println!("\n{} No routes matched '{}'.\n", "→".cyan(), ctx.target);
+        }
+        return Ok(EXIT_SUCCESS);
+    }
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(ctx)?);
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!(
+        "\n{} Observability coverage for {}\n",
+        "→".cyan(),
+        ctx.target.bright_white().bold()
+    );
+    println!(
+        "  {} routes  {} full  {} partial  {} missing  {} unknown",
+        ctx.summary.total_routes.to_string().yellow(),
+        ctx.summary.fully_covered.to_string().green(),
+        ctx.summary.partial.to_string().cyan(),
+        ctx.summary.missing_both.to_string().red(),
+        ctx.summary.unknown.to_string().yellow(),
+    );
+
+    if !ctx.data_sources.traces_available {
+        println!("  traces: {}", "no trace source configured".yellow());
+    }
+    if !ctx.data_sources.metrics_available {
+        println!("  metrics: {}", "no SLO/metrics source configured".yellow());
+    }
+    if ctx.data_sources.from_cache {
+        println!("  source: {}", "cached observability snapshot".dimmed());
+    }
+    println!();
+
+    let tree = build_coverage_tree(&ctx.root, &ctx.routes);
+    println!("  {}", ctx.root.bright_blue());
+    render_coverage_tree(&tree, &ctx.routes, 2);
+    println!();
+
+    Ok(EXIT_SUCCESS)
+}
+
+#[derive(Default)]
+struct CoverageTreeNode {
+    children: BTreeMap<String, CoverageTreeNode>,
+    routes: Vec<usize>,
+}
+
+fn build_coverage_tree(root: &str, routes: &[RouteCoverageEntry]) -> CoverageTreeNode {
+    let mut tree = CoverageTreeNode::default();
+    for (idx, route) in routes.iter().enumerate() {
+        let normalized = normalize_route_path(&route.path);
+        let remainder = strip_root_prefix(root, &normalized);
+        let mut cursor = &mut tree;
+        for segment in remainder.split('/').filter(|segment| !segment.is_empty()) {
+            cursor = cursor.children.entry(segment.to_string()).or_default();
+        }
+        cursor.routes.push(idx);
+    }
+    tree
+}
+
+fn render_coverage_tree(tree: &CoverageTreeNode, routes: &[RouteCoverageEntry], indent: usize) {
+    for &route_idx in &tree.routes {
+        render_coverage_route(&routes[route_idx], indent);
+    }
+
+    for (segment, child) in &tree.children {
+        println!("{}{}", " ".repeat(indent), segment.dimmed());
+        render_coverage_tree(child, routes, indent + 2);
+    }
+}
+
+fn render_coverage_route(route: &RouteCoverageEntry, indent: usize) {
+    let method = match route.method.as_str() {
+        "GET" => route.method.bright_green(),
+        "POST" => route.method.bright_yellow(),
+        "PUT" | "PATCH" => route.method.bright_cyan(),
+        "DELETE" => route.method.bright_red(),
+        _ => route.method.normal(),
+    };
+    let overall = match route.overall_status.as_str() {
+        "full" => "full".green(),
+        "partial" => "partial".cyan(),
+        "missing" => "missing".red(),
+        _ => "unknown".yellow(),
+    };
+    let trace_label = trace_status_label(&route.traces);
+    let metrics_label = metrics_status_label(&route.metrics);
+    let location = route
+        .line
+        .map(|line| format!("{}:{}", route.file, line))
+        .unwrap_or_else(|| route.file.clone());
+
+    println!(
+        "{}{:<8} {}  [{}]  [{}]  [{}]",
+        " ".repeat(indent),
+        method,
+        route.path,
+        overall,
+        trace_label,
+        metrics_label,
+    );
+    println!(
+        "{}{}  {}",
+        " ".repeat(indent + 11),
+        route.handler.dimmed(),
+        location.dimmed()
+    );
+}
+
+fn trace_status_label(trace: &TraceCoverage) -> String {
+    match trace.status.as_str() {
+        "observed" => {
+            let evidence = trace
+                .sample_span_names
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "recent spans".to_string());
+            format!("traces {}x via {}", trace.observed_count, evidence)
+        }
+        "instrumented_only" => "traces instrumented only".to_string(),
+        "missing" => "traces missing".to_string(),
+        _ => "traces unknown".to_string(),
+    }
+}
+
+fn metrics_status_label(metrics: &MetricsCoverage) -> String {
+    match metrics.status.as_str() {
+        "covered" => {
+            if metrics.slos.len() == 1 {
+                format!("metrics {}", metrics.slos[0].name)
+            } else {
+                format!("metrics {} SLOs", metrics.slos.len())
+            }
+        }
+        "missing" => "metrics missing".to_string(),
+        _ => "metrics unknown".to_string(),
+    }
+}
+
+fn route_matches_target(target: &str, route_path: &str) -> bool {
+    if target.contains('*') {
+        return path_matches_pattern(target, route_path);
+    }
+
+    let normalized_target = normalize_target_root(target);
+    let normalized_route = normalize_route_path(route_path);
+    normalized_route == normalized_target
+        || normalized_route.starts_with(&(normalized_target.clone() + "/"))
+}
+
+fn normalize_target_root(target: &str) -> String {
+    let raw = target.split('*').next().unwrap_or(target);
+    let normalized = normalize_route_path(raw);
+    if normalized.is_empty() {
+        "/".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn strip_root_prefix(root: &str, route_path: &str) -> String {
+    if root == "/" {
+        return route_path.trim_start_matches('/').to_string();
+    }
+
+    if route_path == root {
+        String::new()
+    } else {
+        route_path
+            .strip_prefix(&(root.to_string() + "/"))
+            .unwrap_or(route_path)
+            .to_string()
+    }
+}
+
+fn slo_matches_route(
+    slo: &crate::slo::SloDefinition,
+    route: &RouteEntry,
+    workspace_label: &str,
+) -> bool {
+    if let Some(ref slo_method) = slo.http_method {
+        if !slo_method.eq_ignore_ascii_case(&route.method) {
+            return false;
+        }
+    }
+
+    if slo.has_path_pattern() {
+        return path_matches_pattern(slo.path_pattern.as_deref().unwrap_or("*"), &route.path);
+    }
+
+    slo.matches_local_service(workspace_label)
+}
+
+fn path_matches_pattern(pattern: &str, route_path: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    let pattern = normalize_path_pattern(pattern);
+    let route = normalize_route_path(route_path);
+
+    if pattern.ends_with("/**") {
+        let prefix = &pattern[..pattern.len() - 3];
+        return route.starts_with(prefix) || route == prefix.trim_end_matches('/');
+    }
+
+    if pattern.ends_with("/*") {
+        let prefix = &pattern[..pattern.len() - 2];
+        if !route.starts_with(prefix) {
+            return false;
+        }
+        let remainder = &route[prefix.len()..];
+        if remainder.is_empty() {
+            return true;
+        }
+        if let Some(after_slash) = remainder.strip_prefix('/') {
+            return !after_slash.contains('/');
+        }
+        return false;
+    }
+
+    pattern == route
+}
+
+fn normalize_path_pattern(path: &str) -> String {
+    // Patterns use explicit `*` / `**` — only lowercase and strip trailing slash.
+    let mut normalized = path.to_ascii_lowercase();
+    if normalized.len() > 1 && normalized.ends_with('/') {
+        normalized.pop();
+    }
+    normalized
+}
+
+// Delegate to the canonical implementation in slo::matcher so there is a
+// single source of truth for dynamic-segment collapsing.
+fn normalize_route_path(path: &str) -> String {
+    crate::slo::matcher::normalize_route_path(path)
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn route_target_prefix_matches_descendants() {
+        assert!(route_matches_target("/api", "/api/users"));
+        assert!(route_matches_target("/api", "/api"));
+        assert!(!route_matches_target("/api", "/admin"));
+    }
+
+    #[test]
+    fn route_target_wildcards_match_templates() {
+        assert!(path_matches_pattern("/users/*", "/users/:id"));
+        assert!(path_matches_pattern("/api/**", "/api/orders/123"));
+        assert!(!path_matches_pattern("/users/*", "/users/123/orders"));
     }
 }
 

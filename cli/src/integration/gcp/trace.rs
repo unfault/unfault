@@ -55,6 +55,19 @@ pub struct RemoteCallPattern {
     pub local_callers: Vec<String>,
 }
 
+/// An HTTP route observed in recent traces.
+#[derive(Debug, Clone)]
+pub struct ObservedRoute {
+    /// HTTP method if one could be inferred from span attributes.
+    pub http_method: Option<String>,
+    /// Normalized route path (dynamic segments collapsed to `*`).
+    pub route_path: String,
+    /// Number of matching spans observed for this route.
+    pub observed_count: u32,
+    /// A few sample span names for human-readable evidence.
+    pub sample_span_names: Vec<String>,
+}
+
 /// GCP Cloud Trace v1 provider.
 pub struct GcpTraceProvider {
     project_id: String,
@@ -98,6 +111,26 @@ impl GcpTraceProvider {
             .await?;
 
         Ok(extract_remote_call_patterns(traces))
+    }
+
+    /// Fetch recent traces and extract inbound HTTP route observations.
+    pub async fn fetch_route_observations(
+        &self,
+        client: &Client,
+        lookback_minutes: u32,
+        page_size: u32,
+    ) -> Result<Vec<ObservedRoute>> {
+        let token = self
+            .credentials
+            .access_token(client)
+            .await
+            .context("Failed to acquire GCP access token for Cloud Trace")?;
+
+        let traces = self
+            .list_traces(client, &token, lookback_minutes, page_size)
+            .await?;
+
+        Ok(extract_observed_routes(traces))
     }
 
     // ── REST calls ──────────────────────────────────────────────────────────
@@ -306,6 +339,216 @@ fn extract_remote_call_patterns(traces: Vec<TraceV1>) -> Vec<RemoteCallPattern> 
             }
         })
         .collect()
+}
+
+fn extract_observed_routes(traces: Vec<TraceV1>) -> Vec<ObservedRoute> {
+    let mut aggregation: HashMap<(String, String), (u32, Vec<String>)> = HashMap::new();
+
+    for trace in &traces {
+        for span in &trace.spans {
+            if !is_inbound_request_span(span) {
+                continue;
+            }
+
+            let method = infer_http_method(span)
+                .map(|m| m.to_uppercase())
+                .unwrap_or_else(|| "ANY".to_string());
+            let Some(path) = infer_route_path(span) else {
+                continue;
+            };
+
+            let key = (method, path);
+            let entry = aggregation.entry(key).or_insert_with(|| (0, Vec::new()));
+            entry.0 += 1;
+            if !span.name.is_empty() && !entry.1.contains(&span.name) && entry.1.len() < 3 {
+                entry.1.push(span.name.clone());
+            }
+        }
+    }
+
+    let mut routes: Vec<ObservedRoute> = aggregation
+        .into_iter()
+        .map(
+            |((method, path), (count, sample_span_names))| ObservedRoute {
+                http_method: if method == "ANY" { None } else { Some(method) },
+                route_path: path,
+                observed_count: count,
+                sample_span_names,
+            },
+        )
+        .collect();
+
+    routes.sort_by(|a, b| {
+        a.route_path
+            .cmp(&b.route_path)
+            .then(a.http_method.cmp(&b.http_method))
+    });
+    routes
+}
+
+fn is_inbound_request_span(span: &TraceSpanV1) -> bool {
+    if span
+        .kind
+        .as_deref()
+        .map(|k| k == "RPC_SERVER" || k == "SERVER")
+        .unwrap_or(false)
+    {
+        return true;
+    }
+
+    span.labels
+        .get("/component")
+        .map(|c| c == "AppServer")
+        .unwrap_or(false)
+}
+
+fn infer_http_method(span: &TraceSpanV1) -> Option<String> {
+    if let Some(method) = span
+        .labels
+        .get("/http/method")
+        .or_else(|| span.labels.get("http.method"))
+    {
+        let trimmed = method.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let (method, _) = parse_span_name_signature(&span.name);
+    method
+}
+
+fn infer_route_path(span: &TraceSpanV1) -> Option<String> {
+    let raw = span
+        .labels
+        .get("http.route")
+        .or_else(|| span.labels.get("/http/route"))
+        .or_else(|| span.labels.get("http.target"))
+        .or_else(|| span.labels.get("/http/path"))
+        .or_else(|| span.labels.get("http.path"))
+        .cloned()
+        .or_else(|| {
+            span.labels
+                .get("/http/url")
+                .or_else(|| span.labels.get("http.url"))
+                .and_then(|u| url_path_only(u))
+        })
+        .or_else(|| {
+            let (_, path) = parse_span_name_signature(&span.name);
+            path
+        })?;
+
+    normalize_observed_route_path(&raw)
+}
+
+fn parse_span_name_signature(name: &str) -> (Option<String>, Option<String>) {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return (None, None);
+    }
+
+    let mut parts = trimmed.split_whitespace();
+    let first = parts.next().unwrap_or_default();
+    let second = parts.next();
+
+    if is_http_method_name(first) {
+        let method = Some(first.to_uppercase());
+        let path = second
+            .filter(|p| p.starts_with('/'))
+            .map(std::string::ToString::to_string);
+        return (method, path);
+    }
+
+    if trimmed.starts_with('/') {
+        return (None, Some(trimmed.to_string()));
+    }
+
+    (None, None)
+}
+
+fn is_http_method_name(value: &str) -> bool {
+    matches!(
+        value.to_ascii_uppercase().as_str(),
+        "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" | "TRACE"
+    )
+}
+
+fn url_path_only(value: &str) -> Option<String> {
+    let without_scheme = value
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(value);
+    let after_host = without_scheme.split_once('/').map(|(_, rest)| rest)?;
+    Some(format!("/{}", after_host))
+}
+
+fn normalize_observed_route_path(path: &str) -> Option<String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let candidate = if raw.starts_with("http://") || raw.starts_with("https://") {
+        url_path_only(raw).unwrap_or_else(|| "/".to_string())
+    } else {
+        raw.to_string()
+    };
+
+    let without_query = candidate
+        .split('?')
+        .next()
+        .unwrap_or(candidate.as_str())
+        .split('#')
+        .next()
+        .unwrap_or(candidate.as_str());
+
+    let mut normalized_segments = Vec::new();
+    for segment in without_query.split('/') {
+        if segment.is_empty() {
+            continue;
+        }
+        normalized_segments.push(normalize_route_segment(segment));
+    }
+
+    if normalized_segments.is_empty() {
+        Some("/".to_string())
+    } else {
+        Some(format!("/{}", normalized_segments.join("/")))
+    }
+}
+
+fn normalize_route_segment(segment: &str) -> String {
+    if segment.starts_with(':')
+        || (segment.starts_with('{') && segment.ends_with('}'))
+        || (segment.starts_with('<') && segment.ends_with('>'))
+        || looks_dynamic_segment(segment)
+    {
+        return "*".to_string();
+    }
+
+    segment.to_ascii_lowercase()
+}
+
+fn looks_dynamic_segment(segment: &str) -> bool {
+    if segment.chars().all(|c| c.is_ascii_digit()) {
+        return true;
+    }
+
+    let compact = segment.trim_matches(|c| c == '{' || c == '}' || c == '<' || c == '>');
+    if compact.is_empty() {
+        return false;
+    }
+
+    let hyphenless: String = compact.chars().filter(|c| *c != '-').collect();
+    if hyphenless.len() == 32 && hyphenless.chars().all(|c| c.is_ascii_hexdigit()) {
+        return true;
+    }
+
+    compact.len() >= 8
+        && compact.chars().any(|c| c.is_ascii_digit())
+        && compact
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 fn infer_remote_service_name(span: &TraceSpanV1) -> String {
@@ -849,6 +1092,41 @@ mod tests {
         }];
         let patterns = extract_remote_call_patterns(traces);
         assert!(patterns.is_empty());
+    }
+
+    #[test]
+    fn extract_observed_routes_from_server_spans() {
+        let mut labels = HashMap::new();
+        labels.insert("/http/method".to_string(), "GET".to_string());
+        labels.insert("http.route".to_string(), "/users/{user_id}".to_string());
+
+        let span = TraceSpanV1 {
+            span_id: "1".to_string(),
+            kind: Some("SERVER".to_string()),
+            name: "GET /users/42".to_string(),
+            start_time: "2026-04-15T00:00:00Z".to_string(),
+            end_time: "2026-04-15T00:00:00.100Z".to_string(),
+            parent_span_id: None,
+            labels,
+        };
+
+        let routes = extract_observed_routes(vec![TraceV1 {
+            _trace_id: "t3".to_string(),
+            spans: vec![span],
+        }]);
+
+        assert_eq!(routes.len(), 1);
+        assert_eq!(routes[0].http_method.as_deref(), Some("GET"));
+        assert_eq!(routes[0].route_path, "/users/*");
+        assert_eq!(routes[0].observed_count, 1);
+    }
+
+    #[test]
+    fn normalize_observed_route_path_collapses_ids() {
+        assert_eq!(
+            normalize_observed_route_path("/orders/123e4567-e89b-12d3-a456-426614174000/items/42"),
+            Some("/orders/*/items/*".to_string())
+        );
     }
 
     #[test]

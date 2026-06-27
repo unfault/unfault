@@ -10,6 +10,63 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.18] — 2026-06-27
+
+### Added
+
+- **`unfault graph coverage <route>`** — new subcommand that walks an HTTP
+  route subtree and reports OpenTelemetry trace and metrics coverage for every
+  matched handler.
+
+  Each route is evaluated on two independent dimensions:
+
+  - **Traces** — inbound `SERVER`/`AppServer` spans fetched from GCP Cloud
+    Trace are matched against route handlers. A handler is `observed` when
+    recent real traffic spans match its path, `instrumented_only` when tracing
+    decorators are present in code but no span evidence exists, `missing` when
+    a trace source is configured but nothing was seen, and `unknown` when no
+    trace source is configured at all (avoids false "missing" reports).
+
+  - **Metrics** — SLOs from GCP Cloud Monitoring, Datadog, and Dynatrace are
+    matched to routes via path patterns. A route is `covered` when at least
+    one SLO targets it, `missing` when a metrics source is configured but no
+    SLO matches, and `unknown` when no source is available.
+
+  The overall per-route status rolls up to `full` (both covered), `partial`
+  (one covered), `missing` (neither, sources available), or `unknown`.
+
+  Human output renders routes as a path-prefix tree so gaps are obvious at a
+  glance. `--json` emits a fully structured `CoverageContext` document.
+
+  Accepts a route prefix (`/api`) or wildcard pattern (`/api/**`,
+  `/users/*`). Supports `--method` to filter by HTTP verb, `--offline` to
+  skip live fetches, `--refresh-cache` to force a fresh snapshot, and `--json`
+  for machine-readable output.
+
+  After a `unfault review` run the command is instant: review now co-fetches
+  inbound route observations from Cloud Trace alongside the existing outbound
+  call patterns and caches them in the enrichment cache. Coverage results are
+  also stored in the query cache (keyed on route + method + commit SHA) so
+  repeated calls within a session are free.
+
+- **Inbound route observations in the enrichment cache** — `unfault review`
+  now calls `fetch_route_observations` on the GCP Cloud Trace provider during
+  its enrichment pass, storing the observed inbound HTTP routes alongside SLOs
+  and remote-call patterns in `.unfault/cache/enrichment/`. This lets
+  `unfault graph coverage` serve results from the enrichment cache without an
+  extra Cloud Trace round-trip.
+
+- **`slo::matcher::normalize_route_path` is now `pub`** — promoted to the
+  single canonical implementation shared by the SLO matcher and the coverage
+  command. Eliminates a prior duplication.
+
+### Fixed
+
+- **45-second outer timeout on live observability fetches** — `load_observability_data`
+  (used by `unfault graph coverage`) now wraps SLO and Cloud Trace fetches in a
+  `tokio::time::timeout(45s)` guard. Previously, a hanging API call would stall
+  the command indefinitely. A clear warning is printed when the deadline fires.
+
 ## [1.0.17] — 2026-06-23
 
 ### Fixed

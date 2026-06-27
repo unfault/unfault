@@ -45,48 +45,17 @@ pub fn find_matching_routes(slo: &SloDefinition, graph: &CodeGraph) -> Vec<NodeI
         .collect()
 }
 
-/// Check if a route path matches an SLO path pattern.
-fn path_matches(pattern: &str, route_path: &str) -> bool {
-    if pattern == "*" {
-        return true;
-    }
-
-    let pattern = normalize_path(pattern);
-    let route = normalize_route_path(route_path);
-
-    if pattern.ends_with("/**") {
-        let prefix = &pattern[..pattern.len() - 3];
-        return route.starts_with(prefix) || route == prefix.trim_end_matches('/');
-    }
-
-    if pattern.ends_with("/*") {
-        let prefix = &pattern[..pattern.len() - 2];
-        if !route.starts_with(prefix) {
-            return false;
-        }
-        let remainder = &route[prefix.len()..];
-        if remainder.is_empty() {
-            return true;
-        }
-        if remainder.starts_with('/') {
-            let after_slash = &remainder[1..];
-            return !after_slash.contains('/');
-        }
-        return false;
-    }
-
-    pattern == route
-}
-
-fn normalize_path(path: &str) -> String {
-    let mut p = path.to_lowercase();
-    if p.len() > 1 && p.ends_with('/') {
-        p.pop();
-    }
-    p
-}
-
-fn normalize_route_path(path: &str) -> String {
+/// Normalise a raw route path for comparison.
+///
+/// Collapses framework-specific dynamic segment syntax into `*`:
+/// - Express `:param` → `*`
+/// - FastAPI / Flask `{param}` → `*`
+/// - Werkzeug / Falcon `<param>` → `*`
+///
+/// Also lowercases and strips a trailing `/`.
+///
+/// Returns `"/"` for an empty path so callers always get a non-empty string.
+pub fn normalize_route_path(path: &str) -> String {
     let mut result = String::with_capacity(path.len());
     let mut chars = path.chars().peekable();
 
@@ -120,7 +89,54 @@ fn normalize_route_path(path: &str) -> String {
         result.pop();
     }
 
-    result
+    if result.is_empty() {
+        "/".to_string()
+    } else {
+        result
+    }
+}
+
+/// Check if a route path matches an SLO path pattern.
+fn path_matches(pattern: &str, route_path: &str) -> bool {
+    if pattern == "*" {
+        return true;
+    }
+
+    let pattern = normalize_pattern(pattern);
+    let route = normalize_route_path(route_path);
+
+    if pattern.ends_with("/**") {
+        let prefix = &pattern[..pattern.len() - 3];
+        return route.starts_with(prefix) || route == prefix.trim_end_matches('/');
+    }
+
+    if pattern.ends_with("/*") {
+        let prefix = &pattern[..pattern.len() - 2];
+        if !route.starts_with(prefix) {
+            return false;
+        }
+        let remainder = &route[prefix.len()..];
+        if remainder.is_empty() {
+            return true;
+        }
+        if remainder.starts_with('/') {
+            let after_slash = &remainder[1..];
+            return !after_slash.contains('/');
+        }
+        return false;
+    }
+
+    pattern == route
+}
+
+fn normalize_pattern(path: &str) -> String {
+    // Patterns use simple lowercase + trailing-slash stripping; dynamic
+    // segments in patterns are already written as `*` or `**` by the user.
+    let mut p = path.to_lowercase();
+    if p.len() > 1 && p.ends_with('/') {
+        p.pop();
+    }
+    p
 }
 
 #[cfg(test)]
@@ -129,12 +145,12 @@ mod tests {
 
     #[test]
     fn test_normalize_route_path_express() {
-        assert_eq!(normalize_route_path("/users/:id"), "/users/*");
+        assert_eq!(super::normalize_route_path("/users/:id"), "/users/*");
     }
 
     #[test]
     fn test_normalize_route_path_fastapi() {
-        assert_eq!(normalize_route_path("/users/{user_id}"), "/users/*");
+        assert_eq!(super::normalize_route_path("/users/{user_id}"), "/users/*");
     }
 
     #[test]

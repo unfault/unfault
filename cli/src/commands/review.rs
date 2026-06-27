@@ -492,6 +492,12 @@ async fn execute_client_parse(
             }
 
             // ── Trace enrichment (GCP Cloud Trace) ───────────────────────
+            // Fetch both outbound-call patterns (for the World Model / review)
+            // and inbound-route observations (for `unfault graph coverage`).
+            // Both use the same HTTP client and the same paged trace window so
+            // we only pay one set of network round-trips.
+            let mut fetched_route_observations: Vec<crate::trace::ObservedRoute> = Vec::new();
+
             if let Some(trace_provider) = crate::trace::GcpTraceProvider::from_env() {
                 any_fetch_attempted = true;
                 pb.set_message("Fetching distributed traces from Cloud Trace...");
@@ -507,6 +513,7 @@ async fn execute_client_parse(
                     .build()
                     .unwrap_or_default();
 
+                // Outbound call patterns — used by the World Model.
                 match trace_provider
                     .fetch_remote_calls(&http_client, 60, 200)
                     .await
@@ -520,6 +527,27 @@ async fn execute_client_parse(
                             "warn:".yellow().bold(),
                             e
                         );
+                    }
+                }
+
+                // Inbound route observations — stored in the enrichment cache
+                // so that `unfault graph coverage` can use them without an
+                // extra network round-trip.
+                match trace_provider
+                    .fetch_route_observations(&http_client, 60, 200)
+                    .await
+                {
+                    Ok(observations) => {
+                        fetched_route_observations = observations;
+                    }
+                    Err(e) => {
+                        if args.verbose {
+                            eprintln!(
+                                "\n{} Could not fetch route observations from Cloud Trace: {}",
+                                "DEBUG".yellow(),
+                                e
+                            );
+                        }
                     }
                 }
             }
@@ -542,7 +570,17 @@ async fn execute_client_parse(
                         .iter()
                         .map(crate::enrichment_cache::CachedRemoteCallPattern::from)
                         .collect();
-                    let _ = c.save(&project_id, workspace_label, fetched_slos, cached_patterns);
+                    let cached_route_obs: Vec<_> = fetched_route_observations
+                        .iter()
+                        .map(crate::enrichment_cache::CachedObservedRoute::from)
+                        .collect();
+                    let _ = c.save(
+                        &project_id,
+                        workspace_label,
+                        fetched_slos,
+                        cached_patterns,
+                        cached_route_obs,
+                    );
                 }
             }
         }
