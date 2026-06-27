@@ -1871,71 +1871,115 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
         .filter(|n| n.span == SpanSignal::None && matches!(n.role, NodeRole::Logic))
         .collect();
 
-    // ✓ only when every node in the tree carries a signal (including the anchor).
-    let any_uninstrumented = all_nodes.iter().any(|n| n.span == SpanSignal::None);
-    if !any_uninstrumented {
+    // ── Per-call coverage breakdown ───────────────────────────────────────────
+    // The key question for the developer: "for each call my handler makes,
+    // will I see it in traces if it fails?"
+    //
+    // We render two lists:
+    //   covered   — calls that sit inside a span (you WILL see them)
+    //   blind spots — calls with no span (you WILL NOT see them)
+    //
+    // A "blind spot" message names the specific code path that will be dark:
+    //   "if get_final_assistant_structured_output fails, you will not know"
+
+    // Direct callees of the anchor are the most actionable level.
+    let direct_callees = &ctx.callees;
+
+    // If there are no callees at all (single-node tree), just do the simple check.
+    if direct_callees.is_empty() {
+        if ctx.anchor.span == SpanSignal::None {
+            println!(
+                "  {} {} has no span — if it fails, traces will show nothing.",
+                "⚠".yellow().bold(),
+                ctx.anchor.name.yellow()
+            );
+        } else {
+            println!(
+                "  {} {} is instrumented.",
+                "✓".green(),
+                ctx.anchor.name.bright_white()
+            );
+        }
+        println!();
+        return Ok(EXIT_SUCCESS);
+    }
+
+    let covered: Vec<&CoverageNode> = direct_callees
+        .iter()
+        .filter(|n| n.span != SpanSignal::None)
+        .collect();
+
+    let blind: Vec<&CoverageNode> = direct_callees
+        .iter()
+        .filter(|n| n.span == SpanSignal::None)
+        .collect();
+
+    if blind.is_empty() {
         println!(
-            "  {} Every function in this call tree carries a span signal.",
-            "✓".green()
+            "  {} All calls from {} are covered by spans.",
+            "✓".green(),
+            ctx.anchor.name.bright_white()
         );
         println!();
         return Ok(EXIT_SUCCESS);
     }
 
-    // Priority 1: uninstrumented boundary nodes (db, http-client, remote).
-    // These matter most — failures here produce no trace evidence.
-    if !boundary_gaps.is_empty() {
+    // Blind spots — the core message.
+    println!(
+        "  {} {} of {} calls from {} {} no span coverage:",
+        "⚠".yellow().bold(),
+        blind.len(),
+        direct_callees.len(),
+        ctx.anchor.name.bright_white(),
+        if blind.len() == 1 { "has" } else { "have" },
+    );
+    println!();
+    for n in &blind {
+        let badge = role_badge_str(&n.role);
+        let badge_str = if badge.is_empty() {
+            String::new()
+        } else {
+            format!("  [{}]", badge)
+        };
         println!(
-            "  {} {} uninstrumented {} — add a span so failures are visible in traces:",
-            "⚠".yellow().bold(),
-            boundary_gaps.len(),
-            if boundary_gaps.len() == 1 {
-                "boundary"
-            } else {
-                "boundaries"
-            }
+            "    {} {}{}",
+            "○".normal(),
+            n.name.yellow(),
+            badge_str.bright_black(),
         );
-        for gap in &boundary_gaps {
-            let badge = role_badge_str(&gap.role);
-            let loc = node_loc(gap);
-            println!(
-                "    {} {}  {}  {}",
-                "○".normal(),
-                gap.name.yellow(),
-                badge.cyan(),
-                loc.bright_black()
-            );
+        println!(
+            "      {} if {} fails or is slow, you will not see it in traces",
+            "→".bright_black(),
+            n.name.yellow(),
+        );
+        if !n.file.is_empty() {
+            println!("        {}", node_loc(n).bright_black());
         }
-        println!();
     }
+    println!();
 
-    // Priority 2: uninstrumented logic functions — shown on smaller trees.
-    // On large trees this is too noisy; the boundaries list is enough.
-    if !logic_gaps.is_empty() && s.total_nodes <= 20 {
+    // Covered calls — show briefly so the developer knows what IS visible.
+    if !covered.is_empty() {
         println!(
-            "  {} {} function{} without spans:",
-            "·".bright_black(),
-            logic_gaps.len(),
-            if logic_gaps.len() == 1 { "" } else { "s" }
+            "  {} {} call{} already covered:",
+            "✓".green(),
+            covered.len(),
+            if covered.len() == 1 { "" } else { "s" },
         );
-        for n in logic_gaps.iter().take(8) {
+        for n in &covered {
+            let span_label = match &n.span {
+                SpanSignal::Decorator { name: Some(s) } => format!("  \"{}\"", s),
+                SpanSignal::Decorator { name: None } => "  (decorator)".to_string(),
+                SpanSignal::SdkImported { library } => format!("  sdk:{}", library),
+                SpanSignal::None => String::new(),
+            };
             println!(
-                "    {} {}  {}",
-                "○".bright_black(),
-                n.name.bright_black(),
-                node_loc(n).bright_black()
+                "    {} {}{}",
+                "●".green(),
+                n.name.bright_white(),
+                span_label.green(),
             );
         }
-        if logic_gaps.len() > 8 {
-            println!("    … and {} more", logic_gaps.len() - 8);
-        }
-        println!();
-    } else if logic_gaps.len() > 0 && s.total_nodes > 20 {
-        println!(
-            "  {} {} more functions without spans (use --json for full list)",
-            "·".bright_black(),
-            logic_gaps.len()
-        );
         println!();
     }
 

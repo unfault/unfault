@@ -10,6 +10,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.23] — 2026-06-27
+
+### Changed
+
+- **`unfault graph coverage` blind-spot messaging** — the nudge section now
+  answers the question "which calls from this handler will I NOT see in traces
+  if they fail?" for each direct callee:
+
+  ```
+  ⚠ 2 of 4 calls from get_run_structured_output have no span coverage:
+
+    ○ get_final_assistant_structured_output
+      → if get_final_assistant_structured_output fails or is slow,
+        you will not see it in traces
+        server/queries/output.py:44
+
+    ○ get_session_or_404
+      → if get_session_or_404 fails or is slow,
+        you will not see it in traces
+        server/utils.py:12
+
+  ✓ 2 calls already covered:
+    ● _build_structured_output_response  "build-output"
+    ● validate_run  sdk:ddtrace
+  ```
+
+  Previously the section listed gap function names with no explanation of
+  consequence. Now it explicitly names the blind spot ("you will not see it
+  in traces") and separately confirms what IS covered.
+
 ## [1.0.22] — 2026-06-27
 
 ### Fixed

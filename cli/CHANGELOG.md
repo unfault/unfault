@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.23] - 2026-06-27
+
+### Changed
+
+- **Coverage blind-spot messaging** — for each call the handler makes, the
+  output now explicitly says which calls are NOT covered ("if X fails or is
+  slow, you will not see it in traces") and which ARE ("2 calls already
+  covered: ● build_output  ● validate_run sdk:ddtrace").
+
 ## [1.0.22] - 2026-06-27
 
 ### Fixed
