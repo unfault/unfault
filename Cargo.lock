@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "unfault-analysis"
-version = "0.4.19"
+version = "0.4.20"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2543,7 +2543,7 @@ dependencies = [
 
 [[package]]
 name = "unfault-core"
-version = "0.5.19"
+version = "0.5.20"
 dependencies = [
  "anyhow",
  "petgraph",
