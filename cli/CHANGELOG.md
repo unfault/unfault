@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.27] - 2026-06-27
+
+### Changed
+
+- Coverage breakdown by category with actionable hints.
+
+### Fixed
+
+- Coverage query cache busts on binary upgrade via CARGO_PKG_VERSION in key.
+
 ## [1.0.26] - 2026-06-27
 
 ### Fixed

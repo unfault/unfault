@@ -10,6 +10,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.27] — 2026-06-27
+
+### Changed
+
+- **`unfault graph coverage` category breakdown** — coverage is now reported
+  by semantic category (`db queries`, `remote calls`, `http-client calls`,
+  `auth / middleware`, `business logic`) with a ratio, optional inline names
+  when ≤ 3, and a plain-English actionable hint for zero or partial coverage.
+
+### Fixed
+
+- **Coverage query cache now busts on binary upgrade** — `CARGO_PKG_VERSION`
+  is included in the cache key so stale results from a previous binary are
+  never served after an upgrade.
+
+- Crates: `unfault-core` 0.5.27, `unfault-analysis` 0.4.27, `unfault` 1.0.27.
+
 ## [1.0.26] — 2026-06-27
 
 ### Fixed
