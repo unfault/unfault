@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.25] — 2026-06-27
+
+### Fixed
+
+- **Coverage query cache now busts on binary upgrade** — the cache key
+  includes `CARGO_PKG_VERSION` so stale `CoverageContext` entries from a
+  previous binary are never served after an upgrade.
+
+- Bumped all three crates: `unfault-core` 0.5.25, `unfault-analysis` 0.4.25,
+  `unfault` 1.0.25.
+
 ## [1.0.24] — 2026-06-27
 
 ### Changed

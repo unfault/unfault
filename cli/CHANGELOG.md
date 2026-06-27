@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.25] - 2026-06-27
+
+### Fixed
+
+- Coverage query cache now includes binary version in its key, so upgrading
+  the binary automatically busts stale cached results.
+
 ## [1.0.24] - 2026-06-27
 
 ### Changed
