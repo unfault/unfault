@@ -36,7 +36,6 @@
 
 use anyhow::Result;
 use colored::Colorize;
-use std::collections::BTreeMap;
 
 use crate::exit_codes::*;
 
@@ -696,10 +695,13 @@ pub struct RoutesArgs {
 #[derive(Debug)]
 pub struct CoverageArgs {
     pub workspace_path: Option<String>,
-    /// Route prefix or wildcard pattern (e.g. "/api", "/api/**")
-    pub route: String,
-    /// Optional HTTP method filter (e.g. "GET", "POST")
+    /// Route path (e.g. "/api/orders") or function name to start from.
+    pub target: String,
+    /// Optional HTTP method filter when target is a route (e.g. "GET").
     pub method: Option<String>,
+    /// Maximum call-tree depth in each direction (default: unlimited until
+    /// a library boundary).
+    pub max_depth: Option<usize>,
     /// Output as JSON
     pub json: bool,
     /// Force a live refresh of observability data
@@ -709,6 +711,103 @@ pub struct CoverageArgs {
     /// Enable verbose output
     pub verbose: bool,
 }
+
+// ── Coverage types ────────────────────────────────────────────────────────────
+
+/// What kind of observability signal a single function node carries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpanSignal {
+    /// Function carries a recognised tracing decorator (@trace, @instrument,
+    /// @span, context manager, etc.).  `name` is whatever we can extract from
+    /// the decorator detail string, or None if only the presence is detected.
+    Decorator {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+    },
+    /// The file this function lives in imports an OTel / tracing SDK
+    /// (opentelemetry, ddtrace, sentry-sdk, …).
+    SdkImported {
+        /// The library name (e.g. "opentelemetry", "ddtrace").
+        library: String,
+    },
+    /// No instrumentation signal detected on this node.
+    None,
+}
+
+/// The semantic "role" of a function node — what kind of work does it do?
+/// Derived from UsesLibrary → ExternalModule → ModuleCategory edges on the
+/// file that contains the function.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NodeRole {
+    /// Entry point: HTTP route handler.
+    HttpHandler { method: String, path: String },
+    /// Makes outbound HTTP calls (HttpClient library).
+    HttpClient,
+    /// Queries a database (Database/ORM library).
+    Database,
+    /// Cross-service call via RemoteCall graph edge.
+    RemoteCall { service: String },
+    /// Regular business logic — no special boundary role detected.
+    Logic,
+}
+
+/// A single node in the coverage call tree.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CoverageNode {
+    /// Display name of the function.
+    pub name: String,
+    /// Source file path, relative to workspace root.
+    pub file: String,
+    /// 1-based line number.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// How deep this node is from the root (0 = root).
+    pub depth: i32,
+    /// Direction from the anchor point: "up" (caller), "down" (callee), or
+    /// "root" (the anchor itself).
+    pub direction: String,
+    /// What instrumentation signal we found on this node.
+    pub span: SpanSignal,
+    /// Semantic role inferred from library edges.
+    pub role: NodeRole,
+    /// Callees of this node (only populated for downward nodes).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<CoverageNode>,
+}
+
+/// Summary counts across the entire tree.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CoverageTreeSummary {
+    pub total_nodes: usize,
+    pub instrumented: usize,
+    pub uninstrumented: usize,
+    pub db_boundaries: usize,
+    pub http_boundaries: usize,
+    pub remote_calls: usize,
+}
+
+/// Top-level result returned by execute_coverage.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CoverageContext {
+    /// The original target string supplied by the user.
+    pub target: String,
+    /// How we resolved the target.
+    pub resolved_as: String,
+    /// Callers above the anchor (upward walk), root-first order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub callers: Vec<CoverageNode>,
+    /// The anchor node itself (route handler or named function).
+    pub anchor: CoverageNode,
+    /// Callees below the anchor (downward walk).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub callees: Vec<CoverageNode>,
+    /// Summary counts.
+    pub summary: CoverageTreeSummary,
+}
+
+// ── Route entry (used by routes command, kept here) ───────────────────────────
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct RouteEntry {
@@ -731,76 +830,6 @@ pub struct RouteEntry {
     /// Response schema from `@blp.response(200, SchemaY)` or `@marshal_with`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_schema: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CoverageDataSources {
-    pub traces_available: bool,
-    pub metrics_available: bool,
-    pub from_cache: bool,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CoverageSummary {
-    pub total_routes: usize,
-    pub fully_covered: usize,
-    pub partial: usize,
-    pub missing_both: usize,
-    pub unknown: usize,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SloCoverageEntry {
-    pub name: String,
-    pub provider: String,
-    pub target_percent: f64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub dashboard_url: Option<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct TraceCoverage {
-    pub status: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub instrumented: bool,
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub observed_count: u32,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub sample_span_names: Vec<String>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct MetricsCoverage {
-    pub status: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub slos: Vec<SloCoverageEntry>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct RouteCoverageEntry {
-    pub method: String,
-    pub path: String,
-    pub handler: String,
-    pub file: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
-    pub overall_status: String,
-    pub traces: TraceCoverage,
-    pub metrics: MetricsCoverage,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct CoverageContext {
-    pub target: String,
-    pub root: String,
-    pub data_sources: CoverageDataSources,
-    pub summary: CoverageSummary,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub routes: Vec<RouteCoverageEntry>,
-}
-
-fn is_zero(value: &u32) -> bool {
-    *value == 0
 }
 
 fn collect_route_entries(graph: &unfault_analysis::graph::CodeGraph) -> Vec<RouteEntry> {
@@ -1023,12 +1052,11 @@ pub async fn execute_coverage(args: CoverageArgs) -> Result<i32> {
         None => std::env::current_dir()?,
     };
 
-    // Query-cache key encodes the route, optional method filter, and
-    // whether a live refresh was requested.  A refresh bypasses the cache.
+    // Query-cache key
     let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
     let cache_params = format!(
         "{}|{}|{}",
-        args.route,
+        args.target,
         args.method.as_deref().unwrap_or(""),
         if args.refresh_cache { "refresh" } else { "" },
     );
@@ -1060,601 +1088,842 @@ pub async fn execute_coverage(args: CoverageArgs) -> Result<i32> {
         }
     };
 
-    let workspace_label = workspace_path
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("workspace");
+    // Resolve the target to an anchor node.
+    let target = &args.target;
+    let max_depth = args.max_depth;
+    let method_filter = args.method.as_deref();
 
-    let observability = load_observability_data(
-        &workspace_path,
-        workspace_label,
-        args.refresh_cache,
-        args.offline,
-        args.verbose,
-    )
-    .await?;
-
-    let mut routes = collect_route_entries(&graph);
-    routes.retain(|route| route_matches_target(&args.route, &route.path));
-    if let Some(ref method_filter) = args.method {
-        let upper = method_filter.to_uppercase();
-        routes.retain(|route| route.method.to_uppercase() == upper);
-    }
-    routes.sort_by(|a, b| a.path.cmp(&b.path).then(a.method.cmp(&b.method)));
-
-    let context = build_coverage_context(
-        &args.route,
-        workspace_label,
-        routes,
-        &observability.slos,
-        &observability.observed_routes,
-        observability.traces_available,
-        observability.metrics_available,
-        observability.from_cache,
-    );
+    let Some(ctx) = build_coverage_context(&graph, target, method_filter, max_depth, args.verbose)
+    else {
+        if args.json {
+            println!("null");
+        } else {
+            eprintln!(
+                "{} Could not resolve '{}' to a route or function in the graph.",
+                "error:".red().bold(),
+                target
+            );
+            eprintln!(
+                "  Try: unfault graph routes  or  unfault graph handlers {}",
+                target
+            );
+        }
+        return Ok(EXIT_ERROR);
+    };
 
     crate::session::query_cache::set::<CoverageContext>(
         &workspace_path,
         "coverage",
         &cache_params,
         &commit_sha,
-        &context,
+        &ctx,
     );
 
-    render_coverage_output(&context, args.json)
+    render_coverage_output(&ctx, args.json)
 }
 
-#[derive(Debug, Default)]
-struct ObservabilityData {
-    slos: Vec<crate::slo::SloDefinition>,
-    observed_routes: Vec<crate::trace::ObservedRoute>,
-    traces_available: bool,
-    metrics_available: bool,
-    from_cache: bool,
-}
+// ── Coverage graph walk ───────────────────────────────────────────────────────
 
-async fn load_observability_data(
-    workspace_path: &std::path::Path,
-    workspace_label: &str,
-    refresh_cache: bool,
-    offline: bool,
-    verbose: bool,
-) -> Result<ObservabilityData> {
-    let mut data = ObservabilityData::default();
-
-    let slo_enricher = crate::slo::SloEnricher::new(verbose);
-    let trace_provider = crate::trace::GcpTraceProvider::from_env();
-
-    data.metrics_available = slo_enricher.any_provider_available();
-    data.traces_available = trace_provider.is_some();
-
-    let gcp_creds = crate::integration::gcp::GcpCredentials::from_env();
-    let project_id = gcp_creds
-        .as_ref()
-        .map(|c| c.project_id.clone())
-        .unwrap_or_default();
-    let cache = crate::enrichment_cache::EnrichmentCache::open(
-        workspace_path,
-        crate::enrichment_cache::DEFAULT_TTL_SECS,
-    )?;
-
-    if refresh_cache && !project_id.is_empty() {
-        cache.invalidate(&project_id, workspace_label);
-    }
-
-    if !project_id.is_empty() {
-        if let Some(snapshot) = cache.load(&project_id, workspace_label) {
-            data.slos = snapshot.slos;
-            data.observed_routes = snapshot
-                .observed_routes
-                .into_iter()
-                .map(crate::trace::ObservedRoute::from)
-                .collect();
-            data.from_cache = true;
-            data.metrics_available = data.metrics_available || !data.slos.is_empty();
-            data.traces_available = data.traces_available || !data.observed_routes.is_empty();
-
-            let need_live_slos = data.slos.is_empty() && slo_enricher.any_provider_available();
-            let need_live_traces = data.observed_routes.is_empty() && trace_provider.is_some();
-            if !need_live_slos && !need_live_traces {
-                return Ok(data);
-            }
-        }
-    }
-
-    if offline {
-        return Ok(data);
-    }
-
-    // Hard deadline for all live network fetches. Each individual HTTP call
-    // already has a 20s per-request timeout; this outer deadline ensures the
-    // whole enrichment block (potentially several paged API calls) never stalls
-    // an interactive `unfault graph coverage` invocation beyond 45 seconds.
-    const LIVE_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
-
-    if slo_enricher.any_provider_available() {
-        match tokio::time::timeout(LIVE_FETCH_TIMEOUT, slo_enricher.fetch_all()).await {
-            Ok(Ok(result)) => {
-                if result.credentials_expired {
-                    eprintln!(
-                        "{} SLO credentials appear expired — run `unfault config integrations verify`",
-                        "warn:".yellow().bold()
-                    );
-                }
-                data.slos = result.slos;
-            }
-            Ok(Err(e)) => {
-                if verbose {
-                    eprintln!("{} Could not fetch SLOs: {}", "warn:".yellow().bold(), e);
-                }
-            }
-            Err(_) => {
-                eprintln!(
-                    "{} SLO fetch timed out after {}s",
-                    "warn:".yellow().bold(),
-                    LIVE_FETCH_TIMEOUT.as_secs()
-                );
-            }
-        }
-    }
-
-    if let Some(trace_provider) = trace_provider {
-        let http_client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(20))
-            .build()
-            .unwrap_or_default();
-
-        match tokio::time::timeout(
-            LIVE_FETCH_TIMEOUT,
-            trace_provider.fetch_route_observations(&http_client, 60, 200),
-        )
-        .await
-        {
-            Ok(Ok(routes)) => {
-                data.observed_routes = routes;
-            }
-            Ok(Err(e)) => {
-                if verbose {
-                    eprintln!(
-                        "{} Could not fetch Cloud Trace route observations: {}",
-                        "warn:".yellow().bold(),
-                        e
-                    );
-                }
-            }
-            Err(_) => {
-                eprintln!(
-                    "{} Cloud Trace fetch timed out after {}s",
-                    "warn:".yellow().bold(),
-                    LIVE_FETCH_TIMEOUT.as_secs()
-                );
-            }
-        }
-    }
-
-    if !project_id.is_empty() {
-        let cached_routes: Vec<_> = data
-            .observed_routes
-            .iter()
-            .map(crate::enrichment_cache::CachedObservedRoute::from)
-            .collect();
-        // Best-effort — a failed cache write must never abort the command.
-        let _ = cache.save(
-            // unfault-ignore: rust.ignored_result
-            &project_id,
-            workspace_label,
-            data.slos.clone(),
-            vec![],
-            cached_routes,
-        );
-    }
-
-    Ok(data)
-}
-
+/// Build a full `CoverageContext` by resolving `target` (route path or function
+/// name) to an anchor node, then walking callers upward and callees downward.
+///
+/// Returns `None` when the target cannot be resolved.
 fn build_coverage_context(
+    graph: &unfault_analysis::graph::CodeGraph,
     target: &str,
-    workspace_label: &str,
-    routes: Vec<RouteEntry>,
-    slos: &[crate::slo::SloDefinition],
-    observed_routes: &[crate::trace::ObservedRoute],
-    traces_available: bool,
-    metrics_available: bool,
-    from_cache: bool,
-) -> CoverageContext {
-    let root = normalize_target_root(target);
-    let mut entries = Vec::new();
-    let mut summary = CoverageSummary {
-        total_routes: routes.len(),
-        fully_covered: 0,
-        partial: 0,
-        missing_both: 0,
-        unknown: 0,
+    method_filter: Option<&str>,
+    max_depth: Option<usize>,
+    verbose: bool,
+) -> Option<CoverageContext> {
+    use unfault_analysis::graph::GraphNode;
+
+    // ── Resolve anchor ────────────────────────────────────────────────────────
+    // First try: HTTP route path (starts with '/' or contains '/')
+    // Second try: function name substring match
+    let anchor_idx = if target.starts_with('/') || target.contains('/') {
+        find_handler_by_route(graph, target, method_filter)
+    } else {
+        find_function_by_name(graph, target)
     };
 
-    for route in routes {
-        let trace_entry = build_trace_coverage(&route, observed_routes, traces_available);
-        let metrics_entry =
-            build_metrics_coverage(&route, slos, workspace_label, metrics_available);
-        let overall_status = overall_coverage_status(&trace_entry, &metrics_entry);
+    let anchor_idx = anchor_idx.or_else(|| find_function_by_name(graph, target))?;
 
-        match overall_status.as_str() {
-            "full" => summary.fully_covered += 1,
-            "partial" => summary.partial += 1,
-            "missing" => summary.missing_both += 1,
-            _ => summary.unknown += 1,
+    let anchor_node = &graph.graph[anchor_idx];
+    let (anchor_name, anchor_file, anchor_line, resolved_as) = match anchor_node {
+        GraphNode::Function {
+            name,
+            http_method: Some(method),
+            http_path: Some(path),
+            line,
+            ..
+        } => {
+            let file = unfault_analysis::graph::traversal::node_file_path_pub(graph, anchor_node)
+                .unwrap_or_default();
+            let desc = format!("route {} {}", method.to_uppercase(), path);
+            (name.clone(), file, *line, desc)
+        }
+        GraphNode::Function { name, line, .. } => {
+            let file = unfault_analysis::graph::traversal::node_file_path_pub(graph, anchor_node)
+                .unwrap_or_default();
+            let desc = format!("function {}", name);
+            (name.clone(), file, *line, desc)
+        }
+        _ => return None,
+    };
+
+    if verbose {
+        eprintln!("  coverage anchor: {} ({})", anchor_name, resolved_as);
+    }
+
+    // Build per-file library category index once — used when classifying roles.
+    let file_libs = build_file_library_index(graph);
+
+    // ── Walk callees (downward) ───────────────────────────────────────────────
+    let callees = walk_callees(graph, anchor_idx, max_depth, &file_libs, 1);
+
+    // ── Walk callers (upward) ─────────────────────────────────────────────────
+    let callers = walk_callers(graph, anchor_idx, max_depth, &file_libs, 1);
+
+    // ── Build anchor node ─────────────────────────────────────────────────────
+    let anchor_role = node_role(graph, anchor_idx, anchor_node, &file_libs);
+    let anchor_span = node_span_signal(graph, anchor_node, &file_libs);
+
+    let anchor = CoverageNode {
+        name: anchor_name.clone(),
+        file: anchor_file,
+        line: anchor_line,
+        depth: 0,
+        direction: "root".to_string(),
+        span: anchor_span,
+        role: anchor_role,
+        children: callees.clone(),
+    };
+
+    // ── Summary ───────────────────────────────────────────────────────────────
+    let mut all_nodes: Vec<&CoverageNode> = Vec::new();
+    collect_nodes(&anchor, &mut all_nodes);
+    for n in &callers {
+        collect_nodes(n, &mut all_nodes);
+    }
+
+    let summary = CoverageTreeSummary {
+        total_nodes: all_nodes.len(),
+        instrumented: all_nodes
+            .iter()
+            .filter(|n| n.span != SpanSignal::None)
+            .count(),
+        uninstrumented: all_nodes
+            .iter()
+            .filter(|n| n.span == SpanSignal::None)
+            .count(),
+        db_boundaries: all_nodes
+            .iter()
+            .filter(|n| matches!(n.role, NodeRole::Database))
+            .count(),
+        http_boundaries: all_nodes
+            .iter()
+            .filter(|n| matches!(n.role, NodeRole::HttpClient))
+            .count(),
+        remote_calls: all_nodes
+            .iter()
+            .filter(|n| matches!(n.role, NodeRole::RemoteCall { .. }))
+            .count(),
+    };
+
+    Some(CoverageContext {
+        target: target.to_string(),
+        resolved_as,
+        callers,
+        anchor,
+        callees,
+        summary,
+    })
+}
+
+fn collect_nodes<'a>(node: &'a CoverageNode, out: &mut Vec<&'a CoverageNode>) {
+    out.push(node);
+    for child in &node.children {
+        collect_nodes(child, out);
+    }
+}
+
+/// Walk Calls edges downward (callees), stopping at library boundaries.
+fn walk_callees(
+    graph: &unfault_analysis::graph::CodeGraph,
+    from: unfault_analysis::graph::GraphNodeIndex,
+    max_depth: Option<usize>,
+    file_libs: &FileLibIndex,
+    depth: i32,
+) -> Vec<CoverageNode> {
+    let mut result = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    walk_callees_inner(
+        graph,
+        from,
+        max_depth,
+        file_libs,
+        depth,
+        &mut visited,
+        &mut result,
+        "down",
+    );
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_callees_inner(
+    graph: &unfault_analysis::graph::CodeGraph,
+    from: unfault_analysis::graph::GraphNodeIndex,
+    max_depth: Option<usize>,
+    file_libs: &std::collections::HashMap<
+        String,
+        Vec<(String, unfault_core::graph::ModuleCategory)>,
+    >,
+    depth: i32,
+    visited: &mut std::collections::HashSet<unfault_analysis::graph::GraphNodeIndex>,
+    out: &mut Vec<CoverageNode>,
+    direction: &str,
+) {
+    use petgraph::Direction;
+    use petgraph::visit::EdgeRef as _;
+    use unfault_analysis::graph::{GraphEdgeKind, GraphNode};
+
+    if visited.contains(&from) {
+        return;
+    }
+    if let Some(max) = max_depth {
+        if depth as usize > max {
+            return;
+        }
+    }
+    visited.insert(from);
+
+    for edge in graph.graph.edges_directed(from, Direction::Outgoing) {
+        if !matches!(edge.weight(), GraphEdgeKind::Calls) {
+            continue;
+        }
+        let callee_idx = edge.target();
+        let callee_node = &graph.graph[callee_idx];
+
+        let (name, file, line) = match callee_node {
+            GraphNode::Function { name, line, .. } => {
+                let f = unfault_analysis::graph::traversal::node_file_path_pub(graph, callee_node)
+                    .unwrap_or_default();
+                (name.clone(), f, *line)
+            }
+            _ => continue,
+        };
+
+        let role = node_role(graph, callee_idx, callee_node, file_libs);
+        let span = node_span_signal(graph, callee_node, file_libs);
+
+        // Stop recursing at library-boundary nodes but still emit the node.
+        let is_boundary = matches!(
+            role,
+            NodeRole::Database | NodeRole::HttpClient | NodeRole::RemoteCall { .. }
+        );
+
+        let mut children = Vec::new();
+        if !is_boundary {
+            walk_callees_inner(
+                graph,
+                callee_idx,
+                max_depth,
+                file_libs,
+                depth + 1,
+                visited,
+                &mut children,
+                direction,
+            );
         }
 
-        entries.push(RouteCoverageEntry {
-            method: route.method,
-            path: route.path,
-            handler: route.handler,
-            file: route.file,
-            line: route.line,
-            overall_status,
-            traces: trace_entry,
-            metrics: metrics_entry,
+        out.push(CoverageNode {
+            name,
+            file,
+            line,
+            depth,
+            direction: direction.to_string(),
+            span,
+            role,
+            children,
         });
     }
+}
 
-    CoverageContext {
-        target: target.to_string(),
-        root,
-        data_sources: CoverageDataSources {
-            traces_available,
-            metrics_available,
-            from_cache,
-        },
-        summary,
-        routes: entries,
+/// Walk Calls edges upward (callers), stopping at max_depth hops.
+fn walk_callers(
+    graph: &unfault_analysis::graph::CodeGraph,
+    from: unfault_analysis::graph::GraphNodeIndex,
+    max_depth: Option<usize>,
+    file_libs: &FileLibIndex,
+    depth: i32,
+) -> Vec<CoverageNode> {
+    let mut result = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(from);
+    walk_callers_inner(
+        graph,
+        from,
+        max_depth,
+        file_libs,
+        depth,
+        &mut visited,
+        &mut result,
+    );
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn walk_callers_inner(
+    graph: &unfault_analysis::graph::CodeGraph,
+    from: unfault_analysis::graph::GraphNodeIndex,
+    max_depth: Option<usize>,
+    file_libs: &std::collections::HashMap<
+        String,
+        Vec<(String, unfault_core::graph::ModuleCategory)>,
+    >,
+    depth: i32,
+    visited: &mut std::collections::HashSet<unfault_analysis::graph::GraphNodeIndex>,
+    out: &mut Vec<CoverageNode>,
+) {
+    use petgraph::Direction;
+    use petgraph::visit::EdgeRef as _;
+    use unfault_analysis::graph::{GraphEdgeKind, GraphNode};
+
+    if let Some(max) = max_depth {
+        if depth as usize > max {
+            return;
+        }
+    }
+
+    for edge in graph.graph.edges_directed(from, Direction::Incoming) {
+        if !matches!(edge.weight(), GraphEdgeKind::Calls) {
+            continue;
+        }
+        let caller_idx = edge.source();
+        if visited.contains(&caller_idx) {
+            continue;
+        }
+        visited.insert(caller_idx);
+
+        let caller_node = &graph.graph[caller_idx];
+        let (name, file, line) = match caller_node {
+            GraphNode::Function { name, line, .. } => {
+                let f = unfault_analysis::graph::traversal::node_file_path_pub(graph, caller_node)
+                    .unwrap_or_default();
+                (name.clone(), f, *line)
+            }
+            _ => continue,
+        };
+
+        let role = node_role(graph, caller_idx, caller_node, file_libs);
+        let span = node_span_signal(graph, caller_node, file_libs);
+
+        out.push(CoverageNode {
+            name,
+            file,
+            line,
+            depth,
+            direction: "up".to_string(),
+            span,
+            role,
+            children: Vec::new(),
+        });
+
+        walk_callers_inner(
+            graph,
+            caller_idx,
+            max_depth,
+            file_libs,
+            depth + 1,
+            visited,
+            out,
+        );
     }
 }
 
-fn build_trace_coverage(
-    route: &RouteEntry,
-    observed_routes: &[crate::trace::ObservedRoute],
-    traces_available: bool,
-) -> TraceCoverage {
-    let instrumented = route.decorators.iter().any(|decorator| {
-        matches!(
-            decorator,
-            unfault_core::graph::DecoratorSemantic::Tracing { .. }
-        )
-    });
+// ── Signal detection ──────────────────────────────────────────────────────────
 
-    let normalized_path = normalize_route_path(&route.path);
-    let mut observed_count = 0;
-    let mut sample_span_names = Vec::new();
+/// Extract a `SpanSignal` for a function.
+///
+/// Priority:
+/// 1. A tracing decorator / context manager (`@trace`, `@instrument`, etc.)
+///    → `SpanSignal::Decorator` with the extracted span name if any.
+/// 2. The file that contains the function imports an OTel / tracing SDK
+///    → `SpanSignal::SdkImported` with the library name.
+/// 3. Neither → `SpanSignal::None`.
+fn node_span_signal(
+    graph: &unfault_analysis::graph::CodeGraph,
+    node: &unfault_analysis::graph::GraphNode,
+    file_libs: &FileLibIndex,
+) -> SpanSignal {
+    use unfault_analysis::graph::GraphNode;
+    use unfault_core::graph::{DecoratorSemantic, ModuleCategory};
 
-    for observed in observed_routes {
-        let method_matches = observed
-            .http_method
-            .as_deref()
-            .map(|m| m.eq_ignore_ascii_case(&route.method))
-            .unwrap_or(true);
-        if method_matches && observed.route_path == normalized_path {
-            observed_count += observed.observed_count;
-            for sample in &observed.sample_span_names {
-                if !sample_span_names.contains(sample) && sample_span_names.len() < 3 {
-                    sample_span_names.push(sample.clone());
+    if let GraphNode::Function { decorators, .. } = node {
+        for dec in decorators {
+            if let DecoratorSemantic::Tracing { detail } = dec {
+                let span_name = extract_span_name_from_detail(detail);
+                return SpanSignal::Decorator { name: span_name };
+            }
+        }
+    }
+
+    let file =
+        unfault_analysis::graph::traversal::node_file_path_pub(graph, node).unwrap_or_default();
+    if let Some(libs) = file_libs.get(&file) {
+        for (lib_name, cat) in libs {
+            if matches!(cat, ModuleCategory::Observability) {
+                return SpanSignal::SdkImported {
+                    library: lib_name.clone(),
+                };
+            }
+        }
+    }
+
+    SpanSignal::None
+}
+
+/// Heuristically extract a span name from a decorator/context-manager detail
+/// string such as `@trace("my-span")` or `with tracer.start_as_current_span("checkout")`.
+fn extract_span_name_from_detail(detail: &str) -> Option<String> {
+    // Look for a quoted string argument anywhere in the detail.
+    for quote in ['"', '\''] {
+        if let Some(start) = detail.find(quote) {
+            let rest = &detail[start + 1..];
+            if let Some(end) = rest.find(quote) {
+                let candidate = &rest[..end];
+                if !candidate.is_empty() && !candidate.contains('\n') {
+                    return Some(candidate.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Classify the semantic role of a function using its file's library imports.
+fn node_role(
+    graph: &unfault_analysis::graph::CodeGraph,
+    _idx: unfault_analysis::graph::GraphNodeIndex,
+    node: &unfault_analysis::graph::GraphNode,
+    file_libs: &std::collections::HashMap<
+        String,
+        Vec<(String, unfault_core::graph::ModuleCategory)>,
+    >,
+) -> NodeRole {
+    use unfault_analysis::graph::GraphNode;
+    use unfault_core::graph::ModuleCategory;
+
+    // HTTP route handler?
+    if let GraphNode::Function {
+        is_handler: true,
+        http_method: Some(method),
+        http_path: Some(path),
+        ..
+    } = node
+    {
+        return NodeRole::HttpHandler {
+            method: method.clone(),
+            path: path.clone(),
+        };
+    }
+
+    // Check file-level library edges.
+    let file =
+        unfault_analysis::graph::traversal::node_file_path_pub(graph, node).unwrap_or_default();
+    if let Some(libs) = file_libs.get(&file) {
+        let mut has_db = false;
+        let mut has_http = false;
+        let mut has_obs = false;
+        for (_, cat) in libs {
+            match cat {
+                ModuleCategory::Database => has_db = true,
+                ModuleCategory::HttpClient => has_http = true,
+                ModuleCategory::Observability => has_obs = true,
+                _ => {}
+            }
+        }
+        // Observability library import → the span signal handles this; the role
+        // is still the underlying boundary type if both are present.
+        if has_db {
+            return NodeRole::Database;
+        }
+        if has_http {
+            return NodeRole::HttpClient;
+        }
+        let _ = has_obs; // signal is in SpanSignal, not NodeRole
+    }
+
+    NodeRole::Logic
+}
+
+// ── File → library index ──────────────────────────────────────────────────────
+
+type FileLibIndex =
+    std::collections::HashMap<String, Vec<(String, unfault_core::graph::ModuleCategory)>>;
+
+/// Build a map from file path → list of (library name, category) for all
+/// UsesLibrary edges in the graph.  Built once per execute_coverage call.
+fn build_file_library_index(graph: &unfault_analysis::graph::CodeGraph) -> FileLibIndex {
+    use petgraph::Direction;
+    use petgraph::visit::EdgeRef as _;
+    use unfault_analysis::graph::{GraphEdgeKind, GraphNode};
+
+    let mut index: FileLibIndex = std::collections::HashMap::new();
+
+    for node_idx in graph.graph.node_indices() {
+        if let GraphNode::File { path, .. } = &graph.graph[node_idx] {
+            for edge in graph.graph.edges_directed(node_idx, Direction::Outgoing) {
+                if !matches!(edge.weight(), GraphEdgeKind::UsesLibrary) {
+                    continue;
+                }
+                if let GraphNode::ExternalModule { name, category, .. } =
+                    &graph.graph[edge.target()]
+                {
+                    index
+                        .entry(path.clone())
+                        .or_default()
+                        .push((name.clone(), category.clone()));
                 }
             }
         }
     }
 
-    let status = if observed_count > 0 {
-        "observed"
-    } else if instrumented {
-        "instrumented_only"
-    } else if traces_available {
-        "missing"
-    } else {
-        "unknown"
-    };
-
-    TraceCoverage {
-        status: status.to_string(),
-        instrumented,
-        observed_count,
-        sample_span_names,
-    }
+    index
 }
 
-fn build_metrics_coverage(
-    route: &RouteEntry,
-    slos: &[crate::slo::SloDefinition],
-    workspace_label: &str,
-    metrics_available: bool,
-) -> MetricsCoverage {
-    let mut matches = Vec::new();
+// ── Target resolution ─────────────────────────────────────────────────────────
 
-    for slo in slos {
-        if slo_matches_route(slo, route, workspace_label) {
-            matches.push(SloCoverageEntry {
-                name: slo.name.clone(),
-                provider: slo.provider.to_string(),
-                target_percent: slo.target_percent,
-                dashboard_url: slo.dashboard_url.clone(),
-            });
+fn find_handler_by_route(
+    graph: &unfault_analysis::graph::CodeGraph,
+    route: &str,
+    method_filter: Option<&str>,
+) -> Option<unfault_analysis::graph::GraphNodeIndex> {
+    use unfault_analysis::graph::GraphNode;
+
+    let normalized = crate::slo::matcher::normalize_route_path(route);
+
+    graph.graph.node_indices().find(|&idx| {
+        if let GraphNode::Function {
+            is_handler: true,
+            http_path: Some(path),
+            http_method,
+            ..
+        } = &graph.graph[idx]
+        {
+            let path_match = crate::slo::matcher::normalize_route_path(path) == normalized;
+            let method_match = method_filter
+                .map(|m| {
+                    http_method
+                        .as_deref()
+                        .map(|hm| hm.eq_ignore_ascii_case(m))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(true);
+            path_match && method_match
+        } else {
+            false
         }
-    }
-
-    let status = if !matches.is_empty() {
-        "covered"
-    } else if metrics_available {
-        "missing"
-    } else {
-        "unknown"
-    };
-
-    MetricsCoverage {
-        status: status.to_string(),
-        slos: matches,
-    }
+    })
 }
 
-fn overall_coverage_status(traces: &TraceCoverage, metrics: &MetricsCoverage) -> String {
-    let trace_present = matches!(traces.status.as_str(), "observed" | "instrumented_only");
-    let metric_present = metrics.status == "covered";
-    let trace_unknown = traces.status == "unknown";
-    let metrics_unknown = metrics.status == "unknown";
+fn find_function_by_name(
+    graph: &unfault_analysis::graph::CodeGraph,
+    name: &str,
+) -> Option<unfault_analysis::graph::GraphNodeIndex> {
+    use unfault_analysis::graph::GraphNode;
 
-    if trace_present && metric_present {
-        "full".to_string()
-    } else if trace_present || metric_present {
-        "partial".to_string()
-    } else if trace_unknown && metrics_unknown {
-        "unknown".to_string()
-    } else {
-        "missing".to_string()
-    }
+    let lower = name.to_lowercase();
+    // Exact match first, then substring.
+    graph
+        .graph
+        .node_indices()
+        .find(|&idx| {
+            if let GraphNode::Function { name: fn_name, .. } = &graph.graph[idx] {
+                fn_name.to_lowercase() == lower
+            } else {
+                false
+            }
+        })
+        .or_else(|| {
+            graph.graph.node_indices().find(|&idx| {
+                if let GraphNode::Function { name: fn_name, .. } = &graph.graph[idx] {
+                    fn_name.to_lowercase().contains(&lower)
+                } else {
+                    false
+                }
+            })
+        })
 }
+
+// ── Renderer ──────────────────────────────────────────────────────────────────
 
 fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
-    if ctx.routes.is_empty() {
-        if json {
-            println!("{}", serde_json::to_string_pretty(ctx)?);
-        } else {
-            println!("\n{} No routes matched '{}'.\n", "→".cyan(), ctx.target);
-        }
-        return Ok(EXIT_SUCCESS);
-    }
-
     if json {
         println!("{}", serde_json::to_string_pretty(ctx)?);
         return Ok(EXIT_SUCCESS);
     }
 
+    // ── Header ────────────────────────────────────────────────────────────────
+    println!();
     println!(
-        "\n{} Observability coverage for {}\n",
+        "  {} Observability coverage  {}",
         "→".cyan(),
-        ctx.target.bright_white().bold()
+        ctx.resolved_as.bright_white().bold()
     );
+    println!();
+
+    // ── Legend (one line, compact) ────────────────────────────────────────────
     println!(
-        "  {} routes  {} full  {} partial  {} missing  {} unknown",
-        ctx.summary.total_routes.to_string().yellow(),
-        ctx.summary.fully_covered.to_string().green(),
-        ctx.summary.partial.to_string().cyan(),
-        ctx.summary.missing_both.to_string().red(),
-        ctx.summary.unknown.to_string().yellow(),
+        "  {} span  {} sdk  {} uninstrumented  {} boundary",
+        "●".green(),
+        "◑".yellow(),
+        "○".normal(),
+        "[db/http/remote]".cyan()
     );
-
-    if !ctx.data_sources.traces_available {
-        println!("  traces: {}", "no trace source configured".yellow());
-    }
-    if !ctx.data_sources.metrics_available {
-        println!("  metrics: {}", "no SLO/metrics source configured".yellow());
-    }
-    if ctx.data_sources.from_cache {
-        println!("  source: {}", "cached observability snapshot".dimmed());
-    }
     println!();
 
-    let tree = build_coverage_tree(&ctx.root, &ctx.routes);
-    println!("  {}", ctx.root.bright_blue());
-    render_coverage_tree(&tree, &ctx.routes, 2);
+    // ── Call tree ─────────────────────────────────────────────────────────────
+    // Fixed left margin so callers/anchor/callees all sit at the same column.
+    const BASE: usize = 4;
+
+    // Callers — sort deepest first (oldest ancestor at top, direct caller just above anchor)
+    if !ctx.callers.is_empty() {
+        let mut sorted: Vec<&CoverageNode> = ctx.callers.iter().collect();
+        sorted.sort_by(|a, b| b.depth.cmp(&a.depth).then(a.name.cmp(&b.name)));
+        let max_depth = sorted[0].depth as usize;
+
+        for caller in &sorted {
+            // Indent each caller proportionally: oldest = BASE, direct = BASE + (max-1)*2
+            let extra = (max_depth - caller.depth as usize) * 2;
+            print_node_row(caller, BASE + extra, None);
+        }
+        // Connector: vertical bar running from the direct caller down to the anchor
+        let connector_indent = BASE + (max_depth - 1) * 2;
+        println!("{}│", " ".repeat(connector_indent + 2)); // +2 to align under the icon
+    }
+
+    // Anchor — printed at BASE
+    print_node_row(&ctx.anchor, BASE, None);
+
+    // Callees — tree hanging below the anchor
+    if !ctx.callees.is_empty() {
+        print_callee_tree(&ctx.callees, BASE, "");
+    }
+
     println!();
+
+    // ── Summary ───────────────────────────────────────────────────────────────
+    let s = &ctx.summary;
+    let pct = if s.total_nodes > 0 {
+        (s.instrumented * 100) / s.total_nodes
+    } else {
+        0
+    };
+    let pct_str = format!("{}%", pct);
+    let pct_colored = if pct >= 80 {
+        pct_str.green().to_string()
+    } else if pct >= 40 {
+        pct_str.yellow().to_string()
+    } else {
+        pct_str.red().to_string()
+    };
+
+    println!(
+        "  {pct} of {} functions carry span signal  ·  {} boundaries ({} db, {} http-client, {} remote)",
+        s.total_nodes,
+        s.db_boundaries + s.http_boundaries + s.remote_calls,
+        s.db_boundaries,
+        s.http_boundaries,
+        s.remote_calls,
+        pct = pct_colored,
+    );
+    println!();
+
+    // ── Nudge: uninstrumented boundaries ─────────────────────────────────────
+    let mut all_nodes: Vec<&CoverageNode> = Vec::new();
+    collect_nodes(&ctx.anchor, &mut all_nodes);
+    for c in &ctx.callers {
+        all_nodes.push(c);
+    }
+
+    let boundary_gaps: Vec<&CoverageNode> = all_nodes
+        .iter()
+        .copied()
+        .filter(|n| {
+            n.span == SpanSignal::None
+                && matches!(
+                    n.role,
+                    NodeRole::Database | NodeRole::HttpClient | NodeRole::RemoteCall { .. }
+                )
+        })
+        .collect();
+
+    let logic_gaps: Vec<&CoverageNode> = all_nodes
+        .iter()
+        .copied()
+        .filter(|n| n.span == SpanSignal::None && matches!(n.role, NodeRole::Logic))
+        .collect();
+
+    if boundary_gaps.is_empty() && logic_gaps.is_empty() {
+        println!(
+            "  {} All functions carry span signal — good trust coverage.",
+            "✓".green()
+        );
+        println!();
+        return Ok(EXIT_SUCCESS);
+    }
+
+    // Priority 1: boundary functions with no span — these matter most for
+    // diagnosing failures (db timeout, downstream 500, etc.).
+    if !boundary_gaps.is_empty() {
+        println!(
+            "  {} {} uninstrumented {} — failures here will be invisible in traces:",
+            "⚠".yellow().bold(),
+            boundary_gaps.len(),
+            if boundary_gaps.len() == 1 {
+                "boundary"
+            } else {
+                "boundaries"
+            }
+        );
+        for gap in &boundary_gaps {
+            let badge = role_badge_str(&gap.role);
+            let loc = node_loc(gap);
+            println!(
+                "    {} {}  {}  {}",
+                "○".normal(),
+                gap.name.yellow(),
+                badge.cyan(),
+                loc.bright_black()
+            );
+        }
+        println!();
+    }
+
+    // Priority 2: logic functions without spans — shown only on small trees
+    // to avoid flooding the output on large codebases.
+    if !logic_gaps.is_empty() && s.total_nodes <= 15 {
+        println!(
+            "  {} {} business-logic function{} without spans:",
+            "·".bright_black(),
+            logic_gaps.len(),
+            if logic_gaps.len() == 1 { "" } else { "s" }
+        );
+        for n in logic_gaps.iter().take(6) {
+            println!(
+                "    {} {}  {}",
+                "○".bright_black(),
+                n.name.bright_black(),
+                node_loc(n).bright_black()
+            );
+        }
+        if logic_gaps.len() > 6 {
+            println!("    … and {} more", logic_gaps.len() - 6);
+        }
+        println!();
+    }
 
     Ok(EXIT_SUCCESS)
 }
 
-#[derive(Default)]
-struct CoverageTreeNode {
-    children: BTreeMap<String, CoverageTreeNode>,
-    routes: Vec<usize>,
-}
+// ── Tree drawing helpers ──────────────────────────────────────────────────────
 
-fn build_coverage_tree(root: &str, routes: &[RouteCoverageEntry]) -> CoverageTreeNode {
-    let mut tree = CoverageTreeNode::default();
-    for (idx, route) in routes.iter().enumerate() {
-        let normalized = normalize_route_path(&route.path);
-        let remainder = strip_root_prefix(root, &normalized);
-        let mut cursor = &mut tree;
-        for segment in remainder.split('/').filter(|segment| !segment.is_empty()) {
-            cursor = cursor.children.entry(segment.to_string()).or_default();
-        }
-        cursor.routes.push(idx);
-    }
-    tree
-}
-
-fn render_coverage_tree(tree: &CoverageTreeNode, routes: &[RouteCoverageEntry], indent: usize) {
-    for &route_idx in &tree.routes {
-        render_coverage_route(&routes[route_idx], indent);
-    }
-
-    for (segment, child) in &tree.children {
-        println!("{}{}", " ".repeat(indent), segment.dimmed());
-        render_coverage_tree(child, routes, indent + 2);
-    }
-}
-
-fn render_coverage_route(route: &RouteCoverageEntry, indent: usize) {
-    let method = match route.method.as_str() {
-        "GET" => route.method.bright_green(),
-        "POST" => route.method.bright_yellow(),
-        "PUT" | "PATCH" => route.method.bright_cyan(),
-        "DELETE" => route.method.bright_red(),
-        _ => route.method.normal(),
-    };
-    let overall = match route.overall_status.as_str() {
-        "full" => "full".green(),
-        "partial" => "partial".cyan(),
-        "missing" => "missing".red(),
-        _ => "unknown".yellow(),
-    };
-    let trace_label = trace_status_label(&route.traces);
-    let metrics_label = metrics_status_label(&route.metrics);
-    let location = route
-        .line
-        .map(|line| format!("{}:{}", route.file, line))
-        .unwrap_or_else(|| route.file.clone());
-
-    println!(
-        "{}{:<8} {}  [{}]  [{}]  [{}]",
-        " ".repeat(indent),
-        method,
-        route.path,
-        overall,
-        trace_label,
-        metrics_label,
-    );
-    println!(
-        "{}{}  {}",
-        " ".repeat(indent + 11),
-        route.handler.dimmed(),
-        location.dimmed()
-    );
-}
-
-fn trace_status_label(trace: &TraceCoverage) -> String {
-    match trace.status.as_str() {
-        "observed" => {
-            let evidence = trace
-                .sample_span_names
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "recent spans".to_string());
-            format!("traces {}x via {}", trace.observed_count, evidence)
-        }
-        "instrumented_only" => "traces instrumented only".to_string(),
-        "missing" => "traces missing".to_string(),
-        _ => "traces unknown".to_string(),
-    }
-}
-
-fn metrics_status_label(metrics: &MetricsCoverage) -> String {
-    match metrics.status.as_str() {
-        "covered" => {
-            if metrics.slos.len() == 1 {
-                format!("metrics {}", metrics.slos[0].name)
-            } else {
-                format!("metrics {} SLOs", metrics.slos.len())
-            }
-        }
-        "missing" => "metrics missing".to_string(),
-        _ => "metrics unknown".to_string(),
-    }
-}
-
-fn route_matches_target(target: &str, route_path: &str) -> bool {
-    if target.contains('*') {
-        return path_matches_pattern(target, route_path);
-    }
-
-    let normalized_target = normalize_target_root(target);
-    let normalized_route = normalize_route_path(route_path);
-    normalized_route == normalized_target
-        || normalized_route.starts_with(&(normalized_target.clone() + "/"))
-}
-
-fn normalize_target_root(target: &str) -> String {
-    let raw = target.split('*').next().unwrap_or(target);
-    let normalized = normalize_route_path(raw);
-    if normalized.is_empty() {
-        "/".to_string()
-    } else {
-        normalized
-    }
-}
-
-fn strip_root_prefix(root: &str, route_path: &str) -> String {
-    if root == "/" {
-        return route_path.trim_start_matches('/').to_string();
-    }
-
-    if route_path == root {
+/// Print a single node row (icon  name  [badge]  file:line).
+/// `prefix` is a box-drawing prefix like "├─ " inserted between indent and icon.
+fn print_node_row(node: &CoverageNode, indent: usize, prefix: Option<&str>) {
+    let icon = span_icon(&node.span);
+    let name = node_name_str(node);
+    let badge = role_badge_str(&node.role);
+    let badge_part = if badge.is_empty() {
         String::new()
     } else {
-        route_path
-            .strip_prefix(&(root.to_string() + "/"))
-            .unwrap_or(route_path)
-            .to_string()
+        format!("  {}", badge.cyan())
+    };
+    let loc = node_loc(node);
+
+    if let Some(p) = prefix {
+        println!(
+            "{}{}{} {}{}  {}",
+            " ".repeat(indent),
+            p,
+            icon,
+            name,
+            badge_part,
+            loc.bright_black()
+        );
+    } else {
+        println!(
+            "{}{} {}{}  {}",
+            " ".repeat(indent),
+            icon,
+            name,
+            badge_part,
+            loc.bright_black()
+        );
     }
 }
 
-fn slo_matches_route(
-    slo: &crate::slo::SloDefinition,
-    route: &RouteEntry,
-    workspace_label: &str,
-) -> bool {
-    if let Some(ref slo_method) = slo.http_method {
-        if !slo_method.eq_ignore_ascii_case(&route.method) {
-            return false;
+/// Recursively render callees as a box-drawing tree.
+/// `pad` is the accumulated vertical-bar prefix for deeper levels,
+/// e.g. "│  │  " for the third level.
+fn print_callee_tree(nodes: &[CoverageNode], indent: usize, pad: &str) {
+    for (i, node) in nodes.iter().enumerate() {
+        let last = i == nodes.len() - 1;
+        let branch = if last { "└─ " } else { "├─ " };
+        let child_pad = format!("{}{}", pad, if last { "   " } else { "│  " });
+        let full_prefix = format!("{}{}", pad, branch);
+        print_node_row(node, indent, Some(&full_prefix));
+        if !node.children.is_empty() {
+            print_callee_tree(&node.children, indent, &child_pad);
         }
     }
-
-    if slo.has_path_pattern() {
-        return path_matches_pattern(slo.path_pattern.as_deref().unwrap_or("*"), &route.path);
-    }
-
-    slo.matches_local_service(workspace_label)
 }
 
-fn path_matches_pattern(pattern: &str, route_path: &str) -> bool {
-    if pattern == "*" {
-        return true;
+// ── Node formatting helpers ───────────────────────────────────────────────────
+
+fn span_icon(signal: &SpanSignal) -> colored::ColoredString {
+    match signal {
+        SpanSignal::Decorator { .. } => "●".green(),
+        SpanSignal::SdkImported { .. } => "◑".yellow(),
+        SpanSignal::None => "○".normal(),
     }
-
-    let pattern = normalize_path_pattern(pattern);
-    let route = normalize_route_path(route_path);
-
-    if pattern.ends_with("/**") {
-        let prefix = &pattern[..pattern.len() - 3];
-        return route.starts_with(prefix) || route == prefix.trim_end_matches('/');
-    }
-
-    if pattern.ends_with("/*") {
-        let prefix = &pattern[..pattern.len() - 2];
-        if !route.starts_with(prefix) {
-            return false;
-        }
-        let remainder = &route[prefix.len()..];
-        if remainder.is_empty() {
-            return true;
-        }
-        if let Some(after_slash) = remainder.strip_prefix('/') {
-            return !after_slash.contains('/');
-        }
-        return false;
-    }
-
-    pattern == route
 }
 
-fn normalize_path_pattern(path: &str) -> String {
-    // Patterns use explicit `*` / `**` — only lowercase and strip trailing slash.
-    let mut normalized = path.to_ascii_lowercase();
-    if normalized.len() > 1 && normalized.ends_with('/') {
-        normalized.pop();
+fn node_name_str(node: &CoverageNode) -> String {
+    match &node.span {
+        SpanSignal::Decorator {
+            name: Some(span_name),
+        } => format!(
+            "{}  {}",
+            node.name.bright_white(),
+            format!("\"{}\"", span_name).green()
+        ),
+        SpanSignal::Decorator { name: None } => node.name.bright_white().to_string(),
+        SpanSignal::SdkImported { library } => format!(
+            "{}  {}",
+            node.name.bright_white(),
+            format!("sdk:{}", library).yellow()
+        ),
+        SpanSignal::None => node.name.normal().to_string(),
     }
-    normalized
 }
 
-// Delegate to the canonical implementation in slo::matcher so there is a
-// single source of truth for dynamic-segment collapsing.
-fn normalize_route_path(path: &str) -> String {
-    crate::slo::matcher::normalize_route_path(path)
+fn role_badge_str(role: &NodeRole) -> String {
+    match role {
+        NodeRole::HttpHandler { method, path } => format!("{} {}", method, path),
+        NodeRole::Database => "db".to_string(),
+        NodeRole::HttpClient => "http-client".to_string(),
+        NodeRole::RemoteCall { service } => format!("remote:{}", service),
+        NodeRole::Logic => String::new(),
+    }
+}
+
+fn node_loc(node: &CoverageNode) -> String {
+    node.line
+        .map(|l| format!("{}:{}", node.file, l))
+        .unwrap_or_else(|| node.file.clone())
 }
 
 #[cfg(test)]
@@ -1662,17 +1931,24 @@ mod coverage_tests {
     use super::*;
 
     #[test]
-    fn route_target_prefix_matches_descendants() {
-        assert!(route_matches_target("/api", "/api/users"));
-        assert!(route_matches_target("/api", "/api"));
-        assert!(!route_matches_target("/api", "/admin"));
+    fn extract_span_name_double_quoted() {
+        assert_eq!(
+            extract_span_name_from_detail("@trace(\"checkout\")"),
+            Some("checkout".to_string())
+        );
     }
 
     #[test]
-    fn route_target_wildcards_match_templates() {
-        assert!(path_matches_pattern("/users/*", "/users/:id"));
-        assert!(path_matches_pattern("/api/**", "/api/orders/123"));
-        assert!(!path_matches_pattern("/users/*", "/users/123/orders"));
+    fn extract_span_name_single_quoted() {
+        assert_eq!(
+            extract_span_name_from_detail("with tracer.start_as_current_span('place-order')"),
+            Some("place-order".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_span_name_none_when_no_quotes() {
+        assert_eq!(extract_span_name_from_detail("@instrument"), None);
     }
 }
 

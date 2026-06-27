@@ -74,6 +74,9 @@ pub enum ModuleCategory {
     AsyncRuntime,
     /// Logging libraries
     Logging,
+    /// Observability / tracing / metrics libraries
+    /// (opentelemetry, ddtrace, sentry-sdk, opentracing, etc.)
+    Observability,
     /// Retry/resilience libraries
     Resilience,
     /// Standard library
@@ -1793,7 +1796,28 @@ fn add_function_nodes(
 fn categorize_module(module_path: &str) -> ModuleCategory {
     let path_lower = module_path.to_lowercase();
 
-    // Logging - check first to catch "logging", "structlog" etc before other patterns
+    // Observability / tracing SDKs — checked before Logging so that
+    // "opentelemetry" doesn't fall through to Other.
+    if path_lower.contains("opentelemetry")
+        || path_lower.contains("open_telemetry")
+        || path_lower.contains("ddtrace")
+        || path_lower.contains("datadog_lambda")
+        || path_lower.contains("sentry_sdk")
+        || path_lower.contains("sentry-sdk")
+        || path_lower == "sentry"
+        || path_lower.starts_with("sentry.")
+        || path_lower.contains("opentracing")
+        || path_lower.contains("jaeger")
+        || path_lower.contains("zipkin")
+        || path_lower.contains("aws_xray")
+        || path_lower.contains("aws-xray")
+        || path_lower == "otel"
+        || path_lower.starts_with("otel.")
+    {
+        return ModuleCategory::Observability;
+    }
+
+    // Logging - check before HTTP / Database to catch "logging", "structlog" etc
     if path_lower == "logging"
         || path_lower.starts_with("logging.")
         || path_lower.contains("structlog")

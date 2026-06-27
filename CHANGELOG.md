@@ -10,6 +10,49 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.19] — 2026-06-27
+
+### Changed
+
+- **`unfault graph coverage` redesigned** — the command now takes a route path
+  (`/api/orders`) *or* a function name (`validate_order`) and walks the call
+  tree in both directions to answer: "which functions in this path carry span
+  instrumentation, and where are the gaps?"
+
+  **What each node shows:**
+  - `●` — function has a tracing decorator (`@trace`, `@instrument`, `@span`,
+    `with tracer.start_as_current_span(…)`). Span name is extracted and shown
+    in green when detectable.
+  - `◑` — function's file imports an OTel/tracing SDK (opentelemetry, ddtrace,
+    sentry-sdk, zipkin, jaeger, …) but no explicit decorator was found.
+  - `○` — no instrumentation signal.
+
+  **Role badges** next to each node reveal what kind of work is done:
+  `db`, `http-client`, `remote:<service>`, or `GET /path` for entry handlers.
+  These are derived from `UsesLibrary` edges to `ModuleCategory` nodes —
+  no heuristics, pure graph edges.
+
+  **Callers section** (above the anchor): all functions that reach this point,
+  deepest ancestor first, indented to show ancestry distance.
+
+  **Callees section** (below the anchor): full box-drawing tree of everything
+  called from this function, stopping at library boundaries (db/http/remote).
+
+  **Nudge section** at the bottom: lists every uninstrumented boundary
+  (`○ db/http-client/remote`) — these are the specific functions where adding
+  a span would make failures visible in traces. Logic functions without spans
+  are listed separately on small trees (≤15 nodes) to avoid noise.
+
+  **Summary line**: `N% of M functions carry span signal · K boundaries`.
+
+  `--json` emits the full `CoverageContext` document including the anchor,
+  callers list, callee tree, per-node span/role data, and summary counts.
+
+- **`ModuleCategory::Observability` added** — opentelemetry, ddtrace,
+  sentry-sdk, opentracing, jaeger, zipkin, AWS X-Ray, and `otel.*` are now
+  categorised as `Observability` rather than `Other`. This powers the `◑`
+  SDK-imported signal in coverage output.
+
 ## [1.0.18] — 2026-06-27
 
 ### Added

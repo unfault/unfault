@@ -382,33 +382,46 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
-    /// Check trace and metrics coverage for a route subtree
+    /// Show observability coverage for a route or function call tree
     ///
-    /// Accepts either a route prefix (`/api/orders`) or a wildcard pattern
-    /// (`/api/**`). Traces are inferred from recent Cloud Trace spans; metrics
-    /// coverage is inferred from route-matched SLOs.
+    /// Walks the call tree in both directions from a starting point and shows
+    /// which functions are instrumented with spans, which are library
+    /// boundaries (db, http-client, remote), and where coverage is missing.
+    ///
+    /// The target can be:
+    ///   - An HTTP route path:  /api/orders  (matches the handler)
+    ///   - A function name:     validate_order
+    ///
+    /// Node icons:
+    ///   ● = has a tracing decorator / context manager (span name shown)
+    ///   ◑ = file imports an OTel/tracing SDK
+    ///   ○ = no instrumentation detected
     ///
     /// Examples:
-    ///   unfault graph coverage /api
-    ///   unfault graph coverage "/api/**" --method POST
-    ///   unfault graph coverage /checkout --offline
+    ///   unfault graph coverage /api/orders
+    ///   unfault graph coverage validate_order
+    ///   unfault graph coverage /checkout --method POST
+    ///   unfault graph coverage place_order --json
     Coverage {
-        /// Route prefix or wildcard pattern to inspect.
-        #[arg(value_name = "ROUTE")]
-        route: String,
+        /// HTTP route path (e.g. /api/orders) or function name to start from.
+        #[arg(value_name = "TARGET")]
+        target: String,
         /// Workspace path to analyze (defaults to current directory)
         #[arg(long, short = 'w', value_name = "PATH")]
         workspace: Option<String>,
-        /// Filter by HTTP method (case-insensitive, e.g. GET, POST)
+        /// Filter by HTTP method when target is a route (e.g. GET, POST)
         #[arg(long, value_name = "METHOD")]
         method: Option<String>,
+        /// Maximum call-tree depth in each direction (default: stop at library boundaries)
+        #[arg(long, value_name = "DEPTH")]
+        max_depth: Option<usize>,
         /// Output as JSON
         #[arg(long)]
         json: bool,
         /// Force a live refresh of observability data
         #[arg(long)]
         refresh_cache: bool,
-        /// Use cached observability data only
+        /// Use cached observability data only (no network calls)
         #[arg(long)]
         offline: bool,
         /// Enable verbose output
@@ -1113,9 +1126,10 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
             }
         }
         GraphCommands::Coverage {
-            route,
+            target,
             workspace,
             method,
+            max_depth,
             json,
             refresh_cache,
             offline,
@@ -1123,8 +1137,9 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
         } => {
             let args = commands::graph::CoverageArgs {
                 workspace_path: workspace,
-                route,
+                target,
                 method,
+                max_depth,
                 json,
                 refresh_cache,
                 offline,

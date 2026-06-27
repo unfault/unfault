@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.19] - 2026-06-27
+
+### Changed
+
+- **`unfault graph coverage` redesigned** — now walks the full call tree
+  bidirectionally from any route path or function name. Each node is
+  annotated with its span signal (`●` decorator, `◑` SDK imported, `○` none)
+  and its boundary role (`db`, `http-client`, `remote:<svc>`).
+
+  Callers appear above the anchor (oldest ancestor at top), callees as a
+  box-drawing tree below. The nudge section at the bottom lists every
+  uninstrumented boundary (`db`/`http-client`/`remote`) — the exact functions
+  where adding a span would make failures visible in production traces.
+
+- **`ModuleCategory::Observability` added** — OTel, ddtrace, sentry-sdk,
+  opentracing, jaeger, zipkin, AWS X-Ray are now in their own category,
+  enabling the `◑` SDK-imported signal.
+
 ## [1.0.18] - 2026-06-27
 
 ### Added
