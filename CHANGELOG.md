@@ -10,6 +10,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.26] — 2026-06-27
+
+### Fixed
+
+- Bumped all three crates in lockstep: `unfault-core` 0.5.26,
+  `unfault-analysis` 0.4.26, `unfault` 1.0.26.
+
 ## [1.0.25] — 2026-06-27
 
 ### Fixed
