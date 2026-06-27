@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.31] - 2026-06-27
+
+### Fixed
+
+- `unfault graph coverage` now correctly classifies `db_session.get()`,
+  `.commit()`, `.execute()`, etc. as Database calls. Previously a SKIP list
+  silenced these as "noise" before any classification ran.
+- Display names for boundary calls use the full expression (`db_session.get`)
+  rather than just the last segment.
+
 ## [1.0.30] - 2026-06-27
 
 ### Fixed

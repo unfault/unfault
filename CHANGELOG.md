@@ -10,6 +10,33 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.31] — 2026-06-27
+
+### Fixed
+
+- **`stub_callees_from_raw_calls` no longer drops real DB calls.** Previous
+  versions had a SKIP list that included `get`, `commit`, `execute`, `scalar`,
+  `scalars`, `add`, `rollback`, `flush`, `close` — these were intended to
+  filter "noise" but in fact silenced the most fundamental SQLAlchemy ORM
+  calls. `db_session.get(SessionRun, run_id)`, `db_session.commit()`, etc.
+  were classified as nothing and never appeared in the db queries category.
+
+  New behaviour: every raw call expression is classified through
+  `is_db_call_expr` / `is_http_client_call_expr` BEFORE any noise filtering.
+  Real boundary calls are kept regardless of receiver shape. Noise filtering
+  only applies to calls that classify as Logic.
+
+- Display names for boundary calls now use the full expression
+  (`db_session.get`) rather than just the last segment (`get`) so the user
+  can see what was actually called.
+
+- Three regression tests pin the behaviour: `db_session.get` stays in the
+  Database category, `.commit` / `.execute` / `.scalars` all classify as
+  Database, and only true noise (`Depends`, `HTTPException`, dunders) is
+  dropped.
+
+- Bumped: `unfault-core` 0.5.31, `unfault-analysis` 0.4.31, `unfault` 1.0.31.
+
 ## [1.0.30] — 2026-06-27
 
 ### Fixed

@@ -1541,30 +1541,53 @@ fn stub_callees_from_raw_calls(
     let mut result = Vec::new();
 
     for call_expr in raw_calls {
-        // Skip method calls on `self`, injected deps like `db_session.get`,
-        // built-ins, and very short names.
+        // Classify the call expression FIRST.  If it's a recognised db /
+        // http-client boundary we keep it regardless of receiver shape —
+        // this is the whole point of category-based coverage.
+        let inferred_role = if is_db_call_expr(call_expr) {
+            NodeRole::Database
+        } else if is_http_client_call_expr(call_expr) {
+            NodeRole::HttpClient
+        } else {
+            NodeRole::Logic
+        };
+
+        // For display purposes the node name is the last segment of the call.
         let name = call_expr.split('.').last().unwrap_or(call_expr.as_str());
-        if name.len() < 3 || name.starts_with('_') && name.ends_with('_') {
-            continue;
+
+        // Skip rules that apply ONLY to plain logic calls (never to known
+        // boundaries — db_session.get must survive).
+        if matches!(inferred_role, NodeRole::Logic) {
+            // Drop dunder methods, very short names, and the obvious noise.
+            if name.len() < 3 || (name.starts_with('_') && name.ends_with('_')) {
+                continue;
+            }
+            // Match case-insensitively so both `Depends` (FastAPI marker)
+            // and `depends` are dropped.
+            const LOGIC_SKIP: &[&str] = &[
+                "depends",
+                "depend",
+                "httpexception",
+                "isinstance",
+                "len",
+                "str",
+                "int",
+                "list",
+                "dict",
+                "tuple",
+                "set",
+                "print",
+            ];
+            let name_lower = name.to_lowercase();
+            if LOGIC_SKIP.contains(&name_lower.as_str()) {
+                continue;
+            }
         }
-        // Skip the obvious SQLAlchemy / FastAPI dependency calls
-        const SKIP: &[&str] = &[
-            "get",
-            "add",
-            "commit",
-            "rollback",
-            "flush",
-            "execute",
-            "scalar",
-            "scalars",
-            "close",
-            "depends",
-            "HTTPException",
-        ];
-        if SKIP.contains(&name) {
-            continue;
-        }
-        if !seen.insert(name.to_string()) {
+
+        // Deduplicate by the displayed name + role pair so that two distinct
+        // db calls aren't collapsed into one logic call.
+        let dedup_key = format!("{}|{:?}", name, std::mem::discriminant(&inferred_role));
+        if !seen.insert(dedup_key) {
             continue;
         }
 
@@ -1593,14 +1616,30 @@ fn stub_callees_from_raw_calls(
                 None
             };
             let s = node_span_signal(graph, node, file_libs);
-            let r = node_role(graph, idx, node, file_libs);
+            // If the resolved function has its own classification, prefer it.
+            // Otherwise keep the role we inferred from the call expression
+            // (so unresolved db_session.get stays Database).
+            let resolved_role = node_role(graph, idx, node, file_libs);
+            let r = match (&resolved_role, &inferred_role) {
+                (NodeRole::Logic, NodeRole::Database) => NodeRole::Database,
+                (NodeRole::Logic, NodeRole::HttpClient) => NodeRole::HttpClient,
+                _ => resolved_role,
+            };
             (f, l, s, r)
         } else {
-            (String::new(), None, SpanSignal::None, NodeRole::Logic)
+            (String::new(), None, SpanSignal::None, inferred_role)
+        };
+
+        // For db / http-client boundary calls we display the full expression
+        // (db_session.get) rather than just the last segment ("get") so the
+        // user can see what was actually called.
+        let display_name = match &role {
+            NodeRole::Database | NodeRole::HttpClient => call_expr.clone(),
+            _ => name.to_string(),
         };
 
         result.push(CoverageNode {
-            name: name.to_string(),
+            name: display_name,
             file,
             line,
             depth: 1,
@@ -2247,6 +2286,110 @@ mod coverage_tests {
     fn http_client_classification_rejects_db_get() {
         assert!(!is_http_client_call_expr("db_session.get"));
         assert!(!is_http_client_call_expr("cache.get"));
+    }
+
+    // ── stub_callees_from_raw_calls integration ──────────────────────────────
+    //
+    // Regression: previously a SKIP list dropped "get", "commit", "execute"
+    // before they were ever classified — so db_session.get(...) inside a
+    // FastAPI handler never appeared in the db queries category.
+
+    fn make_handler_with_raw_calls(raw: Vec<&str>) -> unfault_analysis::graph::GraphNode {
+        unfault_analysis::graph::GraphNode::Function {
+            file_id: unfault_core::parse::ast::FileId(1),
+            name: "h".to_string(),
+            qualified_name: "h".to_string(),
+            is_async: true,
+            is_handler: true,
+            http_method: Some("GET".to_string()),
+            http_path: Some("/x".to_string()),
+            decorators: vec![],
+            is_writer: false,
+            line: None,
+            column: None,
+            request_schema: None,
+            response_schema: None,
+            raw_calls: raw.into_iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn stub_callees_keeps_db_session_get_in_database_category() {
+        let graph = unfault_analysis::graph::CodeGraph::default();
+        let anchor = make_handler_with_raw_calls(vec!["db_session.get", "build_response"]);
+        let file_libs = std::collections::HashMap::new();
+
+        let nodes = stub_callees_from_raw_calls(&graph, &anchor, &file_libs);
+
+        assert!(
+            nodes
+                .iter()
+                .any(|n| matches!(n.role, NodeRole::Database) && n.name == "db_session.get"),
+            "db_session.get must be present as a Database node, got: {:?}",
+            nodes
+                .iter()
+                .map(|n| (n.name.clone(), format!("{:?}", n.role)))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            nodes
+                .iter()
+                .any(|n| matches!(n.role, NodeRole::Logic) && n.name == "build_response"),
+            "build_response must remain as a Logic node"
+        );
+    }
+
+    #[test]
+    fn stub_callees_keeps_db_session_commit_and_execute() {
+        let graph = unfault_analysis::graph::CodeGraph::default();
+        let anchor = make_handler_with_raw_calls(vec![
+            "db_session.commit",
+            "db_session.execute",
+            "db_session.scalars",
+        ]);
+        let file_libs = std::collections::HashMap::new();
+
+        let nodes = stub_callees_from_raw_calls(&graph, &anchor, &file_libs);
+
+        let db_count = nodes
+            .iter()
+            .filter(|n| matches!(n.role, NodeRole::Database))
+            .count();
+        assert_eq!(
+            db_count, 3,
+            "all three db_session calls must be Database, got: {:?}",
+            nodes
+        );
+    }
+
+    #[test]
+    fn stub_callees_drops_only_noise_not_real_calls() {
+        let graph = unfault_analysis::graph::CodeGraph::default();
+        let anchor = make_handler_with_raw_calls(vec![
+            "Depends",        // FastAPI DI marker — drop
+            "HTTPException",  // error constructor — drop
+            "__init__",       // dunder — drop
+            "db_session.get", // real db call — keep
+            "validate_input", // logic — keep
+        ]);
+        let file_libs = std::collections::HashMap::new();
+
+        let nodes = stub_callees_from_raw_calls(&graph, &anchor, &file_libs);
+
+        let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
+        assert!(
+            names.contains(&"db_session.get"),
+            "expected db_session.get, got {:?}",
+            names
+        );
+        assert!(
+            names.contains(&"validate_input"),
+            "expected validate_input, got {:?}",
+            names
+        );
+        assert!(!names.contains(&"Depends"));
+        assert!(!names.contains(&"HTTPException"));
+        assert!(!names.contains(&"__init__"));
     }
 }
 
