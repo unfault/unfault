@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.22] — 2026-06-27
+
+### Fixed
+
+- Re-release of v1.0.21 with all three crates (`unfault-core` 0.5.22,
+  `unfault-analysis` 0.4.22, `unfault` 1.0.22) bumped together for a clean
+  crates.io publish.
+
 ## [1.0.21] — 2026-06-27
 
 ### Added
