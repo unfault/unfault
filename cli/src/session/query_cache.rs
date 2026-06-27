@@ -19,16 +19,60 @@ use std::fs;
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 
 const CACHE_VERSION: u8 = 1;
 
+/// Path to the on-disk SHA cache file.
+fn sha_cache_path(workspace_path: &Path) -> PathBuf {
+    workspace_path
+        .join(".unfault")
+        .join("cache")
+        .join("commit_sha")
+}
+
+/// Return the mtime (seconds since UNIX epoch) of a file, or 0 on any error.
+fn mtime_secs(path: &Path) -> u64 {
+    path.metadata()
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 /// Return the HEAD commit SHA of the git repo containing `workspace_path`,
 /// or a fallback string when not in a git repo.
+///
+/// On a warm cache the result is served from a small file without spawning
+/// a subprocess. The cache is invalidated when `.git/HEAD` or
+/// `.git/packed-refs` is newer than the cached file.
 pub fn current_commit_sha(workspace_path: &Path) -> String {
-    Command::new("git")
+    let cache_file = sha_cache_path(workspace_path);
+
+    // Check whether the on-disk cache is still fresh.
+    if cache_file.exists() {
+        let cache_mtime = mtime_secs(&cache_file);
+        let head_mtime = mtime_secs(&workspace_path.join(".git").join("HEAD"));
+        // packed-refs is written when refs are compacted; guard against it too.
+        let packed_mtime = mtime_secs(&workspace_path.join(".git").join("packed-refs"));
+        let git_mtime = head_mtime.max(packed_mtime);
+
+        if cache_mtime >= git_mtime && git_mtime > 0 {
+            if let Ok(sha) = fs::read_to_string(&cache_file) {
+                let sha = sha.trim().to_string();
+                if !sha.is_empty() {
+                    return sha;
+                }
+            }
+        }
+    }
+
+    // Cache miss — run git and persist the result.
+    let sha = Command::new("git")
         .args(["rev-parse", "--short=12", "HEAD"])
         .current_dir(workspace_path)
         .output()
@@ -42,7 +86,15 @@ pub fn current_commit_sha(workspace_path: &Path) -> String {
                 None
             }
         })
-        .unwrap_or_else(|| "no-git".to_string())
+        .unwrap_or_else(|| "no-git".to_string());
+
+    // Persist for subsequent invocations (best-effort; ignore write errors).
+    if let Some(parent) = cache_file.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&cache_file, &sha);
+
+    sha
 }
 
 /// Directory where query cache files are stored.

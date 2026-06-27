@@ -5,6 +5,8 @@
 //! - Cache key: (relative_path, content_hash_xxh3_64)
 //! - Cache value: MessagePack-serialized SourceSemantics
 //! - Storage: `.unfault/cache/semantics/<hash>.msgpack`
+//! - Index: `.unfault/cache/semantics/index.msgpack` — persisted HashMap so
+//!   `open()` does a single file read instead of a full `readdir` scan.
 //! - Invalidation: Content hash mismatch or cache version bump
 //!
 //! ## Concurrency model
@@ -34,6 +36,18 @@ const CACHE_VERSION: u32 = 5;
 struct CacheMeta {
     version: u32,
     created_at: u64,
+}
+
+/// Serialisable form of a cache index entry, stored in `index.msgpack`.
+///
+/// Mirrors `CacheEntry` but uses owned types so it can be derived with serde.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct IndexEntry {
+    /// Relative filename inside the semantics cache directory.
+    filename: String,
+    content_hash: u64,
+    mtime_secs: u64,
+    file_size: u64,
 }
 
 /// Entry in the in-memory cache index
@@ -116,6 +130,69 @@ pub struct SemanticsCache {
 }
 
 impl SemanticsCache {
+    /// Path to the persisted index file inside the cache directory.
+    fn index_path(cache_dir: &Path) -> PathBuf {
+        cache_dir.join("index.msgpack")
+    }
+
+    /// Load the persisted index from disk into a `HashMap`.
+    ///
+    /// Returns `None` if the file is absent or corrupt — the caller falls
+    /// back to the legacy `readdir` scan in that case.
+    fn load_index(cache_dir: &Path) -> Option<HashMap<u64, CacheEntry>> {
+        let path = Self::index_path(cache_dir);
+        let file = fs::File::open(&path).ok()?;
+        let entries: Vec<IndexEntry> = rmp_serde::from_read(BufReader::new(file)).ok()?;
+        let mut map = HashMap::with_capacity(entries.len());
+        for e in entries {
+            // Derive path_hash from the filename — same scheme as set().
+            // The filename is: <content_hash>_<path_hash>_... so we can
+            // parse it back. But path_hash isn't stored explicitly in
+            // IndexEntry, so we parse the filename instead.
+            let stem = e.filename.strip_suffix(".msgpack").unwrap_or(&e.filename);
+            let parts: Vec<&str> = stem.splitn(5, '_').collect();
+            if parts.len() >= 2 {
+                if let Ok(path_hash) = u64::from_str_radix(parts[1], 16) {
+                    map.insert(
+                        path_hash,
+                        CacheEntry {
+                            cache_path: cache_dir.join(&e.filename),
+                            content_hash: e.content_hash,
+                            mtime_secs: e.mtime_secs,
+                            file_size: e.file_size,
+                        },
+                    );
+                }
+            }
+        }
+        Some(map)
+    }
+
+    /// Persist the current in-memory index to `index.msgpack`.
+    fn save_index(&self) {
+        let entries: Vec<IndexEntry> = self
+            .index
+            .values()
+            .filter_map(|e| {
+                e.cache_path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|filename| IndexEntry {
+                        filename: filename.to_string(),
+                        content_hash: e.content_hash,
+                        mtime_secs: e.mtime_secs,
+                        file_size: e.file_size,
+                    })
+            })
+            .collect();
+
+        let path = Self::index_path(&self.cache_dir);
+        if let Ok(file) = fs::File::create(&path) {
+            let mut writer = BufWriter::new(file);
+            let _ = rmp_serde::encode::write(&mut writer, &entries);
+        }
+    }
+
     /// Open or create a cache in the given workspace directory.
     pub fn open(workspace_path: &Path) -> Result<Self> {
         let cache_dir = workspace_path
@@ -145,8 +222,10 @@ impl SemanticsCache {
         if should_clear {
             for entry in fs::read_dir(&cache_dir)? {
                 let entry = entry?;
-                if entry.path().extension().map_or(false, |e| e == "msgpack") {
-                    let _ = fs::remove_file(entry.path());
+                let path = entry.path();
+                let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+                if ext == "msgpack" || path == meta_path {
+                    let _ = fs::remove_file(&path);
                 }
             }
         }
@@ -160,48 +239,69 @@ impl SemanticsCache {
         };
         serde_json::to_writer(BufWriter::new(fs::File::create(&meta_path)?), &meta)?;
 
-        // Build index from existing cache files.
-        // Filename: <content_hash>_<path_hash>_<mtime>_<size>_<truncated_path>.msgpack
-        let mut index = HashMap::new();
-        for entry in fs::read_dir(&cache_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.extension().map_or(false, |e| e == "msgpack") {
-                let filename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-                let parts: Vec<&str> = filename.splitn(5, '_').collect();
-                if parts.len() >= 2 {
-                    if let (Ok(content_hash), Ok(path_hash)) = (
-                        u64::from_str_radix(parts[0], 16),
-                        u64::from_str_radix(parts[1], 16),
-                    ) {
-                        let mtime_secs = parts
-                            .get(2)
-                            .and_then(|s| u64::from_str_radix(s, 16).ok())
-                            .unwrap_or(0);
-                        let file_size = parts
-                            .get(3)
-                            .and_then(|s| u64::from_str_radix(s, 16).ok())
-                            .unwrap_or(0);
-                        index.insert(
-                            path_hash,
-                            CacheEntry {
-                                cache_path: path.clone(),
-                                content_hash,
-                                mtime_secs,
-                                file_size,
-                            },
-                        );
+        // Fast path: load persisted index (one file read, no readdir).
+        // Fall back to readdir scan only when the index is absent or corrupt,
+        // then immediately persist it so the next open() is fast.
+        let (index, needs_persist) = match Self::load_index(&cache_dir) {
+            Some(map) => (map, false),
+            None => {
+                // Legacy / first-run: rebuild from filenames.
+                // Filename: <content_hash>_<path_hash>_<mtime>_<size>_<truncated_path>.msgpack
+                let mut map = HashMap::new();
+                if let Ok(read_dir) = fs::read_dir(&cache_dir) {
+                    for entry in read_dir.flatten() {
+                        let path = entry.path();
+                        if path.extension().map_or(false, |e| e == "msgpack") {
+                            // Skip the index file itself.
+                            if path.file_name().map_or(false, |n| n == "index.msgpack") {
+                                continue;
+                            }
+                            let filename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                            let parts: Vec<&str> = filename.splitn(5, '_').collect();
+                            if parts.len() >= 2 {
+                                if let (Ok(content_hash), Ok(path_hash)) = (
+                                    u64::from_str_radix(parts[0], 16),
+                                    u64::from_str_radix(parts[1], 16),
+                                ) {
+                                    let mtime_secs = parts
+                                        .get(2)
+                                        .and_then(|s| u64::from_str_radix(s, 16).ok())
+                                        .unwrap_or(0);
+                                    let file_size = parts
+                                        .get(3)
+                                        .and_then(|s| u64::from_str_radix(s, 16).ok())
+                                        .unwrap_or(0);
+                                    map.insert(
+                                        path_hash,
+                                        CacheEntry {
+                                            cache_path: path.clone(),
+                                            content_hash,
+                                            mtime_secs,
+                                            file_size,
+                                        },
+                                    );
+                                }
+                            }
+                        }
                     }
                 }
+                (map, true)
             }
-        }
+        };
 
-        Ok(Self {
+        let cache = Self {
             cache_dir,
             index,
             stats: CacheStats::default(),
             enabled: true,
-        })
+        };
+
+        // Persist after a legacy readdir rebuild so subsequent opens are fast.
+        if needs_persist {
+            cache.save_index();
+        }
+
+        Ok(cache)
     }
 
     /// Create a disabled cache (always returns None for lookups).
@@ -336,11 +436,13 @@ impl SemanticsCache {
                         file_size,
                     },
                 );
+                // Persist the updated index so the next open() is fast.
+                self.save_index();
             }
         }
     }
 
-    /// Clear all cached files.
+    /// Clear all cached files (including the index).
     pub fn clear(&self) -> Result<()> {
         if !self.enabled {
             return Ok(());
