@@ -10,6 +10,27 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.29] — 2026-06-27
+
+### Fixed
+
+- **`raw_calls` now populated for ALL framework route handlers** — previously
+  only regular Python functions got `raw_calls` populated. Handlers added by
+  `add_fastapi_nodes`, `add_flask_nodes`, `add_express_nodes`,
+  `add_go_framework_nodes`, and `add_rust_framework_nodes` all had
+  `raw_calls: vec![]`. Result: `unfault graph coverage` on a FastAPI / Flask /
+  Express / Go / Rust handler printed "No calls detected" instead of showing
+  its actual callees.
+
+  All five framework adders now extract call-site expressions from the
+  language-specific `calls` list (`py.calls`, `ts.calls`, `go.calls`,
+  `rs.calls`) filtered by `caller_function == handler_name`.
+
+- Regression test `fastapi_handler_raw_calls_are_populated` added to prevent
+  this from happening again.
+
+- Bumped: `unfault-core` 0.5.29, `unfault-analysis` 0.4.29, `unfault` 1.0.29.
+
 ## [1.0.28] — 2026-06-27
 
 ### Removed

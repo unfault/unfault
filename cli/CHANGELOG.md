@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.29] - 2026-06-27
+
+### Fixed
+
+- `unfault graph coverage` on a FastAPI / Flask / Express / Go / Rust route
+  handler now shows the handler's actual callees instead of "No calls
+  detected". Root cause: framework route handler nodes were created with
+  `raw_calls: vec![]` instead of being populated from the language-specific
+  call-site list.
+
 ## [1.0.28] - 2026-06-27
 
 ### Removed

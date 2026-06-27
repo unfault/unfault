@@ -2110,6 +2110,14 @@ fn add_fastapi_nodes(
             )
         });
 
+        // Collect raw call-site expressions for this handler from py.calls.
+        let handler_raw_calls: Vec<String> = py
+            .calls
+            .iter()
+            .filter(|c| c.function_call.caller_function == route.handler_name)
+            .map(|c| c.function_call.callee_expr.clone())
+            .collect();
+
         let qualified_name = route.handler_name.clone();
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -2125,7 +2133,7 @@ fn add_fastapi_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
-            raw_calls: vec![],
+            raw_calls: handler_raw_calls,
         });
 
         // File contains function
@@ -2212,6 +2220,14 @@ fn add_flask_nodes(
             .map(|d| DecoratorSemantic::classify(&d.name, &d.text))
             .collect();
 
+        // Collect raw call-site expressions for this handler from py.calls.
+        let handler_raw_calls: Vec<String> = py
+            .calls
+            .iter()
+            .filter(|c| c.function_call.caller_function == route.handler_name)
+            .map(|c| c.function_call.callee_expr.clone())
+            .collect();
+
         let qualified_name = route.handler_name.clone();
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -2227,7 +2243,7 @@ fn add_flask_nodes(
             column: None,
             request_schema: route.request_schema.clone(),
             response_schema: route.response_schema.clone(),
-            raw_calls: vec![],
+            raw_calls: handler_raw_calls,
         });
 
         cg.graph
@@ -2246,7 +2262,7 @@ fn add_express_nodes(
     cg: &mut CodeGraph,
     file_node: NodeIndex,
     file_id: FileId,
-    _ts: &TsFileSemantics,
+    ts: &TsFileSemantics,
     express: &ExpressFileSummary,
 ) {
     // Routes - create function nodes with HTTP metadata
@@ -2271,6 +2287,14 @@ fn add_express_nodes(
         let http_method = route.method.to_uppercase();
         let http_path = route.path.clone();
 
+        // Collect raw call-site expressions for this handler from ts.calls.
+        let handler_raw_calls: Vec<String> = ts
+            .calls
+            .iter()
+            .filter(|c| c.function_call.caller_function == handler_name)
+            .map(|c| c.function_call.callee_expr.clone())
+            .collect();
+
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
             name: handler_name.clone(),
@@ -2285,7 +2309,7 @@ fn add_express_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
-            raw_calls: vec![],
+            raw_calls: handler_raw_calls,
         });
 
         // File contains function
@@ -2306,7 +2330,7 @@ fn add_go_framework_nodes(
     cg: &mut CodeGraph,
     file_node: NodeIndex,
     file_id: FileId,
-    _go: &GoFileSemantics,
+    go: &GoFileSemantics,
     framework: &GoFrameworkSummary,
 ) {
     // Routes - create function nodes with HTTP metadata
@@ -2326,6 +2350,14 @@ fn add_go_framework_nodes(
             continue;
         }
 
+        // Collect raw call-site expressions for this handler from go.calls.
+        let handler_raw_calls: Vec<String> = go
+            .calls
+            .iter()
+            .filter(|c| c.function_call.caller_function == handler_name)
+            .map(|c| c.function_call.callee_expr.clone())
+            .collect();
+
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
             name: handler_name.clone(),
@@ -2340,7 +2372,7 @@ fn add_go_framework_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
-            raw_calls: vec![],
+            raw_calls: handler_raw_calls,
         });
 
         // File contains function
@@ -2361,7 +2393,7 @@ fn add_rust_framework_nodes(
     cg: &mut CodeGraph,
     file_node: NodeIndex,
     file_id: FileId,
-    _rs: &RustFileSemantics,
+    rs: &RustFileSemantics,
     framework: &RustFrameworkSummary,
 ) {
     // Routes - create function nodes with HTTP metadata
@@ -2377,6 +2409,14 @@ fn add_rust_framework_nodes(
             continue;
         }
 
+        // Collect raw call-site expressions for this handler from rs.calls.
+        let handler_raw_calls: Vec<String> = rs
+            .calls
+            .iter()
+            .filter(|c| c.function_call.caller_function == handler_name)
+            .map(|c| c.function_call.callee_expr.clone())
+            .collect();
+
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
             name: handler_name.clone(),
@@ -2391,7 +2431,7 @@ fn add_rust_framework_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
-            raw_calls: vec![],
+            raw_calls: handler_raw_calls,
         });
 
         // File contains function
@@ -2802,6 +2842,72 @@ app.add_middleware(
 
         // Should have edges: file->app, file->middleware, app->middleware
         assert!(cg.graph.edge_count() >= 3);
+    }
+
+    /// Regression test: FastAPI route handlers must have their body call sites
+    /// populated in `raw_calls` so that `unfault graph coverage` can show
+    /// callees even when cross-file `Calls` edges weren't resolved.
+    ///
+    /// This guards against the bug where a handler with body calls produced
+    /// `raw_calls: vec![]`, causing `coverage` to print "No calls detected".
+    #[test]
+    fn fastapi_handler_raw_calls_are_populated() {
+        let src = r#"
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.get("/items/{item_id}")
+async def get_item(item_id):
+    await fetch_item(item_id)
+    enriched = await enrich_data(item_id)
+    return build_response(enriched)
+"#;
+        let (file_id, sem) = parse_and_build_semantics("routes.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let handler = cg
+            .graph
+            .node_indices()
+            .map(|idx| &cg.graph[idx])
+            .find_map(|node| {
+                if let GraphNode::Function {
+                    name,
+                    is_handler: true,
+                    raw_calls,
+                    ..
+                } = node
+                {
+                    if name == "get_item" {
+                        Some(raw_calls.clone())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .expect("handler get_item should exist in the graph");
+
+        assert!(
+            !handler.is_empty(),
+            "raw_calls must be populated for FastAPI handlers; was empty"
+        );
+
+        let last_segments: Vec<String> = handler
+            .iter()
+            .map(|c| c.split('.').last().unwrap_or(c).to_string())
+            .collect();
+
+        for expected in &["fetch_item", "enrich_data", "build_response"] {
+            assert!(
+                last_segments.iter().any(|n| n == expected),
+                "expected {} in raw_calls, got {:?}",
+                expected,
+                handler
+            );
+        }
     }
 
     #[test]
