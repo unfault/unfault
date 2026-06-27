@@ -731,6 +731,14 @@ pub enum SpanSignal {
         /// The library name (e.g. "opentelemetry", "ddtrace").
         library: String,
     },
+    /// A framework auto-instrumentation was detected elsewhere in the codebase
+    /// (e.g. FastAPIInstrumentor.instrument_app(app), ddtrace.patch_all(),
+    /// SentryAsgiMiddleware, otelgin.Middleware, etc.).  The server span for
+    /// this handler is created automatically — no explicit decorator needed.
+    AutoInstrumented {
+        /// Human-readable framework name, e.g. "fastapi", "sqlalchemy".
+        framework: String,
+    },
     /// No instrumentation signal detected on this node.
     None,
 }
@@ -1179,29 +1187,48 @@ fn build_coverage_context(
     // Build per-file library category index once — used when classifying roles.
     let file_libs = build_file_library_index(graph);
 
+    // Build auto-instrumentation index once — scan the whole graph for global
+    // OTel / ddtrace / sentry instrumentation activation calls.
+    let auto_instruments = build_auto_instrument_set(graph);
+
     // ── Walk callees (downward) ───────────────────────────────────────────────
-    let mut callees = walk_callees(graph, anchor_idx, max_depth, &file_libs, 1);
+    let mut callees = walk_callees(
+        graph,
+        anchor_idx,
+        max_depth,
+        &file_libs,
+        &auto_instruments,
+        1,
+    );
 
     // Fallback: if the graph walk found no callees (cross-file calls that weren't
     // resolved into Calls edges), synthesise stub nodes from the anchor's raw_calls
     // list so the tree isn't empty and gaps are still visible.
     if callees.is_empty() {
-        callees = stub_callees_from_raw_calls(graph, anchor_node, &file_libs);
+        callees = stub_callees_from_raw_calls(graph, anchor_node, &file_libs, &auto_instruments);
     }
 
     // ── Walk callers (upward) ─────────────────────────────────────────────────
-    let mut callers = walk_callers(graph, anchor_idx, max_depth, &file_libs, 1);
+    let mut callers = walk_callers(
+        graph,
+        anchor_idx,
+        max_depth,
+        &file_libs,
+        &auto_instruments,
+        1,
+    );
 
     // Fallback: if the graph walk found no callers (cross-file Calls edges
     // weren't resolved), scan every route handler in the graph and surface
     // any whose raw_calls list contains the anchor's name.
     if callers.is_empty() {
-        callers = stub_route_callers_via_raw_calls(graph, &anchor_name, &file_libs);
+        callers =
+            stub_route_callers_via_raw_calls(graph, &anchor_name, &file_libs, &auto_instruments);
     }
 
     // ── Build anchor node ─────────────────────────────────────────────────────
     let anchor_role = node_role(graph, anchor_idx, anchor_node, &file_libs);
-    let anchor_span = node_span_signal(graph, anchor_node, &file_libs);
+    let anchor_span = node_span_signal(graph, anchor_node, &file_libs, &auto_instruments);
 
     let anchor = CoverageNode {
         name: anchor_name.clone(),
@@ -1262,12 +1289,195 @@ fn collect_nodes<'a>(node: &'a CoverageNode, out: &mut Vec<&'a CoverageNode>) {
     }
 }
 
+// ── Auto-instrumentation index ────────────────────────────────────────────────
+
+/// A set of framework names that are globally auto-instrumented in this
+/// workspace, derived entirely from the code graph.
+///
+/// Examples:
+/// - `{"fastapi"}` when `FastAPIInstrumentor.instrument_app(app)` is detected
+/// - `{"fastapi", "sqlalchemy"}` when both are instrumented
+/// - `{}` when no auto-instrumentation is detected
+pub type AutoInstrumentSet = std::collections::HashSet<String>;
+
+/// Scan the code graph once and return the set of frameworks that have a
+/// global OTel / tracing auto-instrumentation enabled.
+///
+/// Strategy:
+/// 1. Find every `File` node that has a `UsesLibrary` edge to an
+///    `Observability` `ExternalModule`.
+/// 2. For each such file, inspect the raw call expressions belonging to
+///    any function in that file.  Match against known instrumentor patterns.
+///
+/// This is intentionally conservative: we only claim auto-instrumentation
+/// when we see an explicit `.instrument_app()` / `.instrument()` / `.patch()`
+/// / `patch_all()` call — NOT just from an import.
+pub fn build_auto_instrument_set(graph: &unfault_analysis::graph::CodeGraph) -> AutoInstrumentSet {
+    use petgraph::Direction;
+    use petgraph::visit::EdgeRef as _;
+    use unfault_analysis::graph::{GraphEdgeKind, GraphNode};
+    use unfault_core::graph::ModuleCategory;
+
+    let mut result = AutoInstrumentSet::new();
+
+    // Collect files that import an Observability module.
+    let observability_files: std::collections::HashSet<String> = graph
+        .graph
+        .node_indices()
+        .filter_map(|idx| {
+            if let GraphNode::File { path, .. } = &graph.graph[idx] {
+                let has_obs = graph
+                    .graph
+                    .edges_directed(idx, Direction::Outgoing)
+                    .any(|e| {
+                        matches!(e.weight(), GraphEdgeKind::UsesLibrary)
+                            && matches!(
+                                &graph.graph[e.target()],
+                                GraphNode::ExternalModule {
+                                    category: ModuleCategory::Observability,
+                                    ..
+                                }
+                            )
+                    });
+                if has_obs { Some(path.clone()) } else { None }
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    if observability_files.is_empty() {
+        return result;
+    }
+
+    // Walk every Function node in those files and inspect raw_calls.
+    for idx in graph.graph.node_indices() {
+        if let GraphNode::Function { raw_calls, .. } = &graph.graph[idx] {
+            let file =
+                unfault_analysis::graph::traversal::node_file_path_pub(graph, &graph.graph[idx])
+                    .unwrap_or_default();
+            if !observability_files.contains(&file) {
+                continue;
+            }
+            for call_expr in raw_calls {
+                if let Some(framework) = classify_instrumentor_call(call_expr) {
+                    result.insert(framework);
+                }
+            }
+        }
+    }
+
+    result
+}
+
+/// Map a raw call expression to a framework name if it looks like a global
+/// auto-instrumentation activation call.
+///
+/// Patterns recognised (case-insensitive):
+///
+/// Python OTel:
+///   FastAPIInstrumentor.instrument_app(...)     → "fastapi"
+///   FastAPIInstrumentor().instrument_app(...)   → "fastapi"
+///   FlaskInstrumentor().instrument_app(...)     → "flask"
+///   DjangoInstrumentor().instrument(...)        → "django"
+///   SQLAlchemyInstrumentor().instrument(...)    → "sqlalchemy"
+///   RequestsInstrumentor().instrument(...)      → "requests"
+///   AioHttpClientInstrumentor().instrument(...) → "aiohttp"
+///   GrpcInstrumentorClient().instrument(...)    → "grpc"
+///   ddtrace.patch_all()                         → "all"
+///   ddtrace.patch(fastapi=True, ...)            → "fastapi" (best effort)
+///   sentry_sdk.init(integrations=[...])         → "sentry"
+///
+/// Go OTel:
+///   otelhttp.NewHandler / otelgin.Middleware / otelecho.Middleware
+///   → "http" / "gin" / "echo"
+///
+/// Rust:
+///   tower_http::trace::TraceLayer / axum_tracing_opentelemetry
+///   → "http"
+fn classify_instrumentor_call(call_expr: &str) -> Option<String> {
+    let lower = call_expr.to_lowercase();
+
+    // OTel Python instrumentors — keyed by last non-method segment.
+    // e.g. "fastapiinstrumentor.instrument_app" → "fastapi"
+    if lower.ends_with("instrument_app")
+        || lower.ends_with("instrument")
+        || lower.ends_with("instrument_all")
+    {
+        return Some(infer_framework_from_instrumentor(&lower));
+    }
+
+    // ddtrace
+    if lower == "patch_all" || lower.ends_with(".patch_all") {
+        return Some("all".to_string());
+    }
+    if lower == "patch" || lower.ends_with(".patch") {
+        return Some("ddtrace".to_string());
+    }
+
+    // sentry_sdk.init — not an OTel instrumentor per se but carries
+    // the same "framework is globally observed" guarantee.
+    if (lower.ends_with(".init") || lower == "init")
+        && (lower.contains("sentry") || lower.contains("sentry_sdk"))
+    {
+        return Some("sentry".to_string());
+    }
+
+    // Go / Rust middleware wrappers stored as callee_expr in raw_calls.
+    for (pattern, framework) in &[
+        ("otelhttp", "http"),
+        ("otelgin", "gin"),
+        ("otelecho", "echo"),
+        ("otelchi", "chi"),
+        ("otelfasthttp", "fasthttp"),
+        ("tracelayer", "http"),
+        ("tracing_opentelemetry", "http"),
+    ] {
+        if lower.contains(pattern) {
+            return Some(framework.to_string());
+        }
+    }
+
+    None
+}
+
+/// Infer a framework name from an OTel Python instrumentor class name.
+///
+/// `FastAPIInstrumentor` → `"fastapi"`,
+/// `SQLAlchemyInstrumentor` → `"sqlalchemy"`, etc.
+fn infer_framework_from_instrumentor(lower_expr: &str) -> String {
+    // The class name is the first dot-separated segment.
+    let class = lower_expr.split('.').next().unwrap_or(lower_expr);
+
+    // Strip common suffixes to isolate the framework name.
+    let stripped = class
+        .trim_end_matches("instrumentor")
+        .trim_end_matches("instrumentation");
+
+    match stripped {
+        "fastapi" | "starlette" => "fastapi".to_string(),
+        "flask" => "flask".to_string(),
+        "django" => "django".to_string(),
+        "sqlalchemy" => "sqlalchemy".to_string(),
+        "requests" => "requests".to_string(),
+        "aiohttp" | "aiohttpclient" => "aiohttp".to_string(),
+        "grpc" | "grpcclient" | "grpcserver" => "grpc".to_string(),
+        "redis" => "redis".to_string(),
+        "pymongo" => "mongodb".to_string(),
+        "elasticsearch" => "elasticsearch".to_string(),
+        "celery" => "celery".to_string(),
+        "boto" | "botocore" => "aws".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Walk Calls edges downward (callees), stopping at library boundaries.
 fn walk_callees(
     graph: &unfault_analysis::graph::CodeGraph,
     from: unfault_analysis::graph::GraphNodeIndex,
     max_depth: Option<usize>,
     file_libs: &FileLibIndex,
+    auto_instruments: &AutoInstrumentSet,
     depth: i32,
 ) -> Vec<CoverageNode> {
     let mut result = Vec::new();
@@ -1277,6 +1487,7 @@ fn walk_callees(
         from,
         max_depth,
         file_libs,
+        auto_instruments,
         depth,
         &mut visited,
         &mut result,
@@ -1294,6 +1505,7 @@ fn walk_callees_inner(
         String,
         Vec<(String, unfault_core::graph::ModuleCategory)>,
     >,
+    auto_instruments: &AutoInstrumentSet,
     depth: i32,
     visited: &mut std::collections::HashSet<unfault_analysis::graph::GraphNodeIndex>,
     out: &mut Vec<CoverageNode>,
@@ -1330,7 +1542,7 @@ fn walk_callees_inner(
         };
 
         let role = node_role(graph, callee_idx, callee_node, file_libs);
-        let span = node_span_signal(graph, callee_node, file_libs);
+        let span = node_span_signal(graph, callee_node, file_libs, &auto_instruments);
 
         // Stop recursing at library-boundary nodes but still emit the node.
         let is_boundary = matches!(
@@ -1345,6 +1557,7 @@ fn walk_callees_inner(
                 callee_idx,
                 max_depth,
                 file_libs,
+                auto_instruments,
                 depth + 1,
                 visited,
                 &mut children,
@@ -1371,6 +1584,7 @@ fn walk_callers(
     from: unfault_analysis::graph::GraphNodeIndex,
     max_depth: Option<usize>,
     file_libs: &FileLibIndex,
+    auto_instruments: &AutoInstrumentSet,
     depth: i32,
 ) -> Vec<CoverageNode> {
     let mut result = Vec::new();
@@ -1381,6 +1595,7 @@ fn walk_callers(
         from,
         max_depth,
         file_libs,
+        auto_instruments,
         depth,
         &mut visited,
         &mut result,
@@ -1397,6 +1612,7 @@ fn walk_callers_inner(
         String,
         Vec<(String, unfault_core::graph::ModuleCategory)>,
     >,
+    auto_instruments: &AutoInstrumentSet,
     depth: i32,
     visited: &mut std::collections::HashSet<unfault_analysis::graph::GraphNodeIndex>,
     out: &mut Vec<CoverageNode>,
@@ -1432,7 +1648,7 @@ fn walk_callers_inner(
         };
 
         let role = node_role(graph, caller_idx, caller_node, file_libs);
-        let span = node_span_signal(graph, caller_node, file_libs);
+        let span = node_span_signal(graph, caller_node, file_libs, &auto_instruments);
 
         out.push(CoverageNode {
             name,
@@ -1450,6 +1666,7 @@ fn walk_callers_inner(
             caller_idx,
             max_depth,
             file_libs,
+            auto_instruments,
             depth + 1,
             visited,
             out,
@@ -1473,6 +1690,7 @@ fn stub_route_callers_via_raw_calls(
     graph: &unfault_analysis::graph::CodeGraph,
     anchor_name: &str,
     file_libs: &FileLibIndex,
+    auto_instruments: &AutoInstrumentSet,
 ) -> Vec<CoverageNode> {
     use unfault_analysis::graph::GraphNode;
 
@@ -1502,7 +1720,7 @@ fn stub_route_callers_via_raw_calls(
 
         let file =
             unfault_analysis::graph::traversal::node_file_path_pub(graph, node).unwrap_or_default();
-        let span = node_span_signal(graph, node, file_libs);
+        let span = node_span_signal(graph, node, file_libs, &auto_instruments);
         let role = node_role(graph, idx, node, file_libs);
 
         result.push(CoverageNode {
@@ -1526,6 +1744,7 @@ fn stub_callees_from_raw_calls(
     graph: &unfault_analysis::graph::CodeGraph,
     anchor_node: &unfault_analysis::graph::GraphNode,
     file_libs: &FileLibIndex,
+    auto_instruments: &AutoInstrumentSet,
 ) -> Vec<CoverageNode> {
     use unfault_analysis::graph::GraphNode;
 
@@ -1615,7 +1834,7 @@ fn stub_callees_from_raw_calls(
             } else {
                 None
             };
-            let s = node_span_signal(graph, node, file_libs);
+            let s = node_span_signal(graph, node, file_libs, &auto_instruments);
             // If the resolved function has its own classification, prefer it.
             // Otherwise keep the role we inferred from the call expression
             // (so unresolved db_session.get stays Database).
@@ -1664,10 +1883,12 @@ fn node_span_signal(
     graph: &unfault_analysis::graph::CodeGraph,
     node: &unfault_analysis::graph::GraphNode,
     file_libs: &FileLibIndex,
+    auto_instruments: &AutoInstrumentSet,
 ) -> SpanSignal {
     use unfault_analysis::graph::GraphNode;
     use unfault_core::graph::{DecoratorSemantic, ModuleCategory};
 
+    // Priority 1: explicit tracing decorator / context manager on this function.
     if let GraphNode::Function { decorators, .. } = node {
         for dec in decorators {
             if let DecoratorSemantic::Tracing { detail } = dec {
@@ -1677,6 +1898,31 @@ fn node_span_signal(
         }
     }
 
+    // Priority 2: global auto-instrumentation detected in the workspace.
+    // For HTTP route handlers we check whether the handler's framework is
+    // auto-instrumented; for other functions we skip this (auto-instrumentation
+    // only creates server spans at the HTTP boundary).
+    if !auto_instruments.is_empty() {
+        if let GraphNode::Function {
+            is_handler: true, ..
+        } = node
+        {
+            // "all" is emitted by ddtrace.patch_all() — covers everything.
+            if auto_instruments.contains("all") {
+                return SpanSignal::AutoInstrumented {
+                    framework: "ddtrace (patch_all)".to_string(),
+                };
+            }
+            // Match on the handler's framework (fastapi, flask, django, …).
+            for framework in auto_instruments {
+                return SpanSignal::AutoInstrumented {
+                    framework: framework.clone(),
+                };
+            }
+        }
+    }
+
+    // Priority 3: the file imports an OTel / tracing SDK.
     let file =
         unfault_analysis::graph::traversal::node_file_path_pub(graph, node).unwrap_or_default();
     if let Some(libs) = file_libs.get(&file) {
@@ -1995,6 +2241,31 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
         _ => format!("function {}", ctx.anchor.name.bright_white().bold()),
     };
     println!("  {} Coverage for {}", "→".cyan(), header);
+
+    // Show auto-instrumentation status on the anchor.
+    match &ctx.anchor.span {
+        SpanSignal::AutoInstrumented { framework } => {
+            println!(
+                "  {} server span from {} auto-instrumentation",
+                "◐".yellow(),
+                framework.bright_white()
+            );
+        }
+        SpanSignal::Decorator { name: Some(n) } => {
+            println!("  {} explicit span  \"{}\"", "●".green(), n.green());
+        }
+        SpanSignal::Decorator { name: None } => {
+            println!("  {} tracing decorator detected", "●".green());
+        }
+        SpanSignal::SdkImported { library } => {
+            println!(
+                "  {} sdk imported: {}",
+                "◑".yellow(),
+                library.bright_black()
+            );
+        }
+        SpanSignal::None => {}
+    }
     println!();
 
     // ── Reached by ──
@@ -2319,7 +2590,8 @@ mod coverage_tests {
         let anchor = make_handler_with_raw_calls(vec!["db_session.get", "build_response"]);
         let file_libs = std::collections::HashMap::new();
 
-        let nodes = stub_callees_from_raw_calls(&graph, &anchor, &file_libs);
+        let nodes =
+            stub_callees_from_raw_calls(&graph, &anchor, &file_libs, &AutoInstrumentSet::new());
 
         assert!(
             nodes
@@ -2349,7 +2621,8 @@ mod coverage_tests {
         ]);
         let file_libs = std::collections::HashMap::new();
 
-        let nodes = stub_callees_from_raw_calls(&graph, &anchor, &file_libs);
+        let nodes =
+            stub_callees_from_raw_calls(&graph, &anchor, &file_libs, &AutoInstrumentSet::new());
 
         let db_count = nodes
             .iter()
@@ -2374,7 +2647,8 @@ mod coverage_tests {
         ]);
         let file_libs = std::collections::HashMap::new();
 
-        let nodes = stub_callees_from_raw_calls(&graph, &anchor, &file_libs);
+        let nodes =
+            stub_callees_from_raw_calls(&graph, &anchor, &file_libs, &AutoInstrumentSet::new());
 
         let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
         assert!(
@@ -2390,6 +2664,124 @@ mod coverage_tests {
         assert!(!names.contains(&"Depends"));
         assert!(!names.contains(&"HTTPException"));
         assert!(!names.contains(&"__init__"));
+    }
+
+    // ── build_auto_instrument_set ─────────────────────────────────────────────
+
+    #[test]
+    fn classify_instrumentor_call_recognises_fastapi() {
+        assert_eq!(
+            classify_instrumentor_call("fastapiinstrumentor.instrument_app"),
+            Some("fastapi".to_string())
+        );
+        assert_eq!(
+            classify_instrumentor_call("FastAPIInstrumentor.instrument_app"),
+            Some("fastapi".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_instrumentor_call_recognises_sqlalchemy() {
+        assert_eq!(
+            classify_instrumentor_call("sqlalchemyinstrumentor.instrument"),
+            Some("sqlalchemy".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_instrumentor_call_recognises_ddtrace_patch_all() {
+        assert_eq!(
+            classify_instrumentor_call("patch_all"),
+            Some("all".to_string())
+        );
+        assert_eq!(
+            classify_instrumentor_call("ddtrace.patch_all"),
+            Some("all".to_string())
+        );
+    }
+
+    #[test]
+    fn classify_instrumentor_call_ignores_regular_calls() {
+        assert_eq!(classify_instrumentor_call("validate_input"), None);
+        assert_eq!(classify_instrumentor_call("db_session.get"), None);
+        assert_eq!(classify_instrumentor_call("fetch_user"), None);
+    }
+
+    #[test]
+    fn build_auto_instrument_set_from_graph_with_fastapi_instrumentor() {
+        use crate::session::ir_builder::build_ir_cached;
+        use std::sync::Arc;
+        use unfault_core::semantics::SourceSemantics;
+
+        // Build a tiny two-file workspace:
+        //   tracing.py  — imports opentelemetry.instrumentation.fastapi and calls instrument_app
+        //   routes.py   — a FastAPI route handler (no OTel import)
+        let temp = tempfile::TempDir::new().unwrap();
+
+        std::fs::write(
+            temp.path().join("tracing.py"),
+            r#"
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+def setup_tracing(app):
+    FastAPIInstrumentor.instrument_app(app)
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            temp.path().join("routes.py"),
+            r#"
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.get("/items")
+async def list_items():
+    return []
+"#,
+        )
+        .unwrap();
+
+        let build = build_ir_cached(temp.path(), None, false).unwrap();
+        let graph = unfault_analysis::graph::CodeGraph::from(build.ir.graph);
+
+        let instruments = build_auto_instrument_set(&graph);
+
+        assert!(
+            instruments.contains("fastapi"),
+            "expected fastapi in auto_instruments, got {:?}",
+            instruments
+        );
+    }
+
+    #[test]
+    fn build_auto_instrument_set_empty_when_no_instrumentor() {
+        use crate::session::ir_builder::build_ir_cached;
+
+        let temp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            temp.path().join("routes.py"),
+            r#"
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/items")
+async def list_items():
+    return []
+"#,
+        )
+        .unwrap();
+
+        let build = build_ir_cached(temp.path(), None, false).unwrap();
+        let graph = unfault_analysis::graph::CodeGraph::from(build.ir.graph);
+
+        let instruments = build_auto_instrument_set(&graph);
+        assert!(
+            instruments.is_empty(),
+            "expected no auto-instrumentation, got {:?}",
+            instruments
+        );
     }
 }
 

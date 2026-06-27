@@ -10,6 +10,39 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.32] — 2026-06-27
+
+### Added
+
+- **Auto-instrumentation detection** — `unfault graph coverage` now detects
+  when a framework's OTel instrumentation is activated globally in the
+  codebase and reflects that on the route handler's span signal.
+
+  A new `SpanSignal::AutoInstrumented { framework }` variant is emitted when
+  `build_auto_instrument_set` finds calls like:
+  - `FastAPIInstrumentor.instrument_app(app)` → `"fastapi"`
+  - `SQLAlchemyInstrumentor().instrument(...)` → `"sqlalchemy"`
+  - `ddtrace.patch_all()` → `"all"`
+  - `sentry_sdk.init(...)` → `"sentry"`
+  - Go: `otelhttp.NewHandler`, `otelgin.Middleware`, etc.
+  - Rust: `tower_http::trace::TraceLayer`, etc.
+
+  The detection is purely graph-based — it scans `UsesLibrary` edges to
+  `Observability` modules and inspects `raw_calls` for instrumentor-activation
+  patterns. No network calls, no config files.
+
+  The coverage header now shows:
+  - `◐ server span from fastapi auto-instrumentation` — when a global
+    instrumentor covers this handler
+  - `● explicit span "my-span"` — when an explicit decorator is present
+  - `◑ sdk imported: opentelemetry` — when the SDK is imported but no
+    instrumentor activation was detected
+
+- `classify_instrumentor_call` and `infer_framework_from_instrumentor`
+  utility functions (tested, 18 total coverage tests).
+
+- Bumped: `unfault-core` 0.5.32, `unfault-analysis` 0.4.32, `unfault` 1.0.32.
+
 ## [1.0.31] — 2026-06-27
 
 ### Fixed

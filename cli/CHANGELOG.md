@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.32] - 2026-06-27
+
+### Added
+
+- Auto-instrumentation detection: `unfault graph coverage` now detects global
+  OTel/ddtrace/sentry instrumentation (FastAPIInstrumentor.instrument_app,
+  ddtrace.patch_all, etc.) from the code graph and shows the handler's span
+  signal as `◐ server span from fastapi auto-instrumentation` instead of
+  incorrectly flagging it as uninstrumented.
+
 ## [1.0.31] - 2026-06-27
 
 ### Fixed
