@@ -10,6 +10,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.24] — 2026-06-27
+
+### Changed
+
+- **`unfault graph coverage` now reports coverage by category**, not per
+  function. Instead of listing individual function names, the output groups
+  calls into `db queries`, `remote calls`, `http-client calls`,
+  `auth / middleware`, and `business logic`, and reports a ratio and a
+  plain-English hint per group:
+
+  ```
+  Coverage breakdown for get_run_structured_output
+
+  ○  db queries           0 / 3
+     wrap db calls in a span to catch timeouts and query errors
+  ●  remote calls         2 / 2  payment-svc, auth-svc
+  ◑  business logic       1 / 4
+     partial logic coverage — some code paths will be dark
+  ```
+
+  Function names are shown inline only when there are ≤ 3 in the group.
+  Zero-coverage groups get an actionable hint ("wrap X in a span to catch Y").
+  Full-coverage groups show `● N / N` with no extra noise.
+
 ## [1.0.23] — 2026-06-27
 
 ### Changed

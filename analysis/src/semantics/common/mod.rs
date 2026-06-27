@@ -11,7 +11,7 @@ pub mod functions;
 pub mod http;
 pub mod imports;
 
-use crate::parse::ast::{AstLocation, FileId};
+use crate::parse::ast::FileId;
 use crate::types::context::Language;
 
 /// Language-agnostic semantic information for a source file.
@@ -127,7 +127,7 @@ mod tests {
 
     #[test]
     fn common_location_from_ast_location() {
-        use crate::parse::ast::TextRange;
+        use crate::parse::ast::{AstLocation, TextRange};
         let ast_loc = AstLocation {
             file_id: FileId(1),
             range: TextRange {

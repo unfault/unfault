@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.24] - 2026-06-27
+
+### Changed
+
+- **Category-based coverage breakdown** — coverage is now grouped by
+  `db queries`, `remote calls`, `http-client calls`, `auth / middleware`,
+  and `business logic`. Each group shows a ratio, an optional inline name
+  list (when ≤ 3), and a plain-English hint when coverage is 0% or partial.
+
 ## [1.0.23] - 2026-06-27
 
 ### Changed

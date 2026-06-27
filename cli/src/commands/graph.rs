@@ -1846,144 +1846,186 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
     );
     println!();
 
-    // ── Nudge: uninstrumented boundaries ─────────────────────────────────────
+    // ── Category-based coverage breakdown ────────────────────────────────────
+    // Group all nodes in the tree by their semantic category, then report
+    // coverage at the category level rather than per-function.  This lets the
+    // engineer reason at the right level: "I have a blind spot in db queries"
+    // rather than "these three function names are uninstrumented".
+
     let mut all_nodes: Vec<&CoverageNode> = Vec::new();
     collect_nodes(&ctx.anchor, &mut all_nodes);
     for c in &ctx.callers {
-        all_nodes.push(c);
+        collect_nodes(c, &mut all_nodes);
     }
 
-    let boundary_gaps: Vec<&CoverageNode> = all_nodes
-        .iter()
-        .copied()
-        .filter(|n| {
-            n.span == SpanSignal::None
-                && matches!(
-                    n.role,
-                    NodeRole::Database | NodeRole::HttpClient | NodeRole::RemoteCall { .. }
-                )
-        })
-        .collect();
-
-    let logic_gaps: Vec<&CoverageNode> = all_nodes
-        .iter()
-        .copied()
-        .filter(|n| n.span == SpanSignal::None && matches!(n.role, NodeRole::Logic))
-        .collect();
-
-    // ── Per-call coverage breakdown ───────────────────────────────────────────
-    // The key question for the developer: "for each call my handler makes,
-    // will I see it in traces if it fails?"
-    //
-    // We render two lists:
-    //   covered   — calls that sit inside a span (you WILL see them)
-    //   blind spots — calls with no span (you WILL NOT see them)
-    //
-    // A "blind spot" message names the specific code path that will be dark:
-    //   "if get_final_assistant_structured_output fails, you will not know"
-
-    // Direct callees of the anchor are the most actionable level.
-    let direct_callees = &ctx.callees;
-
-    // If there are no callees at all (single-node tree), just do the simple check.
-    if direct_callees.is_empty() {
-        if ctx.anchor.span == SpanSignal::None {
-            println!(
-                "  {} {} has no span — if it fails, traces will show nothing.",
-                "⚠".yellow().bold(),
-                ctx.anchor.name.yellow()
-            );
-        } else {
-            println!(
-                "  {} {} is instrumented.",
-                "✓".green(),
-                ctx.anchor.name.bright_white()
-            );
-        }
-        println!();
-        return Ok(EXIT_SUCCESS);
-    }
-
-    let covered: Vec<&CoverageNode> = direct_callees
-        .iter()
-        .filter(|n| n.span != SpanSignal::None)
-        .collect();
-
-    let blind: Vec<&CoverageNode> = direct_callees
-        .iter()
-        .filter(|n| n.span == SpanSignal::None)
-        .collect();
-
-    if blind.is_empty() {
-        println!(
-            "  {} All calls from {} are covered by spans.",
-            "✓".green(),
-            ctx.anchor.name.bright_white()
-        );
-        println!();
-        return Ok(EXIT_SUCCESS);
-    }
-
-    // Blind spots — the core message.
-    println!(
-        "  {} {} of {} calls from {} {} no span coverage:",
-        "⚠".yellow().bold(),
-        blind.len(),
-        direct_callees.len(),
-        ctx.anchor.name.bright_white(),
-        if blind.len() == 1 { "has" } else { "have" },
-    );
-    println!();
-    for n in &blind {
-        let badge = role_badge_str(&n.role);
-        let badge_str = if badge.is_empty() {
-            String::new()
-        } else {
-            format!("  [{}]", badge)
-        };
-        println!(
-            "    {} {}{}",
-            "○".normal(),
-            n.name.yellow(),
-            badge_str.bright_black(),
-        );
-        println!(
-            "      {} if {} fails or is slow, you will not see it in traces",
-            "→".bright_black(),
-            n.name.yellow(),
-        );
-        if !n.file.is_empty() {
-            println!("        {}", node_loc(n).bright_black());
-        }
-    }
-    println!();
-
-    // Covered calls — show briefly so the developer knows what IS visible.
-    if !covered.is_empty() {
-        println!(
-            "  {} {} call{} already covered:",
-            "✓".green(),
-            covered.len(),
-            if covered.len() == 1 { "" } else { "s" },
-        );
-        for n in &covered {
-            let span_label = match &n.span {
-                SpanSignal::Decorator { name: Some(s) } => format!("  \"{}\"", s),
-                SpanSignal::Decorator { name: None } => "  (decorator)".to_string(),
-                SpanSignal::SdkImported { library } => format!("  sdk:{}", library),
-                SpanSignal::None => String::new(),
-            };
-            println!(
-                "    {} {}{}",
-                "●".green(),
-                n.name.bright_white(),
-                span_label.green(),
-            );
-        }
-        println!();
-    }
+    render_category_breakdown(&all_nodes, &ctx.anchor.name);
 
     Ok(EXIT_SUCCESS)
+}
+
+/// A grouping of nodes that share the same semantic category.
+struct CategoryGroup<'a> {
+    label: &'static str,
+    /// Hint shown when coverage is 0% — tells the engineer what they'll miss.
+    blind_spot_hint: &'static str,
+    /// Hint shown when coverage is partial.
+    partial_hint: &'static str,
+    nodes: Vec<&'a CoverageNode>,
+}
+
+impl<'a> CategoryGroup<'a> {
+    fn covered(&self) -> Vec<&CoverageNode> {
+        self.nodes
+            .iter()
+            .copied()
+            .filter(|n| n.span != SpanSignal::None)
+            .collect()
+    }
+
+    fn uncovered(&self) -> Vec<&CoverageNode> {
+        self.nodes
+            .iter()
+            .copied()
+            .filter(|n| n.span == SpanSignal::None)
+            .collect()
+    }
+}
+
+fn render_category_breakdown(all_nodes: &[&CoverageNode], anchor_name: &str) {
+    // Partition nodes into categories.  A node can only be in one.
+    let mut db: Vec<&CoverageNode> = Vec::new();
+    let mut remote: Vec<&CoverageNode> = Vec::new();
+    let mut http_client: Vec<&CoverageNode> = Vec::new();
+    let mut auth: Vec<&CoverageNode> = Vec::new();
+    let mut logic: Vec<&CoverageNode> = Vec::new();
+
+    for &node in all_nodes {
+        match &node.role {
+            NodeRole::Database => db.push(node),
+            NodeRole::RemoteCall { .. } => remote.push(node),
+            NodeRole::HttpClient => http_client.push(node),
+            NodeRole::Logic => {
+                // Auth / middleware: functions whose decorators include Auth.
+                let has_auth = matches!(node.role, NodeRole::Logic)
+                    && node.name.to_lowercase().contains("auth")
+                    || node.name.to_lowercase().contains("permission")
+                    || node.name.to_lowercase().contains("middleware");
+                if has_auth {
+                    auth.push(node);
+                } else {
+                    logic.push(node);
+                }
+            }
+            NodeRole::HttpHandler { .. } => {} // anchor itself — skip
+        }
+    }
+
+    let groups: Vec<CategoryGroup> = vec![
+        CategoryGroup {
+            label: "db queries",
+            blind_spot_hint: "wrap db calls in a span to catch timeouts and query errors",
+            partial_hint: "some db calls are untraced — you may miss slow queries",
+            nodes: db,
+        },
+        CategoryGroup {
+            label: "remote calls",
+            blind_spot_hint: "wrap remote calls in a span to catch downstream failures",
+            partial_hint: "some remote calls are untraced — partial visibility into downstream",
+            nodes: remote,
+        },
+        CategoryGroup {
+            label: "http-client calls",
+            blind_spot_hint: "wrap outbound http calls in a span to catch connection errors",
+            partial_hint: "some outbound http calls are untraced",
+            nodes: http_client,
+        },
+        CategoryGroup {
+            label: "auth / middleware",
+            blind_spot_hint: "wrap auth checks in a span to see permission failures",
+            partial_hint: "some auth checks are untraced",
+            nodes: auth,
+        },
+        CategoryGroup {
+            label: "business logic",
+            blind_spot_hint: "core logic is uninstrumented — failures will have no trace context",
+            partial_hint: "partial logic coverage — some code paths will be dark",
+            nodes: logic,
+        },
+    ];
+
+    // Only render categories that have at least one node.
+    let active: Vec<&CategoryGroup> = groups.iter().filter(|g| !g.nodes.is_empty()).collect();
+
+    if active.is_empty() {
+        println!(
+            "  {} No calls detected from {} — nothing to evaluate.",
+            "·".bright_black(),
+            anchor_name.bright_white()
+        );
+        println!();
+        return;
+    }
+
+    println!(
+        "  Coverage breakdown for {}\n",
+        anchor_name.bright_white().bold()
+    );
+
+    let all_full = active.iter().all(|g| g.uncovered().is_empty());
+    if all_full {
+        println!(
+            "  {} All categories fully covered — good trust awareness.",
+            "✓".green()
+        );
+        println!();
+        return;
+    }
+
+    for group in &active {
+        let covered = group.covered();
+        let uncovered = group.uncovered();
+        let total = group.nodes.len();
+
+        let (icon, ratio_colored, hint) = if uncovered.is_empty() {
+            // Full coverage
+            let ratio = format!("{} / {}", total, total).green().to_string();
+            ("●".green().to_string(), ratio, None)
+        } else if covered.is_empty() {
+            // Zero coverage — blind spot
+            let ratio = format!("0 / {}", total).red().to_string();
+            ("○".normal().to_string(), ratio, Some(group.blind_spot_hint))
+        } else {
+            // Partial
+            let ratio = format!("{} / {}", covered.len(), total)
+                .yellow()
+                .to_string();
+            ("◑".yellow().to_string(), ratio, Some(group.partial_hint))
+        };
+
+        // Names inline only when ≤ 3 nodes total
+        let names = if total <= 3 {
+            let names_str = group
+                .nodes
+                .iter()
+                .map(|n| n.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("  {}", names_str.bright_black())
+        } else {
+            String::new()
+        };
+
+        println!(
+            "  {}  {:<18}  {}{}",
+            icon, group.label, ratio_colored, names,
+        );
+
+        if let Some(h) = hint {
+            println!("     {}", h.bright_black());
+        }
+    }
+
+    println!();
 }
 
 // ── Tree drawing helpers ──────────────────────────────────────────────────────
