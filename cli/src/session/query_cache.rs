@@ -21,10 +21,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 
-const CACHE_VERSION: u8 = 1;
+/// Bump when the encoding format changes incompatibly.
+/// v1 → v2: switched to struct-map encoding so skip_serializing_if fields
+///          round-trip correctly through rmp_serde.
+const CACHE_VERSION: u8 = 2;
 
 /// Path to the on-disk SHA cache file.
 fn sha_cache_path(workspace_path: &Path) -> PathBuf {
@@ -127,6 +130,9 @@ pub fn get<T: DeserializeOwned>(
 ) -> Option<T> {
     let path = cache_path(workspace_path, query_type, params, commit_sha);
     let file = fs::File::open(&path).ok()?;
+    // Struct-map decoding: structs were written as {field: value} maps so
+    // that absent `#[serde(default, skip_serializing_if = …)]` fields are
+    // filled from their Default impl on deserialization.
     rmp_serde::from_read(BufReader::new(file)).ok()
 }
 
@@ -145,7 +151,12 @@ pub fn set<T: Serialize>(
     let path = cache_path(workspace_path, query_type, params, commit_sha);
     if let Ok(file) = fs::File::create(&path) {
         let mut writer = BufWriter::new(file);
-        if rmp_serde::encode::write(&mut writer, value).is_ok() {
+        // Use struct-map encoding: structs are written as {field: value}
+        // maps instead of positional arrays. This makes fields with
+        // `#[serde(default, skip_serializing_if = …)]` safely round-trip —
+        // absent fields are filled from their Default impl on read.
+        let mut ser = rmp_serde::Serializer::new(&mut writer).with_struct_map();
+        if value.serialize(&mut ser).is_ok() {
             let _ = writer.flush();
         }
     }

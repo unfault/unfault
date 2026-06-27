@@ -10,6 +10,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.21] — 2026-06-27
+
+### Fixed
+
+- **Query cache was never used on warm runs** — all `unfault graph` subcommands
+  (routes, impact, callers, stats, deps, critical, path, handlers, coverage,
+  function-impact, brief) rebuilt the full code graph on every invocation even
+  when nothing had changed. Root cause: `rmp_serde` serialises structs as
+  positional arrays by default, but structs with `#[serde(skip_serializing_if)]`
+  fields write a shorter array than expected, causing silent deserialization
+  failures. Fixed by switching the query cache to struct-map encoding
+  (`Serializer::with_struct_map()`), which writes field names so absent
+  optional/default fields round-trip correctly. Cache version bumped to v2 to
+  invalidate existing broken entries. On a warm cache most commands now return
+  in under 50ms instead of 4–5 seconds.
+
+### Performance
+
+- **Git SHA lookup eliminated on cached runs** — `current_commit_sha()` now
+  reads `.unfault/cache/commit_sha` instead of spawning `git rev-parse` on
+  every command invocation. The file is invalidated when `.git/HEAD` or
+  `.git/packed-refs` is newer than the cached file.
+
+- **Semantics index no longer rescans the cache directory on every run** —
+  `SemanticsCache::open()` now reads a single persisted `index.msgpack` file
+  (one syscall) instead of walking every filename in `.unfault/cache/semantics/`
+  to reconstruct the in-memory index. The index is written on first run and
+  updated incrementally on cache misses. On a 366-file workspace this dropped
+  cache open time from ~34ms to ~5ms.
+
 ## [1.0.20] — 2026-06-27
 
 ### Changed
