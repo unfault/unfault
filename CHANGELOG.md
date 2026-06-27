@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.28] — 2026-06-27
+
+### Removed
+
+- **Old coverage renderer fully deleted** — the legend, call tree, summary
+  line ("N% of M functions carry span signal"), and the per-node tree
+  drawing helpers (`print_node_row`, `print_callee_tree`, `span_icon`,
+  `node_name_str`, `role_badge_str`, `node_loc`) have been removed.
+  `unfault graph coverage` now prints only the header and the category
+  breakdown — nothing else.
+
+### Bumped
+
+- `unfault-core` 0.5.28, `unfault-analysis` 0.4.28, `unfault` 1.0.28.
+
 ## [1.0.27] — 2026-06-27
 
 ### Changed

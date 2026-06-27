@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.28] - 2026-06-27
+
+### Removed
+
+- Old coverage renderer (legend, call tree, summary line, tree drawing
+  helpers) fully deleted. `unfault graph coverage` now prints only the
+  header and the category breakdown.
+
 ## [1.0.27] - 2026-06-27
 
 ### Changed

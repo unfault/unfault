@@ -1771,7 +1771,7 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
         return Ok(EXIT_SUCCESS);
     }
 
-    // ── Header ────────────────────────────────────────────────────────────────
+    // Header
     println!();
     println!(
         "  {} Observability coverage  {}",
@@ -1780,79 +1780,10 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
     );
     println!();
 
-    // ── Legend (one line, compact) ────────────────────────────────────────────
-    println!(
-        "  {} span  {} sdk  {} uninstrumented  {} boundary",
-        "●".green(),
-        "◑".yellow(),
-        "○".normal(),
-        "[db/http/remote]".cyan()
-    );
-    println!();
-
-    // ── Call tree ─────────────────────────────────────────────────────────────
-    // Fixed left margin so callers/anchor/callees all sit at the same column.
-    const BASE: usize = 4;
-
-    // Callers — sort deepest first (oldest ancestor at top, direct caller just above anchor)
-    if !ctx.callers.is_empty() {
-        let mut sorted: Vec<&CoverageNode> = ctx.callers.iter().collect();
-        sorted.sort_by(|a, b| b.depth.cmp(&a.depth).then(a.name.cmp(&b.name)));
-        let max_depth = sorted[0].depth as usize;
-
-        for caller in &sorted {
-            // Indent each caller proportionally: oldest = BASE, direct = BASE + (max-1)*2
-            let extra = (max_depth - caller.depth as usize) * 2;
-            print_node_row(caller, BASE + extra, None);
-        }
-        // Connector: vertical bar running from the direct caller down to the anchor
-        let connector_indent = BASE + (max_depth - 1) * 2;
-        println!("{}│", " ".repeat(connector_indent + 2)); // +2 to align under the icon
-    }
-
-    // Anchor — printed at BASE
-    print_node_row(&ctx.anchor, BASE, None);
-
-    // Callees — tree hanging below the anchor
-    if !ctx.callees.is_empty() {
-        print_callee_tree(&ctx.callees, BASE, "");
-    }
-
-    println!();
-
-    // ── Summary ───────────────────────────────────────────────────────────────
-    let s = &ctx.summary;
-    let pct = if s.total_nodes > 0 {
-        (s.instrumented * 100) / s.total_nodes
-    } else {
-        0
-    };
-    let pct_str = format!("{}%", pct);
-    let pct_colored = if pct >= 80 {
-        pct_str.green().to_string()
-    } else if pct >= 40 {
-        pct_str.yellow().to_string()
-    } else {
-        pct_str.red().to_string()
-    };
-
-    println!(
-        "  {pct} of {} functions carry span signal  ·  {} boundaries ({} db, {} http-client, {} remote)",
-        s.total_nodes,
-        s.db_boundaries + s.http_boundaries + s.remote_calls,
-        s.db_boundaries,
-        s.http_boundaries,
-        s.remote_calls,
-        pct = pct_colored,
-    );
-    println!();
-
-    // ── Category-based coverage breakdown ────────────────────────────────────
-    // Group all nodes in the tree by their semantic category, then report
-    // coverage at the category level rather than per-function.  This lets the
-    // engineer reason at the right level: "I have a blind spot in db queries"
-    // rather than "these three function names are uninstrumented".
-
+    // Category-based coverage breakdown is the only output (besides the header).
+    // All previous renderings (legend, call tree, summary line) have been
+    // removed because they obscured the actual answer to the question
+    // "which categories of work do I have visibility into?"
     let mut all_nodes: Vec<&CoverageNode> = Vec::new();
     collect_nodes(&ctx.anchor, &mut all_nodes);
     for c in &ctx.callers {
@@ -2027,104 +1958,6 @@ fn render_category_breakdown(all_nodes: &[&CoverageNode], anchor_name: &str) {
     }
 
     println!();
-}
-
-// ── Tree drawing helpers ──────────────────────────────────────────────────────
-
-/// Print a single node row (icon  name  [badge]  file:line).
-/// `prefix` is a box-drawing prefix like "├─ " inserted between indent and icon.
-fn print_node_row(node: &CoverageNode, indent: usize, prefix: Option<&str>) {
-    let icon = span_icon(&node.span);
-    let name = node_name_str(node);
-    let badge = role_badge_str(&node.role);
-    let badge_part = if badge.is_empty() {
-        String::new()
-    } else {
-        format!("  {}", badge.cyan())
-    };
-    let loc = node_loc(node);
-
-    if let Some(p) = prefix {
-        println!(
-            "{}{}{} {}{}  {}",
-            " ".repeat(indent),
-            p,
-            icon,
-            name,
-            badge_part,
-            loc.bright_black()
-        );
-    } else {
-        println!(
-            "{}{} {}{}  {}",
-            " ".repeat(indent),
-            icon,
-            name,
-            badge_part,
-            loc.bright_black()
-        );
-    }
-}
-
-/// Recursively render callees as a box-drawing tree.
-/// `pad` is the accumulated vertical-bar prefix for deeper levels,
-/// e.g. "│  │  " for the third level.
-fn print_callee_tree(nodes: &[CoverageNode], indent: usize, pad: &str) {
-    for (i, node) in nodes.iter().enumerate() {
-        let last = i == nodes.len() - 1;
-        let branch = if last { "└─ " } else { "├─ " };
-        let child_pad = format!("{}{}", pad, if last { "   " } else { "│  " });
-        let full_prefix = format!("{}{}", pad, branch);
-        print_node_row(node, indent, Some(&full_prefix));
-        if !node.children.is_empty() {
-            print_callee_tree(&node.children, indent, &child_pad);
-        }
-    }
-}
-
-// ── Node formatting helpers ───────────────────────────────────────────────────
-
-fn span_icon(signal: &SpanSignal) -> colored::ColoredString {
-    match signal {
-        SpanSignal::Decorator { .. } => "●".green(),
-        SpanSignal::SdkImported { .. } => "◑".yellow(),
-        SpanSignal::None => "○".normal(),
-    }
-}
-
-fn node_name_str(node: &CoverageNode) -> String {
-    match &node.span {
-        SpanSignal::Decorator {
-            name: Some(span_name),
-        } => format!(
-            "{}  {}",
-            node.name.bright_white(),
-            format!("\"{}\"", span_name).green()
-        ),
-        SpanSignal::Decorator { name: None } => node.name.bright_white().to_string(),
-        SpanSignal::SdkImported { library } => format!(
-            "{}  {}",
-            node.name.bright_white(),
-            format!("sdk:{}", library).yellow()
-        ),
-        SpanSignal::None => node.name.normal().to_string(),
-    }
-}
-
-fn role_badge_str(role: &NodeRole) -> String {
-    match role {
-        NodeRole::HttpHandler { method, path } => format!("{} {}", method, path),
-        NodeRole::Database => "db".to_string(),
-        NodeRole::HttpClient => "http-client".to_string(),
-        NodeRole::RemoteCall { service } => format!("remote:{}", service),
-        NodeRole::Logic => String::new(),
-    }
-}
-
-fn node_loc(node: &CoverageNode) -> String {
-    node.line
-        .map(|l| format!("{}:{}", node.file, l))
-        .unwrap_or_else(|| node.file.clone())
 }
 
 #[cfg(test)]
