@@ -597,7 +597,7 @@ pub fn build_ir_cached(
 
     let mut semantics_entries: Vec<(FileId, Arc<SourceSemantics>)> = Vec::new();
     let mut all_semantics: Vec<SourceSemantics> = Vec::new();
-    let mut content_hashes: Vec<u64> = Vec::new();
+    let mut content_hashes: Vec<u64>;
 
     for result in results {
         if let Some((file_id, semantics)) = result {

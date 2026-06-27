@@ -12,7 +12,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.0.21] — 2026-06-27
 
+### Added
+
+- **`GraphNode::Function` now carries `raw_calls`** — the list of call-site
+  expressions extracted from the function body is now stored on the graph node
+  itself. Used by `unfault graph coverage` as a fallback when cross-file
+  `Calls` edges were not resolved, so the callee tree is never empty.
+
+- **`ModuleCategory::Observability`** — `opentelemetry`, `ddtrace`,
+  `sentry-sdk`, `opentracing`, `jaeger`, `zipkin`, `aws_xray`, and `otel.*`
+  are now classified as `Observability` instead of `Other`, powering the
+  `◑ sdk:…` signal in coverage output.
+
 ### Fixed
+
+- **`with tracer.start_span()` context managers now detected as span signal**
+  — Python `with` statements wrapping tracer calls (`start_span`,
+  `start_as_current_span`, `start_active_span`, etc.) inside a function body
+  are now synthesised as a `DecoratorSemantic::Tracing` on the function graph
+  node, so `unfault graph coverage` correctly shows `●` (with the extracted
+  span name) rather than `○` for instrumented handlers.
+
+- **Coverage "✓ All functions carry span signal" fired at 0%** — the success
+  condition now checks whether any node in the full tree has
+  `SpanSignal::None`; it only fires when every single node carries a signal.
+
+- **`unused import: AstLocation`** (analysis) and
+  **`value assigned to content_hashes is never read`** (cli) warnings
+  eliminated.
+
+- **`raw_calls: vec![]` added to all `GraphNode::Function` initialisers**
+  across `core`, `analysis`, and `cli` to keep builds clean after the new
+  field was introduced.
 
 - **Query cache was never used on warm runs** — all `unfault graph` subcommands
   (routes, impact, callers, stats, deps, critical, path, handlers, coverage,

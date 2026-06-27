@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.21] - 2026-06-27
+
+### Fixed
+
+- **`with tracer.start_span()` now detected as a span signal** — Python
+  context-manager tracing calls inside function bodies are synthesised as
+  `DecoratorSemantic::Tracing` at graph-build time, so `unfault graph coverage`
+  shows `●` with the extracted span name instead of `○`.
+
+- **Coverage callee tree was empty for most handlers** — `GraphNode::Function`
+  now stores `raw_calls` (all call-site expressions extracted from the body).
+  When no resolved `Calls` edges exist in the graph, the coverage command falls
+  back to these raw names and synthesises stub callee nodes, so gaps in the
+  call tree are always visible.
+
+- **"✓ All functions carry span signal" fired incorrectly at 0%** — success
+  message now only appears when every node in the tree carries a non-`None`
+  span signal.
+
+- **`ModuleCategory::Observability` added** — OTel, ddtrace, sentry-sdk,
+  opentracing, jaeger, zipkin, and AWS X-Ray are now their own category,
+  enabling the `◑ sdk:…` signal in `unfault graph coverage`.
+
 ## [1.0.20] - 2026-06-27
 
 ### Changed

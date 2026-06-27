@@ -223,6 +223,7 @@ mod tests {
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
         graph
             .graph

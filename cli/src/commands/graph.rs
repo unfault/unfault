@@ -1179,7 +1179,14 @@ fn build_coverage_context(
     let file_libs = build_file_library_index(graph);
 
     // ── Walk callees (downward) ───────────────────────────────────────────────
-    let callees = walk_callees(graph, anchor_idx, max_depth, &file_libs, 1);
+    let mut callees = walk_callees(graph, anchor_idx, max_depth, &file_libs, 1);
+
+    // Fallback: if the graph walk found no callees (cross-file calls that weren't
+    // resolved into Calls edges), synthesise stub nodes from the anchor's raw_calls
+    // list so the tree isn't empty and gaps are still visible.
+    if callees.is_empty() {
+        callees = stub_callees_from_raw_calls(graph, anchor_node, &file_libs);
+    }
 
     // ── Walk callers (upward) ─────────────────────────────────────────────────
     let callers = walk_callers(graph, anchor_idx, max_depth, &file_libs, 1);
@@ -1445,6 +1452,104 @@ fn walk_callers_inner(
 // ── Signal detection ──────────────────────────────────────────────────────────
 
 /// Extract a `SpanSignal` for a function.
+/// When the graph walk finds no `Calls` edges from the anchor (common for
+/// cross-file async calls whose imports weren't resolved), synthesise stub
+/// `CoverageNode`s from the `raw_calls` field baked into the graph node at
+/// build time.  These stubs have `SpanSignal::None` and `NodeRole::Logic` by
+/// default — they show up in the tree and in the nudge list so the developer
+/// can see the gap.
+fn stub_callees_from_raw_calls(
+    graph: &unfault_analysis::graph::CodeGraph,
+    anchor_node: &unfault_analysis::graph::GraphNode,
+    file_libs: &FileLibIndex,
+) -> Vec<CoverageNode> {
+    use unfault_analysis::graph::GraphNode;
+
+    let GraphNode::Function {
+        raw_calls, file_id, ..
+    } = anchor_node
+    else {
+        return vec![];
+    };
+
+    // Deduplicate and skip trivial / noise names.
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+
+    for call_expr in raw_calls {
+        // Skip method calls on `self`, injected deps like `db_session.get`,
+        // built-ins, and very short names.
+        let name = call_expr.split('.').last().unwrap_or(call_expr.as_str());
+        if name.len() < 3 || name.starts_with('_') && name.ends_with('_') {
+            continue;
+        }
+        // Skip the obvious SQLAlchemy / FastAPI dependency calls
+        const SKIP: &[&str] = &[
+            "get",
+            "add",
+            "commit",
+            "rollback",
+            "flush",
+            "execute",
+            "scalar",
+            "scalars",
+            "close",
+            "depends",
+            "HTTPException",
+        ];
+        if SKIP.contains(&name) {
+            continue;
+        }
+        if !seen.insert(name.to_string()) {
+            continue;
+        }
+
+        // See if there's a resolved Function node in the graph with this name
+        // (could be same file or cross-file that was resolved).
+        let resolved = graph.graph.node_indices().find(|&idx| {
+            if let GraphNode::Function {
+                name: fn_name,
+                file_id: fid,
+                ..
+            } = &graph.graph[idx]
+            {
+                fn_name == name && fid == file_id
+            } else {
+                false
+            }
+        });
+
+        let (file, line, span, role) = if let Some(idx) = resolved {
+            let node = &graph.graph[idx];
+            let f = unfault_analysis::graph::traversal::node_file_path_pub(graph, node)
+                .unwrap_or_default();
+            let l = if let GraphNode::Function { line, .. } = node {
+                *line
+            } else {
+                None
+            };
+            let s = node_span_signal(graph, node, file_libs);
+            let r = node_role(graph, idx, node, file_libs);
+            (f, l, s, r)
+        } else {
+            (String::new(), None, SpanSignal::None, NodeRole::Logic)
+        };
+
+        result.push(CoverageNode {
+            name: name.to_string(),
+            file,
+            line,
+            depth: 1,
+            direction: "down".to_string(),
+            span,
+            role,
+            children: vec![],
+        });
+    }
+
+    result
+}
+
 ///
 /// Priority:
 /// 1. A tracing decorator / context manager (`@trace`, `@instrument`, etc.)
@@ -1766,20 +1871,22 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
         .filter(|n| n.span == SpanSignal::None && matches!(n.role, NodeRole::Logic))
         .collect();
 
-    if boundary_gaps.is_empty() && logic_gaps.is_empty() {
+    // ✓ only when every node in the tree carries a signal (including the anchor).
+    let any_uninstrumented = all_nodes.iter().any(|n| n.span == SpanSignal::None);
+    if !any_uninstrumented {
         println!(
-            "  {} All functions carry span signal — good trust coverage.",
+            "  {} Every function in this call tree carries a span signal.",
             "✓".green()
         );
         println!();
         return Ok(EXIT_SUCCESS);
     }
 
-    // Priority 1: boundary functions with no span — these matter most for
-    // diagnosing failures (db timeout, downstream 500, etc.).
+    // Priority 1: uninstrumented boundary nodes (db, http-client, remote).
+    // These matter most — failures here produce no trace evidence.
     if !boundary_gaps.is_empty() {
         println!(
-            "  {} {} uninstrumented {} — failures here will be invisible in traces:",
+            "  {} {} uninstrumented {} — add a span so failures are visible in traces:",
             "⚠".yellow().bold(),
             boundary_gaps.len(),
             if boundary_gaps.len() == 1 {
@@ -1802,16 +1909,16 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
         println!();
     }
 
-    // Priority 2: logic functions without spans — shown only on small trees
-    // to avoid flooding the output on large codebases.
-    if !logic_gaps.is_empty() && s.total_nodes <= 15 {
+    // Priority 2: uninstrumented logic functions — shown on smaller trees.
+    // On large trees this is too noisy; the boundaries list is enough.
+    if !logic_gaps.is_empty() && s.total_nodes <= 20 {
         println!(
-            "  {} {} business-logic function{} without spans:",
+            "  {} {} function{} without spans:",
             "·".bright_black(),
             logic_gaps.len(),
             if logic_gaps.len() == 1 { "" } else { "s" }
         );
-        for n in logic_gaps.iter().take(6) {
+        for n in logic_gaps.iter().take(8) {
             println!(
                 "    {} {}  {}",
                 "○".bright_black(),
@@ -1819,9 +1926,16 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
                 node_loc(n).bright_black()
             );
         }
-        if logic_gaps.len() > 6 {
-            println!("    … and {} more", logic_gaps.len() - 6);
+        if logic_gaps.len() > 8 {
+            println!("    … and {} more", logic_gaps.len() - 8);
         }
+        println!();
+    } else if logic_gaps.len() > 0 && s.total_nodes > 20 {
+        println!(
+            "  {} {} more functions without spans (use --json for full list)",
+            "·".bright_black(),
+            logic_gaps.len()
+        );
         println!();
     }
 

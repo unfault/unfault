@@ -286,6 +286,12 @@ pub enum GraphNode {
         /// Response schema from `@blp.response(200, SchemaY)` or `@marshal_with`.
         #[serde(skip_serializing_if = "Option::is_none")]
         response_schema: Option<String>,
+        /// Raw call-site names extracted from the function body.
+        /// Populated during graph construction; used as a fallback when cross-file
+        /// `Calls` edges could not be resolved (e.g. calls to functions imported
+        /// from unanalysed packages or via dependency injection).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        raw_calls: Vec<String>,
     },
 
     /// A class or type definition
@@ -1639,6 +1645,62 @@ fn rust_path_candidates(path: &str) -> Vec<String> {
 /// For Python files with FastAPI and TypeScript files with Express.js, route handlers
 /// are skipped here since they will be added by framework-specific functions with
 /// HTTP method/path metadata.
+/// Scan a Python function's call sites for span context-manager / tracer call
+/// patterns that are semantically equivalent to a tracing decorator but are
+/// expressed inside the function body rather than as a decorator.
+///
+/// Returns a `detail` string (e.g. `"tracer.start_span(\"checkout\")"`) if a
+/// recognisable span signal is found, `None` otherwise.
+fn find_body_span_signal(
+    fn_name: &str,
+    py: &crate::semantics::python::model::PyFileSemantics,
+) -> Option<String> {
+    // Known patterns for context-manager / direct tracer calls:
+    // - tracer.start_span("name")
+    // - tracer.start_as_current_span("name")
+    // - tracer.start_active_span("name")
+    // - trace.get_tracer(...).start_as_current_span("name")  [callee = "start_as_current_span"]
+    // - ddtrace.tracer.start_span("name")
+    // - otel.start_span("name")
+    // We match on callee_expr containing span-related method names.
+    const SPAN_CALLEE_PATTERNS: &[&str] = &[
+        "start_span",
+        "start_as_current_span",
+        "start_active_span",
+        "start_child_span",
+        "new_span",
+        "open_span",
+        "use_span",
+    ];
+
+    for call in &py.calls {
+        // Only look at calls belonging to this function.
+        if call.function_call.caller_function != fn_name {
+            continue;
+        }
+        let expr_lower = call.function_call.callee_expr.to_lowercase();
+        if SPAN_CALLEE_PATTERNS
+            .iter()
+            .any(|pat| expr_lower.ends_with(pat))
+        {
+            // Try to extract a span name from the first argument.
+            let span_name = call
+                .args
+                .first()
+                .map(|a| {
+                    a.value_repr
+                        .trim_matches(|c| c == '"' || c == '\'')
+                        .to_string()
+                })
+                .filter(|s| !s.is_empty() && !s.contains(' '))
+                .map(|s| format!(" \"{}\"", s))
+                .unwrap_or_default();
+            return Some(format!("{}{}", call.function_call.callee_expr, span_name));
+        }
+    }
+    None
+}
+
 fn add_function_nodes(
     cg: &mut CodeGraph,
     file_node: NodeIndex,
@@ -1748,10 +1810,30 @@ fn add_function_nodes(
             None => func.name.clone(),
         };
 
-        let func_decorators = py_decorators_by_fn
+        let mut func_decorators = py_decorators_by_fn
             .get(&func.name)
             .cloned()
             .unwrap_or_default();
+
+        // Scan call sites in the function body for span context managers and
+        // tracer calls that aren't expressed as decorators.
+        // Examples Python:
+        //   with tracer.start_span("name"): …
+        //   with tracer.start_as_current_span("name"): …
+        //   span = tracer.start_span("name")
+        // We synthesise a Tracing decorator so coverage can detect the signal.
+        if !func_decorators
+            .iter()
+            .any(|d| matches!(d, DecoratorSemantic::Tracing { .. }))
+        {
+            if let SourceSemantics::Python(py) = sem.as_ref() {
+                if let Some(tracing_detail) = find_body_span_signal(&func.name, py) {
+                    func_decorators.push(DecoratorSemantic::Tracing {
+                        detail: tracing_detail,
+                    });
+                }
+            }
+        }
 
         // CommonLocation.line/column are already 1-based (converted in From<&AstLocation>).
         // A value of 0 means the location was not recorded.
@@ -1765,6 +1847,10 @@ fn add_function_nodes(
         } else {
             None
         };
+
+        // Collect raw call-site names for this function.  Used as a fallback
+        // in coverage analysis when cross-file Calls edges weren't resolved.
+        let raw_calls: Vec<String> = func.calls.iter().map(|c| c.callee_expr.clone()).collect();
 
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -1780,6 +1866,7 @@ fn add_function_nodes(
             column: func_col,
             request_schema: None,
             response_schema: None,
+            raw_calls,
         });
 
         // File contains function
@@ -2038,6 +2125,7 @@ fn add_fastapi_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         // File contains function
@@ -2139,6 +2227,7 @@ fn add_flask_nodes(
             column: None,
             request_schema: route.request_schema.clone(),
             response_schema: route.response_schema.clone(),
+            raw_calls: vec![],
         });
 
         cg.graph
@@ -2196,6 +2285,7 @@ fn add_express_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         // File contains function
@@ -2250,6 +2340,7 @@ fn add_go_framework_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         // File contains function
@@ -2300,6 +2391,7 @@ fn add_rust_framework_nodes(
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         // File contains function
@@ -2402,6 +2494,7 @@ mod tests {
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         };
         let debug_str = format!("{:?}", node);
         assert!(debug_str.contains("Function"));
@@ -2488,6 +2581,7 @@ mod tests {
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         };
         assert_eq!(func.display_name(), "Handler.process");
 
@@ -2537,6 +2631,7 @@ mod tests {
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         };
         assert!(!func.is_file());
     }
@@ -2983,6 +3078,7 @@ def bar():
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         let func_b = cg.graph.add_node(GraphNode::Function {
@@ -2999,6 +3095,7 @@ def bar():
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         // File contains both functions
@@ -3059,6 +3156,7 @@ def bar():
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
         cg.function_nodes
             .insert((file_id, "my_func".to_string()), func_node);

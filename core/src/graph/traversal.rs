@@ -456,6 +456,7 @@ mod tests {
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         let fn2 = graph.graph.add_node(GraphNode::Function {
@@ -472,6 +473,7 @@ mod tests {
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         let fn3 = graph.graph.add_node(GraphNode::Function {
@@ -488,6 +490,7 @@ mod tests {
             column: None,
             request_schema: None,
             response_schema: None,
+            raw_calls: vec![],
         });
 
         // Contains edges
