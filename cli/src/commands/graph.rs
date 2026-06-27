@@ -1190,7 +1190,14 @@ fn build_coverage_context(
     }
 
     // ── Walk callers (upward) ─────────────────────────────────────────────────
-    let callers = walk_callers(graph, anchor_idx, max_depth, &file_libs, 1);
+    let mut callers = walk_callers(graph, anchor_idx, max_depth, &file_libs, 1);
+
+    // Fallback: if the graph walk found no callers (cross-file Calls edges
+    // weren't resolved), scan every route handler in the graph and surface
+    // any whose raw_calls list contains the anchor's name.
+    if callers.is_empty() {
+        callers = stub_route_callers_via_raw_calls(graph, &anchor_name, &file_libs);
+    }
 
     // ── Build anchor node ─────────────────────────────────────────────────────
     let anchor_role = node_role(graph, anchor_idx, anchor_node, &file_libs);
@@ -1457,6 +1464,62 @@ fn walk_callers_inner(
 /// cross-file async calls whose imports weren't resolved), synthesise stub
 /// `CoverageNode`s from the `raw_calls` field baked into the graph node at
 /// build time.  These stubs have `SpanSignal::None` and `NodeRole::Logic` by
+/// When `walk_callers` returns nothing (cross-file `Calls` edges weren't
+/// resolved), scan every HTTP route handler in the graph and check whether
+/// the handler's body — captured in `raw_calls` — references this anchor by
+/// name. Each match becomes a synthesised caller node so the user sees which
+/// routes actually reach this function.
+fn stub_route_callers_via_raw_calls(
+    graph: &unfault_analysis::graph::CodeGraph,
+    anchor_name: &str,
+    file_libs: &FileLibIndex,
+) -> Vec<CoverageNode> {
+    use unfault_analysis::graph::GraphNode;
+
+    let mut result = Vec::new();
+
+    for idx in graph.graph.node_indices() {
+        let node = &graph.graph[idx];
+        let GraphNode::Function {
+            is_handler: true,
+            name,
+            raw_calls,
+            line,
+            ..
+        } = node
+        else {
+            continue;
+        };
+
+        // Match the anchor name against the last segment of each raw call.
+        let hit = raw_calls.iter().any(|call_expr| {
+            let last = call_expr.split('.').last().unwrap_or(call_expr.as_str());
+            last == anchor_name
+        });
+        if !hit {
+            continue;
+        }
+
+        let file =
+            unfault_analysis::graph::traversal::node_file_path_pub(graph, node).unwrap_or_default();
+        let span = node_span_signal(graph, node, file_libs);
+        let role = node_role(graph, idx, node, file_libs);
+
+        result.push(CoverageNode {
+            name: name.clone(),
+            file,
+            line: *line,
+            depth: 1,
+            direction: "up".to_string(),
+            span,
+            role,
+            children: vec![],
+        });
+    }
+
+    result
+}
+
 /// default — they show up in the tree and in the nudge list so the developer
 /// can see the gap.
 fn stub_callees_from_raw_calls(
@@ -1610,18 +1673,17 @@ fn extract_span_name_from_detail(detail: &str) -> Option<String> {
 
 /// Classify the semantic role of a function using its file's library imports.
 fn node_role(
-    graph: &unfault_analysis::graph::CodeGraph,
+    _graph: &unfault_analysis::graph::CodeGraph,
     _idx: unfault_analysis::graph::GraphNodeIndex,
     node: &unfault_analysis::graph::GraphNode,
-    file_libs: &std::collections::HashMap<
+    _file_libs: &std::collections::HashMap<
         String,
         Vec<(String, unfault_core::graph::ModuleCategory)>,
     >,
 ) -> NodeRole {
     use unfault_analysis::graph::GraphNode;
-    use unfault_core::graph::ModuleCategory;
 
-    // HTTP route handler?
+    // HTTP route handler — the only signal that overrides everything else.
     if let GraphNode::Function {
         is_handler: true,
         http_method: Some(method),
@@ -1635,33 +1697,147 @@ fn node_role(
         };
     }
 
-    // Check file-level library edges.
-    let file =
-        unfault_analysis::graph::traversal::node_file_path_pub(graph, node).unwrap_or_default();
-    if let Some(libs) = file_libs.get(&file) {
-        let mut has_db = false;
-        let mut has_http = false;
-        let mut has_obs = false;
-        for (_, cat) in libs {
-            match cat {
-                ModuleCategory::Database => has_db = true,
-                ModuleCategory::HttpClient => has_http = true,
-                ModuleCategory::Observability => has_obs = true,
-                _ => {}
-            }
-        }
-        // Observability library import → the span signal handles this; the role
-        // is still the underlying boundary type if both are present.
-        if has_db {
+    // Classify by what the function ACTUALLY DOES — i.e. its body calls.
+    // File-level library imports are deliberately ignored here: a function
+    // sitting next to a SQLAlchemy import doesn't make it a db function.
+    if let GraphNode::Function { raw_calls, .. } = node {
+        if raw_calls.iter().any(|expr| is_db_call_expr(expr)) {
             return NodeRole::Database;
         }
-        if has_http {
+        if raw_calls.iter().any(|expr| is_http_client_call_expr(expr)) {
             return NodeRole::HttpClient;
         }
-        let _ = has_obs; // signal is in SpanSignal, not NodeRole
     }
 
     NodeRole::Logic
+}
+
+/// Returns true when a call expression looks like a database / ORM call.
+///
+/// Recognised patterns (case-insensitive on the method name):
+/// - SQLAlchemy ORM:    session.execute, session.scalar, session.scalars,
+///                      session.add, session.delete, session.merge,
+///                      session.commit, session.rollback, session.flush,
+///                      session.refresh, session.query, session.get
+/// - SQLAlchemy Core:   conn.execute, engine.execute, select(...),
+///                      insert(...), update(...), delete(...)
+/// - Django ORM:        .objects.get, .objects.filter, .objects.create,
+///                      .objects.all, .objects.update, .objects.delete,
+///                      .save(), .delete() on a model instance
+/// - Generic SQL/DB:    db.query, db.execute, db.fetchone, db.fetchall,
+///                      cursor.execute, cursor.fetchone
+fn is_db_call_expr(expr: &str) -> bool {
+    let lower = expr.to_lowercase();
+    let last = lower.rsplit('.').next().unwrap_or(lower.as_str());
+
+    // Top-level Python function calls in the SQLAlchemy Core style.
+    if matches!(
+        last,
+        "select" | "insert" | "update" | "delete" | "exists" | "text"
+    ) && !lower.contains('.')
+    {
+        // Heuristic: standalone select(...) etc. is likely SQLA Core.
+        // Avoid false positives — only flag when expression is exactly the call name.
+        return true;
+    }
+
+    // Helper to extract the receiver (everything before the final method name).
+    // For "self.db_session.execute" the receiver is "self.db_session".
+    let receiver: String = {
+        let parts: Vec<&str> = lower.split('.').collect();
+        if parts.len() <= 1 {
+            String::new()
+        } else {
+            parts[..parts.len() - 1].join(".")
+        }
+    };
+
+    // ORM session / cursor methods.  Match on the last segment of the chain.
+    const DB_METHODS: &[&str] = &[
+        "execute",
+        "scalar",
+        "scalars",
+        "fetchone",
+        "fetchall",
+        "fetchmany",
+        "commit",
+        "rollback",
+        "flush",
+        "refresh",
+        "merge",
+        "bulk_save_objects",
+        "bulk_insert_mappings",
+        "bulk_update_mappings",
+    ];
+    if DB_METHODS.contains(&last) {
+        if receiver.contains("session")
+            || receiver.contains("db")
+            || receiver.contains("conn")
+            || receiver.contains("engine")
+            || receiver.contains("cursor")
+        {
+            return true;
+        }
+    }
+
+    // session.add / session.get / session.query / session.delete on Session-typed receivers.
+    if matches!(last, "add" | "get" | "query" | "delete" | "save") {
+        if receiver.ends_with("session")
+            || receiver.ends_with("db_session")
+            || receiver.ends_with("db")
+            || receiver.contains(".session")
+            || receiver.contains("session.")
+        {
+            return true;
+        }
+    }
+
+    // Django: .objects.<anything>
+    if lower.contains(".objects.") {
+        return true;
+    }
+
+    false
+}
+
+/// Returns true when a call expression looks like an outbound HTTP client call.
+fn is_http_client_call_expr(expr: &str) -> bool {
+    let lower = expr.to_lowercase();
+    let last = lower.rsplit('.').next().unwrap_or(lower.as_str());
+
+    // Top-level requests.get / httpx.post / etc.
+    if matches!(
+        last,
+        "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "request"
+    ) {
+        // Receiver is everything before the final method.
+        let receiver: String = {
+            let parts: Vec<&str> = lower.split('.').collect();
+            if parts.len() <= 1 {
+                String::new()
+            } else {
+                parts[..parts.len() - 1].join(".")
+            }
+        };
+        if receiver == "requests"
+            || receiver == "httpx"
+            || receiver == "aiohttp"
+            || receiver.starts_with("requests.")
+            || receiver.starts_with("httpx.")
+            || receiver.starts_with("aiohttp.")
+            || receiver.ends_with("client")
+            || receiver.ends_with(".client")
+        {
+            return true;
+        }
+    }
+
+    // Common standalone fetch / urlopen / urlretrieve
+    if matches!(last, "fetch" | "urlopen" | "urlretrieve") {
+        return true;
+    }
+
+    false
 }
 
 // ── File → library index ──────────────────────────────────────────────────────
@@ -1771,19 +1947,51 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
         return Ok(EXIT_SUCCESS);
     }
 
-    // Header
+    // Header — colourise route handlers as "[METHOD] path".
     println!();
-    println!(
-        "  {} Observability coverage  {}",
-        "→".cyan(),
-        ctx.resolved_as.bright_white().bold()
-    );
+    let header = match &ctx.anchor.role {
+        NodeRole::HttpHandler { method, path } => {
+            format!("{} {}", method.magenta().bold(), path.bright_yellow())
+        }
+        _ => format!("function {}", ctx.anchor.name.bright_white().bold()),
+    };
+    println!("  {} Coverage for {}", "→".cyan(), header);
     println!();
 
-    // Category-based coverage breakdown is the only output (besides the header).
-    // All previous renderings (legend, call tree, summary line) have been
-    // removed because they obscured the actual answer to the question
-    // "which categories of work do I have visibility into?"
+    // ── Reached by ──
+    // Show route handlers that reach this anchor.  Only relevant when the
+    // anchor is NOT itself a route handler.
+    if !matches!(ctx.anchor.role, NodeRole::HttpHandler { .. }) && !ctx.callers.is_empty() {
+        let route_callers: Vec<&CoverageNode> = ctx
+            .callers
+            .iter()
+            .filter(|c| matches!(c.role, NodeRole::HttpHandler { .. }))
+            .collect();
+
+        if !route_callers.is_empty() {
+            println!(
+                "  Reached by {} route{}:",
+                route_callers.len(),
+                if route_callers.len() == 1 { "" } else { "s" }
+            );
+            for caller in route_callers.iter().take(5) {
+                if let NodeRole::HttpHandler { method, path } = &caller.role {
+                    println!(
+                        "    {} {}  via {}",
+                        method.magenta().bold(),
+                        path.bright_yellow(),
+                        caller.name.bright_black()
+                    );
+                }
+            }
+            if route_callers.len() > 5 {
+                println!("    … and {} more", route_callers.len() - 5);
+            }
+            println!();
+        }
+    }
+
+    // Category-based coverage breakdown.
     let mut all_nodes: Vec<&CoverageNode> = Vec::new();
     collect_nodes(&ctx.anchor, &mut all_nodes);
     for c in &ctx.callers {
@@ -1983,6 +2191,62 @@ mod coverage_tests {
     #[test]
     fn extract_span_name_none_when_no_quotes() {
         assert_eq!(extract_span_name_from_detail("@instrument"), None);
+    }
+
+    // ── is_db_call_expr ────────────────────────────────────────────────────────
+
+    #[test]
+    fn db_classification_recognises_sqlalchemy_session_calls() {
+        assert!(is_db_call_expr("db_session.execute"));
+        assert!(is_db_call_expr("session.scalar"));
+        assert!(is_db_call_expr("self.db_session.scalars"));
+        assert!(is_db_call_expr("db_session.commit"));
+        assert!(is_db_call_expr("db_session.add"));
+        assert!(is_db_call_expr("db_session.get"));
+        assert!(is_db_call_expr("session.query"));
+    }
+
+    #[test]
+    fn db_classification_recognises_django_orm() {
+        assert!(is_db_call_expr("User.objects.get"));
+        assert!(is_db_call_expr("Order.objects.filter"));
+    }
+
+    #[test]
+    fn db_classification_recognises_sqlalchemy_core() {
+        assert!(is_db_call_expr("select"));
+        assert!(is_db_call_expr("insert"));
+        assert!(is_db_call_expr("update"));
+        assert!(is_db_call_expr("delete"));
+    }
+
+    #[test]
+    fn db_classification_rejects_plain_business_logic() {
+        // The bug we are guarding against: a function that builds a response
+        // and just happens to receive a SQLAlchemy model object as an argument
+        // must NOT be flagged as a db function.
+        assert!(!is_db_call_expr("_build_structured_output_response"));
+        assert!(!is_db_call_expr("validate_input"));
+        assert!(!is_db_call_expr("self._serialize"));
+        assert!(!is_db_call_expr("logger.info"));
+        // .get() on a dict / cache / context is not the db.
+        assert!(!is_db_call_expr("cache.get"));
+        assert!(!is_db_call_expr("settings.get"));
+    }
+
+    #[test]
+    fn http_client_classification_recognises_common_libraries() {
+        assert!(is_http_client_call_expr("requests.get"));
+        assert!(is_http_client_call_expr("httpx.post"));
+        assert!(is_http_client_call_expr("aiohttp.request"));
+        assert!(is_http_client_call_expr("self.client.get"));
+        assert!(is_http_client_call_expr("fetch"));
+    }
+
+    #[test]
+    fn http_client_classification_rejects_db_get() {
+        assert!(!is_http_client_call_expr("db_session.get"));
+        assert!(!is_http_client_call_expr("cache.get"));
     }
 }
 

@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.30] - 2026-06-27
+
+### Fixed
+
+- Coverage role classification now per-function (raw_calls patterns), not
+  per-file. Fixes false db classification for response-builder functions.
+- `unfault graph coverage <function>` now shows "Reached by N routes" by
+  scanning route handlers' raw_calls for the anchor name.
+
+### Changed
+
+- Coverage header colours: method magenta bold, path bright yellow.
+
 ## [1.0.29] - 2026-06-27
 
 ### Fixed

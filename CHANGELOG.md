@@ -10,6 +10,31 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.30] — 2026-06-27
+
+### Fixed
+
+- Coverage role classification is now per-function, not per-file. A function
+  is flagged as db only if its own raw_calls match explicit SQLAlchemy / Django
+  ORM / SQL patterns. Previously, sitting next to a SQLAlchemy import was
+  enough.
+
+- `unfault graph coverage <function>` now lists the routes that reach the
+  anchor under "Reached by N routes" — derived by scanning every route
+  handler's raw_calls.
+
+### Changed
+
+- Coverage header colours: method in magenta bold, path in bright yellow.
+
+### Tests
+
+- 6 new tests for is_db_call_expr / is_http_client_call_expr covering
+  SQLAlchemy, Django ORM, and the cache.get / settings.get / response-builder
+  false-positive cases.
+
+- Bumped: core 0.5.30, analysis 0.4.30, cli 1.0.30.
+
 ## [1.0.29] — 2026-06-27
 
 ### Fixed
