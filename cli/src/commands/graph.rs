@@ -1055,10 +1055,11 @@ pub async fn execute_coverage(args: CoverageArgs) -> Result<i32> {
     // Query-cache key
     let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
     let cache_params = format!(
-        "{}|{}|{}",
+        "{}|{}|{}|{}",
         args.target,
         args.method.as_deref().unwrap_or(""),
         if args.refresh_cache { "refresh" } else { "" },
+        env!("CARGO_PKG_VERSION"),
     );
 
     if !args.verbose && !args.refresh_cache {
