@@ -10,6 +10,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.39] — 2026-06-28
+
+### Fixed
+
+- **Graph cache now loads on workspaces with persistent semantics cache misses.**
+  The graph cache load was previously gated on `cache_stats.misses == 0`, so any
+  file that failed to parse or never entered the semantics cache would force a
+  full petgraph rebuild (~7s on large workspaces) on every subsequent run.
+
+  The `aggregate_hash` used as the graph cache key is computed only over files
+  that successfully entered the semantics cache index (`get_stored_content_hash`
+  returns `None` for uncached files), so persistent misses contribute nothing
+  to the key and the hash is deterministic across runs. The miss guard was
+  redundant with the hash check and prevented the cache from ever loading on
+  real workspaces.
+
+  Affects `cli/src/session/ir_builder.rs` around the `build_or_load_code_graph`
+  path. The graph cache is now always attempted; correctness is enforced by the
+  aggregate hash alone.
+
 ## [1.0.38] — 2026-06-28
 
 ### Added

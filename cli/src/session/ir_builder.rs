@@ -664,10 +664,11 @@ pub fn build_ir_cached(
     }
 
     // Build or load the code graph.
-    // If all files were cache hits, try to load a pre-built graph from disk
-    // to avoid rebuilding petgraph (~1.3s on large workspaces).
+    // Attempt to load a pre-built graph from disk to avoid rebuilding petgraph
+    // (~1.3s on large workspaces). The aggregate hash is computed only over
+    // files that successfully entered the semantics cache, so persistent
+    // parse-time misses do not affect the key and the graph cache still loads.
     let graph_start = Instant::now();
-    let all_cache_hits = cache_stats.misses == 0;
     let graph_cache_path = workspace_path
         .join(".unfault")
         .join("cache")
@@ -698,12 +699,8 @@ pub fn build_ir_cached(
         xxhash_rust::xxh3::xxh3_64(&bytes)
     };
 
-    let code_graph = if all_cache_hits {
-        try_load_graph_cache(&graph_cache_path, aggregate_hash, verbose)
-            .unwrap_or_else(|| build_code_graph(&semantics_entries))
-    } else {
-        build_code_graph(&semantics_entries)
-    };
+    let code_graph = try_load_graph_cache(&graph_cache_path, aggregate_hash, verbose)
+        .unwrap_or_else(|| build_code_graph(&semantics_entries));
 
     // Always save the graph cache after building so the next run can skip
     // petgraph reconstruction even if this run had semantics cache misses.
