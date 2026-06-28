@@ -762,26 +762,71 @@ fn render_sections(report: &TelemetryReport) {
     );
     println!();
 
-    // ── Traces section ──
     let total = report.routes.len();
-    let deep = report
-        .routes
-        .iter()
-        .filter(|r| r.trace_quality == TraceQuality::Deep)
-        .count();
-    let shallow = report
-        .routes
-        .iter()
-        .filter(|r| r.trace_quality == TraceQuality::Shallow)
-        .count();
-    let unobserved = report
-        .routes
-        .iter()
-        .filter(|r| r.trace_quality == TraceQuality::Unobserved)
-        .count();
-
-    println!("  {}Traces{}", "──".cyan(), "──".cyan());
-    if total > 0 {
+    if total == 0 {
+        println!("  {}Traces{}", "──".cyan(), "──".cyan());
+        println!("  No routes in scope.");
+    } else if report.target_kind == "directory" {
+        println!("  {}Traces by Method{}", "──".cyan(), "──".cyan());
+        let reads: Vec<&RouteTelemetry> = report
+            .routes
+            .iter()
+            .filter(|r| !is_write_method(&r.method))
+            .collect();
+        let writes: Vec<&RouteTelemetry> = report
+            .routes
+            .iter()
+            .filter(|r| is_write_method(&r.method))
+            .collect();
+        for (routes, label) in [(&reads, "read "), (&writes, "write")] {
+            let n = routes.len();
+            if n == 0 {
+                continue;
+            }
+            let deep = routes
+                .iter()
+                .filter(|r| r.trace_quality == TraceQuality::Deep)
+                .count();
+            let shallow = routes
+                .iter()
+                .filter(|r| r.trace_quality == TraceQuality::Shallow)
+                .count();
+            let unobserved = routes
+                .iter()
+                .filter(|r| r.trace_quality == TraceQuality::Unobserved)
+                .count();
+            println!(
+                "  {} ({:>3})   {} {} ({:>3}%)  {} {} ({:>3}%)  {} {} ({:>3}%)",
+                label,
+                n,
+                "●".green(),
+                fmt_count(deep, n),
+                pct(deep, n),
+                "◐".yellow(),
+                fmt_count(shallow, n),
+                pct(shallow, n),
+                "○".normal(),
+                fmt_count(unobserved, n),
+                pct(unobserved, n),
+            );
+        }
+    } else {
+        println!("  {}Traces{}", "──".cyan(), "──".cyan());
+        let deep = report
+            .routes
+            .iter()
+            .filter(|r| r.trace_quality == TraceQuality::Deep)
+            .count();
+        let shallow = report
+            .routes
+            .iter()
+            .filter(|r| r.trace_quality == TraceQuality::Shallow)
+            .count();
+        let unobserved = report
+            .routes
+            .iter()
+            .filter(|r| r.trace_quality == TraceQuality::Unobserved)
+            .count();
         println!(
             "  {} deep           {} ({:>3}%)",
             "●".green(),
@@ -837,8 +882,6 @@ fn render_sections(report: &TelemetryReport) {
                 println!("  {:>17}{}", "", sig_str.bright_black());
             }
         }
-    } else {
-        println!("  No routes in scope.");
     }
     println!();
 
@@ -884,19 +927,21 @@ fn render_sections(report: &TelemetryReport) {
         );
     }
 
-    for fl in &report.logging {
-        let icon = fl.quality.icon();
-        let quality_str = match fl.quality {
-            LoggingQuality::Structured => format!("{} {}", icon.green(), "structured".green()),
-            LoggingQuality::Plain => format!("{} {}", icon.normal(), "plain".normal()),
-            LoggingQuality::None_ => format!("{} {}", icon.dimmed(), "none".dimmed()),
-        };
-        let lib_str = if !fl.library.is_empty() {
-            format!("  ({})", fl.library.bright_black())
-        } else {
-            String::new()
-        };
-        println!("  {}  {}{}", fl.file.bright_blue(), quality_str, lib_str);
+    if report.target_kind != "directory" {
+        for fl in &report.logging {
+            let icon = fl.quality.icon();
+            let quality_str = match fl.quality {
+                LoggingQuality::Structured => format!("{} {}", icon.green(), "structured".green()),
+                LoggingQuality::Plain => format!("{} {}", icon.normal(), "plain".normal()),
+                LoggingQuality::None_ => format!("{} {}", icon.dimmed(), "none".dimmed()),
+            };
+            let lib_str = if !fl.library.is_empty() {
+                format!("  ({})", fl.library.bright_black())
+            } else {
+                String::new()
+            };
+            println!("  {}  {}{}", fl.file.bright_blue(), quality_str, lib_str);
+        }
     }
     println!();
 
@@ -919,17 +964,19 @@ fn render_sections(report: &TelemetryReport) {
             if absent_count == 1 { "" } else { "s" }
         );
     }
-    for m in &report.metrics {
-        let status = if m.present {
-            format!(
-                "{} {}",
-                "◉".green(),
-                m.library.as_deref().unwrap_or("present").green()
-            )
-        } else {
-            format!("{} {}", "○".normal(), "none".normal())
-        };
-        println!("  {}  {}", m.file.bright_blue(), status);
+    if report.target_kind != "directory" {
+        for m in &report.metrics {
+            let status = if m.present {
+                format!(
+                    "{} {}",
+                    "◉".green(),
+                    m.library.as_deref().unwrap_or("present").green()
+                )
+            } else {
+                format!("{} {}", "○".normal(), "none".normal())
+            };
+            println!("  {}  {}", m.file.bright_blue(), status);
+        }
     }
     println!();
 
@@ -957,21 +1004,7 @@ fn render_merged(report: &TelemetryReport) {
             );
         }
 
-        let sigs: Vec<String> = r
-            .signal_kinds
-            .iter()
-            .map(|k| format!("{} {}", k.icon_colored(), k.label()))
-            .collect();
-        let sig_str = if sigs.is_empty() {
-            "none".to_string()
-        } else {
-            sigs.join("  ")
-        };
-        println!(
-            "\n  trace: {}  ({})",
-            format_quality_text(&r.trace_quality),
-            sig_str
-        );
+        println!("\n  trace: {}", format_quality_text(&r.trace_quality));
     }
 
     // Show which routes reach this function (if function target)
@@ -1056,42 +1089,19 @@ fn render_compact(report: &TelemetryReport) {
 fn render_legend() {
     println!("{}", "  ── Legend ──".bright_black());
     println!(
-        "{}  {} {} {}",
-        "  trace:".bright_black(),
-        "● deep".green(),
-        "◐ shallow".yellow(),
-        "○ unobserved".normal(),
-    );
-    println!(
-        "  {}  {} full tree instrumented  {} entry covered, inner gaps  {} no signal",
-        " ".repeat(8),
-        "●".green(),
-        "◐".yellow(),
-        "○".normal(),
-    );
-    println!(
-        "{}  {} {} {}",
-        "  log:  ".bright_black(),
-        format!("{} structured", "◉".green()),
-        format!("{} plain", "○".normal()),
-        format!("{} none", "·".dimmed()),
+        "  {}  {}",
+        "● deep / ◐ shallow / ○ unobserved".dimmed(),
+        "— trace quality".bright_black()
     );
     println!(
         "  {}  {}",
-        "       ",
-        "structured lib (structlog/loguru/…)  vs  plain (stdlib logging)  vs  none".bright_black()
+        "◉ structured / ○ plain / · none".dimmed(),
+        "— logging quality".bright_black()
     );
     println!(
-        "{}  {} {} {} {}",
-        "  sig:  ".bright_black(),
-        format!("{} trace", "◉".green()),
-        format!("{} log", "≡".cyan()),
-        format!("{} metric", "⬡".yellow()),
-        format!("{} error", "✖".red()),
-    );
-    println!(
-        "  {}  signal kinds detected on the handler and its call tree",
-        "       ".bright_black()
+        "  {}  {}",
+        "◉ trace / ≡ log / ⬡ metric / ✖ err".dimmed(),
+        "— signal kind".bright_black()
     );
     println!();
 }
@@ -1159,6 +1169,10 @@ fn render_boundaries_line(report: &TelemetryReport) {
         ),
     ];
     println!("  boundaries:  {}", parts.join("    ").bright_black());
+}
+
+fn is_write_method(method: &str) -> bool {
+    matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
 }
 
 fn format_quality_text(q: &TraceQuality) -> colored::ColoredString {

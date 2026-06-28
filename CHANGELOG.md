@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.43] — 2026-06-28
+
+### Changed
+
+- **`unfault telemetry` directory output now shows a read/write breakdown
+  (`──Traces by Method──`) instead of a per-route listing.** The merged view
+  no longer prints a redundant signal-kind icon inline with the trace quality.
+  The legend footer has been shortened to a compact single-line-per-category
+  format.
+
 ## [1.0.42] — 2026-06-28
 
 ### Fixed
