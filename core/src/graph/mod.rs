@@ -267,30 +267,37 @@ pub enum GraphNode {
         http_path: Option<String>,
         /// Semantic roles inferred from the function's decorators.
         /// Empty when no recognisable decorators were found.
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        ///
+        /// Note: `skip_serializing_if` is intentionally NOT used on any field of
+        /// this variant. The on-disk graph cache uses positional msgpack encoding,
+        /// which requires every field to be present in the stream for fields to
+        /// align with their target positions on read. Optional fields are kept
+        /// in the output even when empty — the size cost is negligible (a few
+        /// bytes per node) and the round-trip is now correctness-by-construction.
+        #[serde(default)]
         decorators: Vec<DecoratorSemantic>,
         /// True when the function contains at least one write/mutation ORM call
         /// (INSERT, UPDATE, or DELETE). False does not mean read-only — the
         /// static graph may miss indirect writes.
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        #[serde(default)]
         is_writer: bool,
         /// 1-based line number of the function definition.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         line: Option<u32>,
         /// 1-based column number of the function definition.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         column: Option<u32>,
         /// Request body / query schema from `@blp.arguments(SchemaX)` or `@use_args`.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         request_schema: Option<String>,
         /// Response schema from `@blp.response(200, SchemaY)` or `@marshal_with`.
-        #[serde(skip_serializing_if = "Option::is_none")]
+        #[serde(default)]
         response_schema: Option<String>,
         /// Raw call-site names extracted from the function body.
         /// Populated during graph construction; used as a fallback when cross-file
         /// `Calls` edges could not be resolved (e.g. calls to functions imported
         /// from unanalysed packages or via dependency injection).
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        #[serde(default)]
         raw_calls: Vec<String>,
     },
 

@@ -61,20 +61,53 @@ pub struct IrBuildResult {
 ///
 /// Returns `Some(graph)` if the cache file exists and its stored aggregate
 /// hash matches `expected_hash`. Returns `None` otherwise.
+///
+/// The on-disk format is `[aggregate_hash: u64 LE][msgpack graph bytes]`,
+/// using positional msgpack encoding. `GraphNode::Function` has no
+/// `skip_serializing_if` fields, so every field is present in the stream
+/// and positions are unambiguous on read.
 fn try_load_graph_cache(
     path: &std::path::Path,
     expected_hash: u64,
     verbose: bool,
 ) -> Option<unfault_core::graph::CodeGraph> {
     use std::io::BufReader;
-
-    // The file is: [aggregate_hash: u64 LE][msgpack graph bytes]
-    let mut file = std::fs::File::open(path).ok()?;
     use std::io::Read;
+
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            if verbose {
+                eprintln!(
+                    "{} graph cache: open failed ({}) — rebuilding",
+                    "TIMING".yellow(),
+                    e
+                );
+            }
+            return None;
+        }
+    };
+
     let mut header = [0u8; 8];
-    file.read_exact(&mut header).ok()?;
+    if file.read_exact(&mut header).is_err() {
+        if verbose {
+            eprintln!(
+                "{} graph cache: header read failed — rebuilding",
+                "TIMING".yellow()
+            );
+        }
+        return None;
+    }
     let stored_hash = u64::from_le_bytes(header);
     if stored_hash != expected_hash {
+        if verbose {
+            eprintln!(
+                "{} graph cache: aggregate hash mismatch (stored={:016x} expected={:016x}) — rebuilding",
+                "TIMING".yellow(),
+                stored_hash,
+                expected_hash
+            );
+        }
         return None;
     }
 
@@ -87,7 +120,16 @@ fn try_load_graph_cache(
             }
             Some(graph)
         }
-        Err(_) => None,
+        Err(e) => {
+            if verbose {
+                eprintln!(
+                    "{} graph cache: deserialize failed ({}) — rebuilding",
+                    "TIMING".yellow(),
+                    e
+                );
+            }
+            None
+        }
     }
 }
 
@@ -106,9 +148,10 @@ fn save_graph_cache(
 
     let file = std::fs::File::create(path)?;
     let mut writer = BufWriter::new(file);
-    // Write 8-byte aggregate hash header, then msgpack graph
+    // Write 8-byte aggregate hash header, then positional msgpack graph.
     writer.write_all(&aggregate_hash.to_le_bytes())?;
     rmp_serde::encode::write(&mut writer, graph)?;
+    writer.flush()?;
     Ok(())
 }
 
@@ -1065,6 +1108,74 @@ def fetch_data():
         // JSON should contain expected content
         assert!(json_str.contains("fetch_data"));
         assert!(json_str.contains("requests"));
+    }
+
+    #[test]
+    /// Regression test for the graph cache deserialization bug fixed in
+    /// v1.0.36. The on-disk format is positional msgpack, which silently
+    /// returns an "invalid type: integer N, expected a sequence" error when
+    /// `GraphNode::Function` has `skip_serializing_if` fields that elide
+    /// entries from the stream and shift positions. This test exercises the
+    /// real cache code path with a graph that contains a Function node, so
+    /// any reintroduction of `skip_serializing_if` on `GraphNode` or
+    /// `CodeGraph` will fail here.
+    #[test]
+    fn test_graph_cache_msgpack_roundtrip() {
+        let temp_dir = TempDir::new().unwrap();
+        let py_file = temp_dir.path().join("svc.py");
+        fs::write(
+            &py_file,
+            r#"
+import requests
+
+class Service:
+    def fetch(self):
+        return requests.get("http://example.com")
+
+def helper():
+    return Service().fetch()
+"#,
+        )
+        .unwrap();
+
+        let ir = build_ir(temp_dir.path(), None, false).unwrap();
+        let stats_before = ir.graph.stats();
+        assert!(
+            stats_before.function_count >= 2,
+            "expected at least 2 functions, got {}",
+            stats_before.function_count
+        );
+
+        // Write the graph through the exact code path used by build_ir_cached.
+        let cache_path = temp_dir
+            .path()
+            .join(".unfault")
+            .join("cache")
+            .join("graph.msgpack");
+        save_graph_cache(&cache_path, 0xdeadbeef_cafef00d, &ir.graph, false)
+            .expect("save_graph_cache should succeed");
+
+        // Wrong hash → must return None (negative test).
+        assert!(
+            try_load_graph_cache(&cache_path, 0x1234_5678, false).is_none(),
+            "load with mismatched hash must return None"
+        );
+
+        // Right hash → must return the graph with matching stats.
+        let restored = try_load_graph_cache(&cache_path, 0xdeadbeef_cafef00d, false)
+            .expect("load with matching hash must succeed");
+        let stats_after = restored.stats();
+        assert_eq!(stats_before.file_count, stats_after.file_count);
+        assert_eq!(stats_before.function_count, stats_after.function_count);
+        assert_eq!(stats_before.class_count, stats_after.class_count);
+        assert_eq!(stats_before.total_nodes, stats_after.total_nodes);
+        assert_eq!(stats_before.total_edges, stats_after.total_edges);
+
+        // Indexes must be rebuilt so lookups work without a second build.
+        assert!(
+            !restored.file_nodes.is_empty(),
+            "rebuild_indexes must run during load"
+        );
     }
 
     #[test]

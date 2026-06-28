@@ -10,6 +10,56 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.36] — 2026-06-28
+
+### Fixed
+
+- **Graph cache now actually loads on warm runs.** Every `unfault graph`
+  subcommand (`coverage`, `impact`, `library`, `deps`, `stats`, `critical`,
+  `callers`, `path`, `handlers`, `routes`, `brief`, `function-impact`) reuses
+  the prebuilt graph on subsequent invocations with different arguments,
+  dropping graph build time from ~150ms to ~25ms on small repos and from
+  tens of seconds to ~1s on large ones.
+
+  Root cause: `GraphNode::Function` had seven fields marked
+  `#[serde(skip_serializing_if = …)]`. The graph cache uses positional
+  msgpack encoding (via `rmp_serde::encode::write`), where each field
+  occupies a fixed position in the stream. Skipped fields removed entries,
+  shifted positions for subsequent fields, and made the round-trip fail
+  with `"invalid type: integer N, expected a sequence"` — silently falling
+  back to a full graph rebuild on every invocation.
+
+  Fix: removed `skip_serializing_if` from `GraphNode::Function`. Optional
+  fields are now always present in the stream (cost: a few bytes per node).
+  `#[serde(default)]` is kept so historical caches and partial inputs still
+  round-trip. The on-disk format and `try_load_graph_cache` /
+  `save_graph_cache` are otherwise unchanged from v1.0.34 — no version byte,
+  no struct-map encoding, no extra complexity.
+
+- Added `test_graph_cache_msgpack_roundtrip` in `cli/src/session/ir_builder.rs`
+  that exercises the exact save/load path with a graph containing a
+  Function node. Any future reintroduction of `skip_serializing_if` on
+  `GraphNode` will fail this test.
+
+- Added verbose-mode diagnostic logs in `try_load_graph_cache` that print
+  the specific reason a cache load returned `None` (open failed, hash
+  mismatch, deserialize failed). Run any `unfault graph …` command with
+  `--verbose` to see them.
+
+### Reverted
+
+- **v1.0.35 (broken, do not use)** introduced a 1-byte version prefix and
+  struct-map msgpack encoding on the graph cache. That release made the
+  underlying problem worse: the version prefix was redundant (the hash
+  already detects format changes), and struct-map encoding on a tagged
+  enum with `skip_serializing_if` does not reliably round-trip through
+  `rmp_serde::from_read`. v1.0.35 also contained 145 unrelated clippy
+  cleanups across the workspace that polluted the commit and added no
+  user-visible value. v1.0.36 reverts all of v1.0.35 and applies only the
+  minimal correct fix described above.
+
+- Bumped: `unfault-core` 0.5.36, `unfault-analysis` 0.4.36, `unfault` 1.0.36.
+
 ## [1.0.34] — 2026-06-28
 
 ### Fixed
