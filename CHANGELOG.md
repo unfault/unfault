@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.44] — 2026-06-28
+
+### Fixed
+
+- **Warm graph-cache hits no longer show the "Building graph" spinner.**
+  Commands such as `unfault graph coverage` have per-target result caches, so
+  switching targets correctly bypasses the query cache. The shared graph cache
+  could still load instantly, but the spinner was started before that cache
+  check, making warm graph-cache hits look like graph rebuilds.
+
+  Non-verbose graph commands now check `.unfault/cache/graph.msgpack` before
+  starting the spinner. The spinner is only shown when the shared graph cache
+  misses and a full IR/graph build is actually needed.
+
 ## [1.0.43] — 2026-06-28
 
 ### Changed

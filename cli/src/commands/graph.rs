@@ -53,6 +53,16 @@ pub(crate) fn build_graph_with_spinner(
             .map_err(|e| e.to_string());
     }
 
+    // Avoid showing a "Building graph..." spinner for the common warm-cache
+    // path. This matters for commands like `graph coverage`: changing the
+    // target bypasses the per-query result cache, but the shared graph cache can
+    // still satisfy the request without rebuilding or reading semantics.
+    if let Ok(Some(graph)) =
+        crate::session::ir_builder::try_load_code_graph_only(workspace_path, false)
+    {
+        return Ok(unfault_analysis::graph::CodeGraph::from(graph));
+    }
+
     use indicatif::{ProgressBar, ProgressStyle};
     use std::time::Duration;
 
