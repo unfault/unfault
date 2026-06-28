@@ -1166,223 +1166,104 @@ fn render_catalog(report: &TelemetryReport) {
     );
     println!();
 
-    // ── Paragraph 1: signal overview (logging, metrics) ──
-    if log_structured > 0 {
-        print!(
-            "Most of what {} says about itself is structured logging, across {} file{}; that is where the fine-grained signal lives, the decision points and branches a reader can use to follow what the system did.",
-            report.target,
-            log_structured,
-            if log_structured == 1 { "" } else { "s" },
-        );
-        if log_plain > 0 || log_none_count > 0 || metrics_total > metrics_present {
-            println!();
-            print!("Beyond that the area is quiet");
+    let fine_total = read_deep + write_deep;
+    let shallow_total = read_shallow + write_shallow;
+    let none_total = read_none + write_none;
+
+    // ── Logging ──
+    {
+        let mut parts: Vec<String> = Vec::new();
+        if log_structured > 0 {
+            parts.push(format!(
+                "structured logging in {} of {} file{}",
+                log_structured,
+                total_files,
+                if total_files == 1 { "" } else { "s" }
+            ));
+        } else if log_plain > 0 {
+            parts.push(format!(
+                "plain logging in {} of {} file{}",
+                log_plain,
+                total_files,
+                if total_files == 1 { "" } else { "s" }
+            ));
         }
-        if metrics_present == 0 && metrics_total > 0 {
-            print!(": no file emits a metric");
-            if log_none_count > 0 {
-                print!(
-                    ", and {} file{} run without any logging at all",
-                    log_none_count,
-                    if log_none_count == 1 { "" } else { "s" }
-                );
-            }
-        } else if log_none_count > 0 {
-            print!(
-                ": {} file{} run without any logging at all",
+        if log_none_count > 0 {
+            parts.push(format!(
+                "{} file{} silent",
                 log_none_count,
                 if log_none_count == 1 { "" } else { "s" }
-            );
+            ));
         }
-        let clusters = top_logging_clusters(&report.logging, 3);
-        if !clusters.is_empty() {
-            let parts: Vec<String> = clusters
-                .into_iter()
-                .map(|(dir, count)| {
-                    // Take the last directory component as the cluster label
-                    let label = std::path::Path::new(&dir)
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or(dir);
-                    format!("{} ({})", label, count)
-                })
-                .collect();
-            if parts.len() == 1 {
-                print!(", the largest pool being {}", parts[0]);
-            } else {
-                print!(", the largest pools being {}", parts.join(", "));
+        if metrics_total > 0 {
+            if metrics_present == 0 {
+                parts.push("no metrics".to_string());
+            } else if metrics_present < metrics_total {
+                parts.push(format!(
+                    "metrics in {} of {} file{}",
+                    metrics_present,
+                    metrics_total,
+                    if metrics_total == 1 { "" } else { "s" }
+                ));
             }
         }
-        println!(".");
-    } else if log_plain > 0 {
-        print!(
-            "{} uses plain logging across {} file{}",
-            report.target,
-            log_plain,
-            if log_plain == 1 { "" } else { "s" }
-        );
-        if log_none_count > 0 || metrics_present == 0 {
-            println!(".");
-            if metrics_present == 0 && metrics_total > 0 {
-                print!("No file emits a metric");
-                if log_none_count > 0 {
-                    print!(
-                        ", and {} file{} run without any logging at all",
-                        log_none_count,
-                        if log_none_count == 1 { "" } else { "s" }
-                    );
-                }
-            } else {
-                print!(
-                    "{} file{} run without any logging at all",
-                    log_none_count,
-                    if log_none_count == 1 { "" } else { "s" }
-                );
-            }
+        if parts.is_empty() {
+            println!("No logging or metrics detected.");
+        } else {
+            println!("Logging: {}.", parts.join(", "));
         }
-        println!(".");
-    } else {
-        // No structured or plain logging at all
-        let none_msg =
-            if log_none_count == metrics_total && metrics_present == 0 && metrics_total > 0 {
-                "no file emits a metric or writes a log line".to_string()
-            } else {
-                let mut parts = Vec::new();
-                if log_none_count > 0 {
-                    parts.push(format!(
-                        "no logging in {} file{}",
-                        log_none_count,
-                        if log_none_count == 1 { "" } else { "s" }
-                    ));
-                }
-                if metrics_present == 0 && metrics_total > 0 {
-                    parts.push("no metrics".to_string());
-                }
-                parts.join(", ")
-            };
-        println!(
-            "The area is quiet: {}; every signal would need to be added.",
-            none_msg
-        );
     }
 
-    // ── Paragraph 2: tracing and boundaries ──
+    // ── Tracing ──
     if total_routes > 0 {
         println!();
-
-        if read_none > 0 || write_none > 0 {
-            print!("Tracing is partial");
+        if none_total == total_routes {
+            println!("Spans: none. No route is instrumented.");
+        } else if fine_total == total_routes {
+            println!(
+                "Spans: all {} route{} carry explicit attributes.",
+                total_routes,
+                if total_routes == 1 { "" } else { "s" }
+            );
         } else {
-            print!("Tracing is broad but mostly coarse");
-        }
-        print!(". Spans cover every route, but ");
-        if read_shallow > 0 || write_shallow > 0 {
-            // Coarse dominant
-            let coarse_read_clause = if read_shallow > 0 {
-                format!("{} of {} reads", read_shallow, reads)
-            } else {
-                String::new()
-            };
-            let coarse_write_clause = if write_shallow > 0 {
-                format!("{} of {} writes", write_shallow, writes)
-            } else {
-                String::new()
-            };
-            let coarse_parts: Vec<&str> = [&coarse_read_clause, &coarse_write_clause]
-                .iter()
-                .filter(|s| !s.is_empty())
-                .map(|s| s.as_str())
-                .collect();
-            if coarse_parts.len() == 2 {
-                print!(
-                    "{} and {} are framework auto-instrumentation, the wrap-the-request kind that records that it ran and how long",
-                    coarse_parts[0], coarse_parts[1]
-                );
-            } else if read_shallow > 0 {
-                print!(
-                    "{} of {} reads are framework auto-instrumentation, the wrap-the-request kind that records that it ran and how long",
-                    read_shallow, reads
-                );
-            } else {
-                print!(
-                    "{} of {} writes are framework auto-instrumentation, the wrap-the-request kind that records that it ran and how long",
-                    write_shallow, writes
-                );
-            }
-            println!(".");
-        } else if read_none > 0 || write_none > 0 {
-            // Some have no span at all
-            if read_none > 0 {
-                print!("{} of {} reads have no span at all", read_none, reads);
-                if write_none > 0 {
-                    print!(", and {} of {} writes", write_none, writes);
-                }
-            } else {
-                print!("{} of {} writes have no span at all", write_none, writes);
-            }
-            println!(".");
-        } else {
-            // All deep
-            println!("every route carries explicit attributes.");
-        }
-
-        // Fine routes
-        let fine_total = read_deep + write_deep;
-        if fine_total > 0 {
-            if fine_total == 1 {
-                println!("Only one route goes further and carries its own attributes.");
-            } else {
-                println!(
-                    "Only {} routes go further and carry their own attributes.",
+            let mut parts: Vec<String> = Vec::new();
+            if fine_total > 0 {
+                parts.push(format!(
+                    "{} fine (explicit attributes)",
                     fine_total
-                );
+                ));
             }
+            if shallow_total > 0 {
+                parts.push(format!("{} coarse (framework only)", shallow_total));
+            }
+            if none_total > 0 {
+                parts.push(format!("{} unobserved", none_total));
+            }
+            println!(
+                "Spans: {} of {} routes — {}.",
+                fine_total + shallow_total,
+                total_routes,
+                parts.join(", ")
+            );
         }
 
         // Boundaries
         let has_boundaries = db_total > 0 || http_total > 0;
         if has_boundaries {
-            print!("At the boundaries the picture is similar");
-            let mut bound_clauses = Vec::new();
+            let mut bound_parts: Vec<String> = Vec::new();
             if db_total > 0 {
                 if db_covered == db_total {
-                    bound_clauses
-                        .push(format!("all {} db queries have an explicit span", db_total));
+                    bound_parts.push(format!("db {}/{}", db_covered, db_total));
                 } else {
-                    bound_clauses.push(format!(
-                        "{} of {} db queries have an explicit span",
-                        db_covered, db_total
-                    ));
+                    bound_parts.push(format!("db {}/{}", db_covered, db_total));
                 }
             }
             if http_total > 0 {
-                if http_covered == http_total {
-                    bound_clauses.push(format!("all {} http clients do", http_total));
-                } else {
-                    bound_clauses.push(format!(
-                        "{} of {} http clients do",
-                        http_covered, http_total
-                    ));
-                }
+                bound_parts.push(format!("http {}/{}", http_covered, http_total));
             }
-            let rest_coarse =
-                db_total.saturating_sub(db_covered) + http_total.saturating_sub(http_covered);
-            if rest_coarse > 0 {
-                bound_clauses.push(format!(
-                    "the rest are visible only through their surrounding wrap"
-                ));
-            }
-            println!("; {}.", bound_clauses.join(", "));
+            println!("Boundaries: {}.", bound_parts.join(", "));
         }
     }
-
-    // ── Paragraph 3: closing assessment ──
-    println!();
-    println!(
-        "This shape gives clear answers to \"is it up, is it slow\", and \
-         patchier answers to \"what was it doing when it broke\" outside \
-         the routes already instrumented in detail."
-    );
 
     println!();
     println!(

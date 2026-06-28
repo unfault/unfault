@@ -10,6 +10,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.50] — 2026-06-28
+
+### Changed
+
+- **`unfault telemetry <directory>` default output simplified.**
+  The catalog view is now three concise lines — logging, spans, boundaries —
+  with no narrative filler. Span coverage is reported as fine/coarse/unobserved
+  counts in a single sentence. The closing assessment paragraph is removed.
+
 ## [1.0.49] — 2026-06-28
 
 ### Added
