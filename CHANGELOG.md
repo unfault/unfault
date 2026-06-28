@@ -10,6 +10,55 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.37] — 2026-06-28
+
+### Fixed
+
+- **File discovery now hard-excludes `.unfault/`, `target/`, `node_modules/`,
+  and other build/cache directories regardless of `.gitignore` rules.**
+  This is the actual root cause of "graph rebuilds on every invocation"
+  reported against v1.0.34–1.0.36 on large repositories.
+
+  `WalkBuilder` (from the `ignore` crate) consults the user's global
+  gitignore via `core.excludesFile`. When that config is not set, or when
+  the user lists `.unfault/` in a non-discoverable location, the walker
+  descends into `.unfault/cache/semantics/` and treats every cached
+  `*.msgpack` source as a candidate file. On a 54000-file workspace this
+  added ~1100 phantom "Python" files (msgpack happens to start with bytes
+  that confuse extension detection in some setups) — they parsed, failed
+  to cache (they're not real source), and counted as cache misses every
+  run. `all_cache_hits` was therefore always `false`, the graph cache
+  load was never attempted, and the entire petgraph was rebuilt from
+  semantics every invocation (~7s on the user's repo).
+
+  Fix: added `is_always_excluded_dir_filter` in
+  `cli/src/session/ir_builder.rs` and wired it through `WalkBuilder::
+  filter_entry` in both `discover_source_files` call sites
+  (`ir_builder.rs` and `graph_builder.rs`). The list is narrow and
+  unambiguous:
+
+  - `.unfault` — unfault's own per-workspace cache and data
+  - `target` — Rust build artifacts
+  - `node_modules` — JS/TS dependencies
+  - `.venv` / `venv` / `__pycache__` — Python virtualenvs and bytecode
+  - `.mypy_cache` / `.pytest_cache` / `.ruff_cache` / `.tox` — Python tools
+  - `.gocache` — Go build cache
+
+  None of these can ever contain user source code unfault should analyse,
+  so a hard exclusion is safe and removes any dependency on the user's
+  gitignore configuration.
+
+### Added
+
+- Two regression tests in `cli/src/session/ir_builder.rs`:
+  - `discover_skips_unfault_cache_dir_without_gitignore` — populates a fake
+    `.unfault/cache/semantics/` with 50 `.py` files and asserts the walker
+    finds only the real source file at the workspace root.
+  - `discover_skips_node_modules_and_target_without_gitignore` — same
+    pattern for `node_modules/` and `target/`.
+
+- Bumped: `unfault-core` 0.5.37, `unfault-analysis` 0.4.37, `unfault` 1.0.37.
+
 ## [1.0.36] — 2026-06-28
 
 ### Fixed

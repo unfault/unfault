@@ -35,16 +35,16 @@ use colored::Colorize;
 use log::debug;
 use rayon::prelude::*;
 
-use unfault_core::IntermediateRepresentation;
 use unfault_core::graph::build_code_graph;
 use unfault_core::parse::ast::FileId;
 use unfault_core::parse::{go, python, rust as rust_parse, typescript};
-use unfault_core::semantics::SourceSemantics;
 use unfault_core::semantics::go::model::GoFileSemantics;
 use unfault_core::semantics::python::model::PyFileSemantics;
 use unfault_core::semantics::rust::{build_rust_semantics, model::RustFileSemantics};
 use unfault_core::semantics::typescript::model::TsFileSemantics;
+use unfault_core::semantics::SourceSemantics;
 use unfault_core::types::context::{Language, SourceFile};
+use unfault_core::IntermediateRepresentation;
 
 use super::semantics_cache::{CacheStatsSnapshot, SemanticsCache};
 
@@ -776,6 +776,15 @@ fn discover_source_files(workspace_path: &Path) -> Result<Vec<PathBuf>> {
         .hidden(true)
         .git_ignore(true)
         .git_exclude(true)
+        // Always skip directories that contain unfault's own cache or other
+        // well-known generated content. The user's global gitignore may or
+        // may not list `.unfault/` (it's normally added per-project, but on
+        // a workstation it may live in `~/.config/git/ignore`); we cannot
+        // depend on that. Walking `.unfault/` is catastrophic — on large
+        // repos it adds tens of thousands of msgpack files that look like
+        // sources and force a full graph rebuild on every invocation
+        // because cache writes never converge.
+        .filter_entry(is_always_excluded_dir_filter)
         .build();
 
     for entry in walker {
@@ -788,6 +797,43 @@ fn discover_source_files(workspace_path: &Path) -> Result<Vec<PathBuf>> {
     }
 
     Ok(files)
+}
+
+/// `WalkBuilder::filter_entry` predicate: returns `true` to keep the entry,
+/// `false` to skip it (and if it's a directory, skip its entire subtree).
+///
+/// This is a defence-in-depth measure against misconfigured `.gitignore`
+/// rules. The list is intentionally narrow: only directories that we know
+/// for certain do not contain user source code unfault should analyse.
+///
+/// The critical entry is `.unfault/` — without this guard, on large repos
+/// where the user's global gitignore is configured non-standardly, unfault
+/// would walk its own cache directory and treat tens of thousands of
+/// msgpack files as source candidates. Cache writes never converge, the
+/// graph cache is never reused, and every invocation rebuilds from scratch.
+pub fn is_always_excluded_dir_filter(entry: &ignore::DirEntry) -> bool {
+    // Only filter directories — file checks would slow the walk for no gain.
+    if !entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+        return true;
+    }
+    let Some(name) = entry.file_name().to_str() else {
+        return true;
+    };
+    !matches!(
+        name,
+        // unfault's own per-workspace data and cache
+        ".unfault"
+        // Rust build artifacts (workspaces sometimes lack a .gitignore at the root)
+        | "target"
+        // JS / TS package directories
+        | "node_modules"
+        // Python virtualenvs and bytecode caches
+        | ".venv" | "venv" | "__pycache__"
+        // Other tool caches that occasionally appear unignored
+        | ".mypy_cache" | ".pytest_cache" | ".ruff_cache" | ".tox"
+        // Go build cache
+        | ".gocache"
+    )
 }
 
 /// Returns `true` if `path` looks like a test file for any supported language.
@@ -981,6 +1027,62 @@ mod tests {
     fn is_test_file_non_source_files_pass() {
         assert!(!is_test_file(Path::new("test_config.json")));
         assert!(!is_test_file(Path::new("README.md")));
+    }
+
+    // ── discover_source_files: hard-excluded directories ─────────────────────
+
+    /// Regression test for v1.0.37: discover_source_files must never descend
+    /// into `.unfault/` even when no `.gitignore` excludes it. Walking the
+    /// cache directory results in tens of thousands of phantom "source"
+    /// files, cache writes that never converge, and a full graph rebuild
+    /// on every invocation.
+    #[test]
+    fn discover_skips_unfault_cache_dir_without_gitignore() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        // One real source file at the workspace root.
+        fs::write(root.join("main.py"), "def main(): pass").unwrap();
+
+        // Simulate a populated `.unfault/cache/semantics/` from a prior run.
+        let cache_dir = root.join(".unfault").join("cache").join("semantics");
+        fs::create_dir_all(&cache_dir).unwrap();
+        for i in 0..50 {
+            fs::write(
+                cache_dir.join(format!("phantom_{i}.py")),
+                format!("def phantom_{i}(): pass"),
+            )
+            .unwrap();
+        }
+
+        // No `.gitignore`, no git repo — exactly the situation where
+        // `WalkBuilder`'s `.gitignore` machinery cannot help us.
+        let found = discover_source_files(root).unwrap();
+        assert_eq!(found.len(), 1, "expected only main.py; got {found:#?}");
+        assert!(
+            found[0].ends_with("main.py"),
+            "expected main.py, got {:?}",
+            found[0]
+        );
+    }
+
+    #[test]
+    fn discover_skips_node_modules_and_target_without_gitignore() {
+        let temp_dir = TempDir::new().unwrap();
+        let root = temp_dir.path();
+
+        fs::write(root.join("app.ts"), "function main() {}").unwrap();
+
+        let node_modules = root.join("node_modules").join("lodash");
+        fs::create_dir_all(&node_modules).unwrap();
+        fs::write(node_modules.join("index.js"), "module.exports = {};").unwrap();
+
+        let target = root.join("target").join("debug").join("build");
+        fs::create_dir_all(&target).unwrap();
+        fs::write(target.join("script.rs"), "fn main() {}").unwrap();
+
+        let found = discover_source_files(root).unwrap();
+        assert_eq!(found.len(), 1, "expected only app.ts; got {found:#?}");
     }
 
     // ── detect_language ──────────────────────────────────────────────────────

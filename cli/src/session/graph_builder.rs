@@ -229,6 +229,11 @@ fn discover_source_files(workspace_path: &Path) -> Result<Vec<PathBuf>> {
         .hidden(true)
         .git_ignore(true)
         .git_exclude(true)
+        // See `ir_builder::is_always_excluded_dir_filter` for rationale: we
+        // must never descend into `.unfault/`, `target/`, `node_modules/`,
+        // etc. even if the workspace lacks a local `.gitignore` and the
+        // user's global gitignore configuration cannot be discovered.
+        .filter_entry(super::ir_builder::is_always_excluded_dir_filter)
         .build();
 
     for entry in walker {
