@@ -715,6 +715,75 @@ pub struct CoverageArgs {
 // ── Coverage types ────────────────────────────────────────────────────────────
 
 /// What kind of observability signal a single function node carries.
+/// What kind of observability signal the instrumentation produces.
+/// Used to select distinct display icons so engineers can distinguish
+/// trace spans from error capture from metrics at a glance.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SignalKind {
+    /// Distributed trace span (OTel, ddtrace, Jaeger, Zipkin, …).
+    Trace,
+    /// Structured log emission (structlog, loguru, zap, …).
+    Log,
+    /// Metric recording (Prometheus, StatsD, Datadog metrics, …).
+    Metric,
+    /// Error / exception capture (Sentry, Rollbar, Bugsnag, …).
+    Error,
+}
+
+impl SignalKind {
+    /// Unicode icon that represents this signal kind in the terminal.
+    ///
+    /// - `◉` trace  (filled circle, distinctive from coverage icons)
+    /// - `≡` log    (three horizontal lines, like a log stream)
+    /// - `⬡` metric (hexagon, like a gauge)
+    /// - `✖` error  (cross, like an error event)
+    pub fn icon(&self) -> &'static str {
+        match self {
+            SignalKind::Trace => "◉",
+            SignalKind::Log => "≡",
+            SignalKind::Metric => "⬡",
+            SignalKind::Error => "✖",
+        }
+    }
+
+    /// Default for serde — most signals are traces.
+    pub fn trace_default() -> Self {
+        SignalKind::Trace
+    }
+
+    /// Infer the kind from a library or framework name.
+    pub fn from_name(name: &str) -> Self {
+        let lower = name.to_lowercase();
+        // Error trackers
+        if lower.contains("sentry") || lower.contains("rollbar") || lower.contains("bugsnag") {
+            return SignalKind::Error;
+        }
+        // Metrics
+        if lower.contains("prometheus")
+            || lower.contains("statsd")
+            || lower.contains("influx")
+            || lower.contains("graphite")
+            || lower.contains("metric")
+        {
+            return SignalKind::Metric;
+        }
+        // Structured logging
+        if lower.contains("loguru")
+            || lower.contains("structlog")
+            || lower.contains("zap")
+            || lower.contains("zerolog")
+            || lower.contains("logrus")
+            || lower.contains("winston")
+            || lower.contains("bunyan")
+        {
+            return SignalKind::Log;
+        }
+        // Default: distributed tracing
+        SignalKind::Trace
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SpanSignal {
@@ -724,12 +793,18 @@ pub enum SpanSignal {
     Decorator {
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
+        /// What kind of observability signal this decorator produces.
+        #[serde(default = "SignalKind::trace_default")]
+        kind: SignalKind,
     },
     /// The file this function lives in imports an OTel / tracing SDK
     /// (opentelemetry, ddtrace, sentry-sdk, …).
     SdkImported {
         /// The library name (e.g. "opentelemetry", "ddtrace").
         library: String,
+        /// What kind of observability signal this SDK provides.
+        #[serde(default = "SignalKind::trace_default")]
+        kind: SignalKind,
     },
     /// A framework auto-instrumentation was detected elsewhere in the codebase
     /// (e.g. FastAPIInstrumentor.instrument_app(app), ddtrace.patch_all(),
@@ -738,6 +813,17 @@ pub enum SpanSignal {
     AutoInstrumented {
         /// Human-readable framework name, e.g. "fastapi", "sqlalchemy".
         framework: String,
+        /// Source file where the auto-instrumentation call was found.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_file: Option<String>,
+        /// 1-based line number of the instrumentor call.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_line: Option<u32>,
+        /// True when this function is the HTTP entry boundary that directly
+        /// receives the auto-instrumented server span.  False for inner
+        /// functions that are covered transitively.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_boundary: bool,
     },
     /// No instrumentation signal detected on this node.
     None,
@@ -1291,14 +1377,25 @@ fn collect_nodes<'a>(node: &'a CoverageNode, out: &mut Vec<&'a CoverageNode>) {
 
 // ── Auto-instrumentation index ────────────────────────────────────────────────
 
-/// A set of framework names that are globally auto-instrumented in this
-/// workspace, derived entirely from the code graph.
+/// Location and framework recorded for a single global auto-instrumentation
+/// activation call (e.g. `FastAPIInstrumentor.instrument_app(app)`).
+#[derive(Debug, Clone)]
+pub struct AutoInstrumentEntry {
+    /// Human-readable framework name, e.g. "fastapi", "sqlalchemy".
+    pub framework: String,
+    /// Source file where the instrumentor call was found.
+    pub file: String,
+    /// 1-based line number of the function that contains the call, if known.
+    pub line: Option<u32>,
+}
+
+/// Map from framework name → location of its global instrumentation call.
 ///
 /// Examples:
-/// - `{"fastapi"}` when `FastAPIInstrumentor.instrument_app(app)` is detected
-/// - `{"fastapi", "sqlalchemy"}` when both are instrumented
-/// - `{}` when no auto-instrumentation is detected
-pub type AutoInstrumentSet = std::collections::HashSet<String>;
+/// - `{"fastapi" → (file, line)}` when `FastAPIInstrumentor.instrument_app(app)` is detected
+/// - `{"all" → …}` when `ddtrace.patch_all()` is detected
+/// - empty when no auto-instrumentation is detected
+pub type AutoInstrumentSet = std::collections::HashMap<String, AutoInstrumentEntry>;
 
 /// Scan the code graph once and return the set of frameworks that have a
 /// global OTel / tracing auto-instrumentation enabled.
@@ -1351,8 +1448,12 @@ pub fn build_auto_instrument_set(graph: &unfault_analysis::graph::CodeGraph) -> 
     }
 
     // Walk every Function node in those files and inspect raw_calls.
+    // Record the source file and line of the function containing the call.
     for idx in graph.graph.node_indices() {
-        if let GraphNode::Function { raw_calls, .. } = &graph.graph[idx] {
+        if let GraphNode::Function {
+            line, raw_calls, ..
+        } = &graph.graph[idx]
+        {
             let file =
                 unfault_analysis::graph::traversal::node_file_path_pub(graph, &graph.graph[idx])
                     .unwrap_or_default();
@@ -1361,7 +1462,14 @@ pub fn build_auto_instrument_set(graph: &unfault_analysis::graph::CodeGraph) -> 
             }
             for call_expr in raw_calls {
                 if let Some(framework) = classify_instrumentor_call(call_expr) {
-                    result.insert(framework);
+                    // Keep first entry found for each framework (arbitrary but stable).
+                    result
+                        .entry(framework.clone())
+                        .or_insert_with(|| AutoInstrumentEntry {
+                            framework,
+                            file: file.clone(),
+                            line: *line,
+                        });
                 }
             }
         }
@@ -1893,32 +2001,45 @@ fn node_span_signal(
         for dec in decorators {
             if let DecoratorSemantic::Tracing { detail } = dec {
                 let span_name = extract_span_name_from_detail(detail);
-                return SpanSignal::Decorator { name: span_name };
+                let kind = SignalKind::from_name(detail);
+                return SpanSignal::Decorator {
+                    name: span_name,
+                    kind,
+                };
             }
         }
     }
 
     // Priority 2: global auto-instrumentation detected in the workspace.
-    // For HTTP route handlers we check whether the handler's framework is
-    // auto-instrumented; for other functions we skip this (auto-instrumentation
-    // only creates server spans at the HTTP boundary).
+    // HTTP route handlers are the direct entry boundary where the server span
+    // is created.  Inner functions are transitively covered by that same span.
+    // We report AutoInstrumented for both — is_boundary distinguishes them.
     if !auto_instruments.is_empty() {
-        if let GraphNode::Function {
-            is_handler: true, ..
-        } = node
-        {
-            // "all" is emitted by ddtrace.patch_all() — covers everything.
-            if auto_instruments.contains("all") {
-                return SpanSignal::AutoInstrumented {
-                    framework: "ddtrace (patch_all)".to_string(),
-                };
+        let is_boundary = matches!(
+            node,
+            GraphNode::Function {
+                is_handler: true,
+                ..
             }
-            // Match on the handler's framework (fastapi, flask, django, …).
-            for framework in auto_instruments {
-                return SpanSignal::AutoInstrumented {
-                    framework: framework.clone(),
-                };
-            }
+        );
+
+        // "all" is emitted by ddtrace.patch_all() — covers every framework.
+        if let Some(entry) = auto_instruments.get("all") {
+            return SpanSignal::AutoInstrumented {
+                framework: "ddtrace (patch_all)".to_string(),
+                source_file: Some(entry.file.clone()),
+                source_line: entry.line,
+                is_boundary,
+            };
+        }
+        // Pick the first (or only) matching entry.
+        if let Some(entry) = auto_instruments.values().next() {
+            return SpanSignal::AutoInstrumented {
+                framework: entry.framework.clone(),
+                source_file: Some(entry.file.clone()),
+                source_line: entry.line,
+                is_boundary,
+            };
         }
     }
 
@@ -1928,8 +2049,10 @@ fn node_span_signal(
     if let Some(libs) = file_libs.get(&file) {
         for (lib_name, cat) in libs {
             if matches!(cat, ModuleCategory::Observability) {
+                let kind = SignalKind::from_name(lib_name);
                 return SpanSignal::SdkImported {
                     library: lib_name.clone(),
+                    kind,
                 };
             }
         }
@@ -2226,6 +2349,16 @@ fn find_function_by_name(
 
 // ── Renderer ──────────────────────────────────────────────────────────────────
 
+/// Short human-readable label for a `SignalKind`, used in display lines.
+fn kind_label(kind: &SignalKind) -> &'static str {
+    match kind {
+        SignalKind::Trace => "trace",
+        SignalKind::Log => "log",
+        SignalKind::Metric => "metric",
+        SignalKind::Error => "error",
+    }
+}
+
 fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
     if json {
         println!("{}", serde_json::to_string_pretty(ctx)?);
@@ -2242,25 +2375,63 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
     };
     println!("  {} Coverage for {}", "→".cyan(), header);
 
-    // Show auto-instrumentation status on the anchor.
+    // Show instrumentation status on the anchor.
+    // Icons distinguish signal type:
+    //   ◉  trace span (explicit decorator)
+    //   ◐  trace span via auto-instrumentation (server boundary)
+    //   ⋯  trace span via auto-instrumentation (inner, covered transitively)
+    //   ◑  observability SDK imported (manual usage likely)
     match &ctx.anchor.span {
-        SpanSignal::AutoInstrumented { framework } => {
-            println!(
-                "  {} server span from {} auto-instrumentation",
-                "◐".yellow(),
+        SpanSignal::AutoInstrumented {
+            framework,
+            source_file,
+            source_line,
+            is_boundary,
+        } => {
+            let (icon, label) = if *is_boundary {
+                ("◐".yellow().to_string(), "server span from")
+            } else {
+                ("⋯".bright_black().to_string(), "covered by")
+            };
+            print!(
+                "  {} {} {} auto-instrumentation",
+                icon,
+                label,
                 framework.bright_white()
             );
+            // Show where the instrumentation is registered, dimmed.
+            if let Some(file) = source_file {
+                let loc = match source_line {
+                    Some(l) => format!("{}:{}", file, l),
+                    None => file.clone(),
+                };
+                print!("  {}", loc.bright_black());
+            }
+            println!();
         }
-        SpanSignal::Decorator { name: Some(n) } => {
-            println!("  {} explicit span  \"{}\"", "●".green(), n.green());
-        }
-        SpanSignal::Decorator { name: None } => {
-            println!("  {} tracing decorator detected", "●".green());
-        }
-        SpanSignal::SdkImported { library } => {
+        SpanSignal::Decorator {
+            name: Some(n),
+            kind,
+        } => {
             println!(
-                "  {} sdk imported: {}",
-                "◑".yellow(),
+                "  {} {} span  \"{}\"",
+                kind.icon().green(),
+                kind_label(kind),
+                n.green()
+            );
+        }
+        SpanSignal::Decorator { name: None, kind } => {
+            println!(
+                "  {} {} span (decorator)",
+                kind.icon().green(),
+                kind_label(kind)
+            );
+        }
+        SpanSignal::SdkImported { library, kind } => {
+            println!(
+                "  {} {} sdk: {}",
+                kind.icon().yellow(),
+                kind_label(kind),
                 library.bright_black()
             );
         }
@@ -2308,7 +2479,12 @@ fn render_coverage_output(ctx: &CoverageContext, json: bool) -> Result<i32> {
         collect_nodes(c, &mut all_nodes);
     }
 
-    render_category_breakdown(&all_nodes, &ctx.anchor.name);
+    // Detect whether any node in the tree is covered by global auto-instrumentation.
+    let has_global_instrumentation = all_nodes
+        .iter()
+        .any(|n| matches!(n.span, SpanSignal::AutoInstrumented { .. }));
+
+    render_category_breakdown(&all_nodes, &ctx.anchor.name, has_global_instrumentation);
 
     Ok(EXIT_SUCCESS)
 }
@@ -2341,7 +2517,11 @@ impl<'a> CategoryGroup<'a> {
     }
 }
 
-fn render_category_breakdown(all_nodes: &[&CoverageNode], anchor_name: &str) {
+fn render_category_breakdown(
+    all_nodes: &[&CoverageNode],
+    anchor_name: &str,
+    has_global_instrumentation: bool,
+) {
     // Partition nodes into categories.  A node can only be in one.
     let mut db: Vec<&CoverageNode> = Vec::new();
     let mut remote: Vec<&CoverageNode> = Vec::new();
@@ -2370,6 +2550,17 @@ fn render_category_breakdown(all_nodes: &[&CoverageNode], anchor_name: &str) {
         }
     }
 
+    let logic_blind_spot_hint = if has_global_instrumentation {
+        "instrumentation may be too broad — errors inside will lack granular span context"
+    } else {
+        "core logic is uninstrumented — errors will have no trace context"
+    };
+    let logic_partial_hint = if has_global_instrumentation {
+        "partial logic coverage — some code paths rely only on the outer auto-instrumented span"
+    } else {
+        "partial logic coverage — some code paths will be dark"
+    };
+
     let groups: Vec<CategoryGroup> = vec![
         CategoryGroup {
             label: "db queries",
@@ -2379,7 +2570,7 @@ fn render_category_breakdown(all_nodes: &[&CoverageNode], anchor_name: &str) {
         },
         CategoryGroup {
             label: "remote calls",
-            blind_spot_hint: "wrap remote calls in a span to catch downstream failures",
+            blind_spot_hint: "wrap remote calls in a span to catch downstream errors",
             partial_hint: "some remote calls are untraced — partial visibility into downstream",
             nodes: remote,
         },
@@ -2391,14 +2582,14 @@ fn render_category_breakdown(all_nodes: &[&CoverageNode], anchor_name: &str) {
         },
         CategoryGroup {
             label: "auth / middleware",
-            blind_spot_hint: "wrap auth checks in a span to see permission failures",
+            blind_spot_hint: "wrap auth checks in a span to see permission errors",
             partial_hint: "some auth checks are untraced",
             nodes: auth,
         },
         CategoryGroup {
             label: "business logic",
-            blind_spot_hint: "core logic is uninstrumented — failures will have no trace context",
-            partial_hint: "partial logic coverage — some code paths will be dark",
+            blind_spot_hint: logic_blind_spot_hint,
+            partial_hint: logic_partial_hint,
             nodes: logic,
         },
     ];
@@ -2749,9 +2940,9 @@ async def list_items():
         let instruments = build_auto_instrument_set(&graph);
 
         assert!(
-            instruments.contains("fastapi"),
+            instruments.contains_key("fastapi"),
             "expected fastapi in auto_instruments, got {:?}",
-            instruments
+            instruments.keys().collect::<Vec<_>>()
         );
     }
 

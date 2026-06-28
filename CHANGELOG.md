@@ -10,6 +10,55 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.34] — 2026-06-28
+
+### Fixed
+
+- **`graph coverage` now propagates auto-instrumentation to inner functions.**
+  Previously `SpanSignal::AutoInstrumented` was only emitted for HTTP route
+  handlers (`is_handler: true`). Inner functions called from an
+  auto-instrumented handler showed no signal at all, making the coverage view
+  misleading. The `is_handler` guard is removed — every function in the call
+  tree receives `AutoInstrumented` when global instrumentation is detected. A
+  new `is_boundary: bool` field distinguishes the HTTP entry point (where the
+  server span is created) from inner functions covered transitively. The
+  display renders them differently: `◐ server span from …` at the boundary,
+  `⋯ covered by …` for inner nodes.
+
+- **Auto-instrumentation origin shown as dimmed `file:line`.** The
+  `AutoInstrumentSet` type changed from `HashSet<String>` to
+  `HashMap<String, AutoInstrumentEntry>`, where each entry carries the source
+  file and 1-based line number of the function that makes the instrumentor
+  call (e.g. `tracing.py:3`). `build_auto_instrument_set` now records this
+  location. The coverage header prints it dimmed alongside the framework name
+  so engineers can navigate directly to where the instrumentation is wired up.
+
+- **Hint messages say "errors" instead of "failures".** All per-category hint
+  strings updated: "downstream failures" → "downstream errors", "permission
+  failures" → "permission errors", "failures will have no trace context" →
+  "errors will have no trace context".
+
+- **Business-logic hints are context-aware when global instrumentation is
+  present.** When `has_global_instrumentation` is true the blind-spot hint
+  reads *"instrumentation may be too broad — errors inside will lack granular
+  span context"* rather than claiming there is no trace context at all. The
+  partial hint similarly acknowledges the outer auto-instrumented span.
+
+- **Distinct icons for signal kind (trace / log / metric / error).** A new
+  `SignalKind` enum (`Trace`, `Log`, `Metric`, `Error`) is attached to
+  `SpanSignal::Decorator` and `SpanSignal::SdkImported`. The kind is inferred
+  from the library or decorator name via `SignalKind::from_name`. Display icons:
+  - `◉` — distributed trace span (OTel, ddtrace, …)
+  - `≡` — structured log (loguru, structlog, zap, …)
+  - `⬡` — metric (Prometheus, StatsD, …)
+  - `✖` — error tracker (Sentry, Rollbar, …)
+
+- Fixed two pre-existing clippy errors in test code (`absurd_extreme_comparisons`
+  in `analysis/src/engine.rs` and a tautological `assert!` in
+  `analysis/src/rules/go/unchecked_error.rs`).
+
+- Bumped: `unfault-core` 0.5.34, `unfault-analysis` 0.4.34, `unfault` 1.0.34.
+
 ## [1.0.33] — 2026-06-28
 
 ### Fixed

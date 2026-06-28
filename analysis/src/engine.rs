@@ -202,8 +202,9 @@ mod tests {
         let registry2 = engine.rule_registry.load();
         assert_eq!(registry2.all().len(), 0);
 
-        // The initial count should be >= 0 (builtin rules may or may not be present)
-        assert!(initial_count >= 0);
+        // The initial count is a usize — just verify it is usable (always true,
+        // but documents intent without a tautological comparison).
+        let _ = initial_count;
     }
 
     #[test]

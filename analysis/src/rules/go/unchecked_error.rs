@@ -220,7 +220,8 @@ func main() {
 
         let findings = rule.evaluate(&semantics, None).await;
         // Should detect unchecked error from os.ReadFile
-        assert!(!findings.is_empty() || true); // Semantics may or may not detect this yet
+        // Semantics may or may not detect this yet — just confirm no panic.
+        let _ = findings;
     }
 
     #[tokio::test]
