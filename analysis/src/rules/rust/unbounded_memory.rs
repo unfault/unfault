@@ -341,6 +341,7 @@ mod tests {
     use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
+    #[allow(dead_code)]
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
         let sf = SourceFile {
             path: "memory_code.rs".to_string(),

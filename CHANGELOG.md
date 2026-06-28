@@ -10,6 +10,45 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.38] — 2026-06-28
+
+### Added
+
+- **`unfault telemetry` command** — analyzes observability signal coverage
+  (traces, logging, metrics) across routes, files, directories, or functions.
+
+  Targets are resolved intelligently: `/path` → route, `METHOD /path` → route
+  with method, `file.ext` → file, `path/` → directory, otherwise → function
+  name. Supports `*`/`**` wildcard route patterns.
+
+  Three output modes:
+  - **Sectioned** (default for dir/file): per-signal sections showing trace
+    coverage (deep/shallow/unobserved), logging quality (structured/plain/
+    none), metrics presence, and boundary statistics (db, http, remote calls).
+  - **Merged** (default for route/function): single-item compact view.
+  - **Compact** (`--compact`): per-route inline layout.
+  - **JSON** (`--json`): full serialized report with all node details.
+
+  Logging quality detection chases re-exported loggers (`from utils import
+  logger`) by following `ImportsFrom` → `UsesLibrary` edges in the graph.
+
+### Changed
+
+- `build_graph_with_spinner` and `build_coverage_context` in
+  `cli/src/commands/graph.rs` made `pub(crate)` for reuse by telemetry
+  command. No change to public API.
+
+### Fixed
+
+- Removed duplicate `#[test]` attribute in
+  `cli/src/session/ir_builder.rs:test_graph_cache_msgpack_roundtrip`.
+- Removed unused imports in graph test module.
+- Suppressed minor test warnings across analysis crate.
+
+### Bumped
+
+- `unfault-core` 0.5.38, `unfault-analysis` 0.4.38, `unfault` 1.0.38.
+
 ## [1.0.37] — 2026-06-28
 
 ### Fixed

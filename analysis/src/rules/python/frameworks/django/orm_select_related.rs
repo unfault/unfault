@@ -319,7 +319,6 @@ for item in items:
 
     #[tokio::test]
     async fn evaluate_finding_has_fix_preview() {
-        let rule = DjangoOrmSelectRelatedRule::new();
         // Verify fix preview generation
         let preview = generate_fix_preview();
         assert!(preview.contains("select_related"));

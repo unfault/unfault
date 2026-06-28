@@ -368,7 +368,7 @@ export async function DELETE(
     #[tokio::test]
     async fn debug_semantic_model_for_nextjs_route() {
         // Debug test to inspect what the semantic model produces
-        let (file_id, sem) = parse_and_build_semantics(
+        let (_file_id, sem) = parse_and_build_semantics(
             "app/api/tasks/[id]/route.ts",
             r#"
 export async function GET(

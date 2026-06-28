@@ -21,3 +21,4 @@ pub mod integrations;
 pub mod lint;
 pub mod lsp;
 pub mod review;
+pub mod telemetry;

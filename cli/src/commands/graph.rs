@@ -42,7 +42,7 @@ use crate::exit_codes::*;
 /// Build the analysis graph with a spinner on stderr when not in verbose or
 /// JSON mode. The spinner is cleared before any output is printed, so it
 /// never interleaves with results.
-fn build_graph_with_spinner(
+pub(crate) fn build_graph_with_spinner(
     workspace_path: &std::path::Path,
     verbose: bool,
     json: bool,
@@ -1223,7 +1223,7 @@ pub async fn execute_coverage(args: CoverageArgs) -> Result<i32> {
 /// name) to an anchor node, then walking callers upward and callees downward.
 ///
 /// Returns `None` when the target cannot be resolved.
-fn build_coverage_context(
+pub(crate) fn build_coverage_context(
     graph: &unfault_analysis::graph::CodeGraph,
     target: &str,
     method_filter: Option<&str>,
@@ -2901,8 +2901,6 @@ mod coverage_tests {
     #[test]
     fn build_auto_instrument_set_from_graph_with_fastapi_instrumentor() {
         use crate::session::ir_builder::build_ir_cached;
-        use std::sync::Arc;
-        use unfault_core::semantics::SourceSemantics;
 
         // Build a tiny two-file workspace:
         //   tracing.py  — imports opentelemetry.instrumentation.fastapi and calls instrument_app

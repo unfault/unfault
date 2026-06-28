@@ -184,6 +184,47 @@ enum Commands {
         #[arg(value_name = "ID")]
         id: String,
     },
+    /// Telemetry coverage analysis for routes, files, directories, or functions
+    ///
+    /// Analyzes the code graph for observability signal coverage (traces, logging,
+    /// metrics) across a target scope. The target can be:
+    ///   - An HTTP route path:  /api/orders
+    ///   - A route with method:  POST /api/orders
+    ///   - A file path:         src/api/handlers.py
+    ///   - A directory:         src/api/payments/
+    ///   - A function name:     validate_order
+    ///
+    /// Examples:
+    ///   unfault telemetry src/api/payments/
+    ///   unfault telemetry src/api/handlers.py
+    ///   unfault telemetry validate_order
+    ///   unfault telemetry /api/orders
+    ///   unfault telemetry "POST /api/orders"
+    ///   unfault telemetry src/api/ --json
+    ///   unfault telemetry src/api/payments/ --compact
+    Telemetry {
+        /// Target: directory, file, function, or METHOD /path route
+        #[arg(value_name = "TARGET")]
+        target: String,
+        /// Workspace path to analyze (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Compact per-route inline layout instead of per-signal sections
+        #[arg(long)]
+        compact: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+        /// Force a live refresh of observability data
+        #[arg(long)]
+        refresh_cache: bool,
+        /// Use cached observability data only (no network calls)
+        #[arg(long)]
+        offline: bool,
+    },
 }
 
 /// Graph subcommands
@@ -704,6 +745,32 @@ async fn run_command(command: Commands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Fault error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        Commands::Telemetry {
+            target,
+            workspace,
+            json,
+            compact,
+            verbose,
+            refresh_cache,
+            offline,
+        } => {
+            let args = commands::telemetry::TelemetryArgs {
+                target,
+                workspace_path: workspace,
+                json,
+                compact,
+                verbose,
+                offline,
+                refresh_cache,
+            };
+            match commands::telemetry::execute(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Telemetry error: {}", e);
                     EXIT_ERROR
                 }
             }

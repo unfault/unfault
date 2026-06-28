@@ -1212,7 +1212,6 @@ def fetch_data():
         assert!(json_str.contains("requests"));
     }
 
-    #[test]
     /// Regression test for the graph cache deserialization bug fixed in
     /// v1.0.36. The on-disk format is positional msgpack, which silently
     /// returns an "invalid type: integer N, expected a sequence" error when
