@@ -1042,6 +1042,8 @@ pub fn find_path(
 pub fn find_handlers(graph: &CodeGraph, pattern: &str) -> HandlersContext {
     let lower_pattern = pattern.to_lowercase();
 
+    let mut seen: HashSet<(String, String, String, String)> = HashSet::new();
+
     let mut handlers: Vec<HandlerInfo> = graph
         .graph
         .node_indices()
@@ -1064,6 +1066,10 @@ pub fn find_handlers(graph: &CodeGraph, pattern: &str) -> HandlersContext {
             {
                 if path_matches_pattern(path, &lower_pattern) {
                     let file = node_file_path(graph, node).unwrap_or_default();
+                    let key = (method.clone(), path.clone(), name.clone(), file.clone());
+                    if !seen.insert(key) {
+                        return None;
+                    }
                     Some(HandlerInfo {
                         method: method.clone(),
                         path: path.clone(),

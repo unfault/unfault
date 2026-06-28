@@ -10,6 +10,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.47] — 2026-06-28
+
+### Fixed
+
+- **`unfault graph handlers <pattern>` no longer returns duplicate entries.**
+  Deduplication in `find_handlers` ensures identical handler+route combinations
+  (same method, path, handler, and file) appear only once in the output.
+
 ## [1.0.46] — 2026-06-28
 
 ### Changed
