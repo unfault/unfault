@@ -2,8 +2,8 @@ use anyhow::Result;
 use colored::Colorize;
 
 use crate::commands::graph::{
-    CoverageContext, CoverageNode, NodeRole, SignalKind, SpanSignal, build_coverage_context,
-    build_graph_with_spinner,
+    CoverageContext, CoverageNode, NodeRole, SignalKind, SpanSignal, UnobservedPaths,
+    build_coverage_context, build_graph_with_spinner,
 };
 use crate::exit_codes::*;
 
@@ -170,21 +170,16 @@ fn has_file_with_prefix(graph: &CodeGraph, prefix: &str) -> bool {
 
 // ── Quality levels ────────────────────────────────────────────────────────────
 
+/// What kind of span, if any, the anchor function carries.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum TraceQuality {
-    Deep,
-    Shallow,
-    Unobserved,
-}
-
-/// Whether a span is framework auto-instrumentation (coarse) or
-/// carries explicit per-function attributes (fine).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Grain {
-    Coarse,
-    Fine,
+pub enum AnchorKind {
+    /// Explicit decorator or SDK call on this function.
+    Explicit,
+    /// Framework-level auto-instrumentation (e.g. FastAPIInstrumentor).
+    FrameworkAuto,
+    /// No span detected.
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -192,6 +187,7 @@ pub enum Grain {
 pub enum LoggingQuality {
     Structured,
     Plain,
+    #[serde(rename = "none")]
     None_,
 }
 
@@ -207,21 +203,44 @@ impl LoggingQuality {
 
 // ── Report types ──────────────────────────────────────────────────────────────
 
+/// A single callee in the route's call tree, with its instrumentation state.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CalleeInfo {
+    pub name: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    pub role: NodeRole,
+    /// How deep from the handler (1 = direct callee).
+    pub depth: i32,
+    pub anchor_kind: AnchorKind,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RouteTelemetry {
     pub method: String,
     pub path: String,
     pub handler: String,
     pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub line: Option<u32>,
-    pub trace_quality: TraceQuality,
-    /// Whether the handler's own span is framework auto-instrumentation
-    /// (coarse) or carries explicit per-function attributes (fine).
-    /// None when the handler has no span at all.
-    pub anchor_grain: Option<Grain>,
+    /// What kind of span the handler itself carries.
+    pub anchor_kind: AnchorKind,
     pub total_callees: usize,
     pub instrumented_callees: usize,
-    pub signal_kinds: Vec<SignalKind>,
+    /// Flat list of all callees with their instrumentation state.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub callees: Vec<CalleeInfo>,
+    /// All callees with no span, grouped by role.
+    pub unobserved: UnobservedPaths,
+    /// Logging quality for the file this handler lives in.
+    pub logging: LoggingQuality,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logging_library: Option<String>,
+    /// Whether the handler's file emits metrics.
+    pub metrics: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metrics_library: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -249,8 +268,11 @@ pub struct TelemetryReport {
     pub target: String,
     pub target_kind: String,
     pub routes: Vec<RouteTelemetry>,
+    /// Per-file logging, used for directory-level catalog view.
     pub logging: Vec<FileLogging>,
+    /// Per-file metrics, used for directory-level catalog view.
     pub metrics: Vec<FileMetrics>,
+    /// Directory-level boundary totals (counts only, for summary view).
     pub db_queries: BoundaryStats,
     pub http_clients: BoundaryStats,
     pub remote_calls: BoundaryStats,
@@ -330,7 +352,13 @@ fn analyze_file_list(
             })
             .collect();
 
+        let fl = file_logging_quality(graph, file_path);
+        let fm = file_metrics(graph, file_path);
         for (method, path, handler, line) in &handlers {
+            // Deduplicate: skip if we already have this (method, path, handler) triple
+            if routes.iter().any(|r: &RouteTelemetry| r.method == *method && r.path == *path && r.handler == *handler) {
+                continue;
+            }
             if let Some(rt) = analyze_single_route(graph, path, Some(method), verbose) {
                 all_db += rt.db_queries.total;
                 all_db_covered += rt.db_queries.covered;
@@ -344,11 +372,15 @@ fn analyze_file_list(
                     handler: handler.clone(),
                     file: file_path.clone(),
                     line: *line,
-                    trace_quality: rt.trace_quality,
-                    anchor_grain: rt.anchor_grain,
+                    anchor_kind: rt.anchor_kind,
                     total_callees: rt.total_callees,
                     instrumented_callees: rt.instrumented_callees,
-                    signal_kinds: rt.signal_kinds,
+                    callees: rt.callees,
+                    unobserved: rt.unobserved,
+                    logging: fl.quality.clone(),
+                    logging_library: if fl.library.is_empty() { None } else { Some(fl.library.clone()) },
+                    metrics: fm.present,
+                    metrics_library: fm.library.clone(),
                 });
             }
         }
@@ -385,11 +417,11 @@ fn analyze_file_list(
 // ── Analysis: single route / function ─────────────────────────────────────────
 
 struct RouteTraversal {
-    trace_quality: TraceQuality,
-    anchor_grain: Option<Grain>,
+    anchor_kind: AnchorKind,
     total_callees: usize,
     instrumented_callees: usize,
-    signal_kinds: Vec<SignalKind>,
+    callees: Vec<CalleeInfo>,
+    unobserved: UnobservedPaths,
     db_queries: BoundaryStats,
     http_clients: BoundaryStats,
     remote_calls: BoundaryStats,
@@ -407,6 +439,8 @@ fn analyze_route(
     let anchor_node = &graph.graph[anchor_idx];
     let anchor_file = node_file_path_pub(graph, anchor_node).unwrap_or_default();
 
+    let fl = file_logging_quality(graph, &anchor_file);
+    let fm = file_metrics(graph, &anchor_file);
     let report = TelemetryReport {
         target: format!("{} {}", ctx.anchor.role.method_str().unwrap_or(""), path)
             .trim()
@@ -418,11 +452,15 @@ fn analyze_route(
             handler: ctx.anchor.name.clone(),
             file: anchor_file.clone(),
             line: ctx.anchor.line,
-            trace_quality: rt.trace_quality,
-            anchor_grain: rt.anchor_grain,
+            anchor_kind: rt.anchor_kind,
             total_callees: rt.total_callees,
             instrumented_callees: rt.instrumented_callees,
-            signal_kinds: rt.signal_kinds,
+            callees: rt.callees,
+            unobserved: rt.unobserved,
+            logging: fl.quality,
+            logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
+            metrics: fm.present,
+            metrics_library: fm.library,
         }],
         logging: vec![file_logging_quality(graph, &anchor_file)],
         metrics: vec![file_metrics(graph, &anchor_file)],
@@ -441,6 +479,8 @@ fn analyze_function(graph: &CodeGraph, name: &str, verbose: bool) -> Option<Tele
     let anchor_node = &graph.graph[anchor_idx];
     let anchor_file = node_file_path_pub(graph, anchor_node).unwrap_or_default();
 
+    let fl = file_logging_quality(graph, &anchor_file);
+    let fm = file_metrics(graph, &anchor_file);
     let report = TelemetryReport {
         target: name.to_string(),
         target_kind: "function".to_string(),
@@ -450,11 +490,15 @@ fn analyze_function(graph: &CodeGraph, name: &str, verbose: bool) -> Option<Tele
             handler: ctx.anchor.name.clone(),
             file: anchor_file.clone(),
             line: ctx.anchor.line,
-            trace_quality: rt.trace_quality,
-            anchor_grain: rt.anchor_grain,
+            anchor_kind: rt.anchor_kind,
             total_callees: rt.total_callees,
             instrumented_callees: rt.instrumented_callees,
-            signal_kinds: rt.signal_kinds,
+            callees: rt.callees,
+            unobserved: rt.unobserved,
+            logging: fl.quality,
+            logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
+            metrics: fm.present,
+            metrics_library: fm.library,
         }],
         logging: vec![file_logging_quality(graph, &anchor_file)],
         metrics: vec![file_metrics(graph, &anchor_file)],
@@ -483,98 +527,51 @@ fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
         collect_nodes(c, &mut all_nodes);
     }
 
-    let total_callees = all_nodes.len().saturating_sub(1); // exclude anchor
-    let instrumented_callees = all_nodes
+    // Build flat callee list (exclude anchor itself)
+    let callees: Vec<CalleeInfo> = all_nodes
         .iter()
-        .filter(|n| !matches!(n.span, SpanSignal::None))
-        .count()
-        .saturating_sub(if matches!(ctx.anchor.span, SpanSignal::None) {
-            0
-        } else {
-            1
-        });
-
-    // Signal kinds present across the tree
-    let mut kinds = Vec::new();
-    for node in &all_nodes {
-        let kind = span_signal_kind(&node.span);
-        if !kinds.contains(&kind) {
-            kinds.push(kind);
-        }
-    }
-
-    // Boundary stats
-    let db_total = all_nodes
-        .iter()
-        .filter(|n| matches!(n.role, NodeRole::Database))
-        .count();
-    let db_covered = all_nodes
-        .iter()
-        .filter(|n| matches!(n.role, NodeRole::Database) && !matches!(n.span, SpanSignal::None))
-        .count();
-    let http_total = all_nodes
-        .iter()
-        .filter(|n| matches!(n.role, NodeRole::HttpClient))
-        .count();
-    let http_covered = all_nodes
-        .iter()
-        .filter(|n| matches!(n.role, NodeRole::HttpClient) && !matches!(n.span, SpanSignal::None))
-        .count();
-    let remote_total = all_nodes
-        .iter()
-        .filter(|n| matches!(n.role, NodeRole::RemoteCall { .. }))
-        .count();
-    let remote_covered = all_nodes
-        .iter()
-        .filter(|n| {
-            matches!(n.role, NodeRole::RemoteCall { .. }) && !matches!(n.span, SpanSignal::None)
+        .filter(|n| n.depth != 0)
+        .map(|n| CalleeInfo {
+            name: n.name.clone(),
+            file: n.file.clone(),
+            line: n.line,
+            role: n.role.clone(),
+            depth: n.depth,
+            anchor_kind: span_to_anchor_kind(&n.span),
         })
+        .collect();
+
+    let total_callees = callees.len();
+    let instrumented_callees = callees
+        .iter()
+        .filter(|c| c.anchor_kind != AnchorKind::None)
         .count();
 
-    let trace_quality = if matches!(ctx.anchor.span, SpanSignal::None) {
-        TraceQuality::Unobserved
-    } else if instrumented_callees == total_callees {
-        TraceQuality::Deep
-    } else {
-        TraceQuality::Shallow
-    };
+    // Boundary stats from callee list
+    let db_total = callees.iter().filter(|c| matches!(c.role, NodeRole::Database)).count();
+    let db_covered = callees.iter().filter(|c| matches!(c.role, NodeRole::Database) && c.anchor_kind != AnchorKind::None).count();
+    let http_total = callees.iter().filter(|c| matches!(c.role, NodeRole::HttpClient)).count();
+    let http_covered = callees.iter().filter(|c| matches!(c.role, NodeRole::HttpClient) && c.anchor_kind != AnchorKind::None).count();
+    let remote_total = callees.iter().filter(|c| matches!(c.role, NodeRole::RemoteCall { .. })).count();
+    let remote_covered = callees.iter().filter(|c| matches!(c.role, NodeRole::RemoteCall { .. }) && c.anchor_kind != AnchorKind::None).count();
 
     RouteTraversal {
-        trace_quality,
-        anchor_grain: span_to_grain(&ctx.anchor.span),
+        anchor_kind: span_to_anchor_kind(&ctx.anchor.span),
         total_callees,
         instrumented_callees,
-        signal_kinds: kinds,
-        db_queries: BoundaryStats {
-            total: db_total,
-            covered: db_covered,
-        },
-        http_clients: BoundaryStats {
-            total: http_total,
-            covered: http_covered,
-        },
-        remote_calls: BoundaryStats {
-            total: remote_total,
-            covered: remote_covered,
-        },
+        callees,
+        unobserved: ctx.unobserved_paths.clone(),
+        db_queries: BoundaryStats { total: db_total, covered: db_covered },
+        http_clients: BoundaryStats { total: http_total, covered: http_covered },
+        remote_calls: BoundaryStats { total: remote_total, covered: remote_covered },
     }
 }
 
-fn span_signal_kind(span: &SpanSignal) -> SignalKind {
+fn span_to_anchor_kind(span: &SpanSignal) -> AnchorKind {
     match span {
-        SpanSignal::Decorator { kind, .. } => kind.clone(),
-        SpanSignal::SdkImported { kind, .. } => kind.clone(),
-        SpanSignal::AutoInstrumented { .. } => SignalKind::Trace,
-        SpanSignal::None => SignalKind::Trace,
-    }
-}
-
-fn span_to_grain(span: &SpanSignal) -> Option<Grain> {
-    match span {
-        SpanSignal::AutoInstrumented { .. } => Some(Grain::Coarse),
-        SpanSignal::Decorator { .. } => Some(Grain::Fine),
-        SpanSignal::SdkImported { .. } => Some(Grain::Fine),
-        SpanSignal::None => None,
+        SpanSignal::Decorator { .. } | SpanSignal::SdkImported { .. } => AnchorKind::Explicit,
+        SpanSignal::AutoInstrumented { .. } => AnchorKind::FrameworkAuto,
+        SpanSignal::None => AnchorKind::None,
     }
 }
 
@@ -823,28 +820,28 @@ fn render_sections(report: &TelemetryReport) {
             if n == 0 {
                 continue;
             }
-            let deep = routes
+            let explicit = routes
                 .iter()
-                .filter(|r| r.trace_quality == TraceQuality::Deep)
+                .filter(|r| r.anchor_kind == AnchorKind::Explicit)
                 .count();
-            let shallow = routes
+            let framework = routes
                 .iter()
-                .filter(|r| r.trace_quality == TraceQuality::Shallow)
+                .filter(|r| r.anchor_kind == AnchorKind::FrameworkAuto)
                 .count();
             let unobserved = routes
                 .iter()
-                .filter(|r| r.trace_quality == TraceQuality::Unobserved)
+                .filter(|r| r.anchor_kind == AnchorKind::None)
                 .count();
             println!(
                 "  {} ({:>3})   {} {} ({:>3}%)  {} {} ({:>3}%)  {} {} ({:>3}%)  {}",
                 label,
                 n,
                 "●".green(),
-                fmt_count(deep, n),
-                pct(deep, n),
+                fmt_count(explicit, n),
+                pct(explicit, n),
                 "◐".yellow(),
-                fmt_count(shallow, n),
-                pct(shallow, n),
+                fmt_count(framework, n),
+                pct(framework, n),
                 "○".normal(),
                 fmt_count(unobserved, n),
                 pct(unobserved, n),
@@ -853,32 +850,32 @@ fn render_sections(report: &TelemetryReport) {
         }
     } else {
         println!("  {}Traces{}", "──".cyan(), "──".cyan());
-        let deep = report
+        let explicit = report
             .routes
             .iter()
-            .filter(|r| r.trace_quality == TraceQuality::Deep)
+            .filter(|r| r.anchor_kind == AnchorKind::Explicit)
             .count();
-        let shallow = report
+        let framework = report
             .routes
             .iter()
-            .filter(|r| r.trace_quality == TraceQuality::Shallow)
+            .filter(|r| r.anchor_kind == AnchorKind::FrameworkAuto)
             .count();
         let unobserved = report
             .routes
             .iter()
-            .filter(|r| r.trace_quality == TraceQuality::Unobserved)
+            .filter(|r| r.anchor_kind == AnchorKind::None)
             .count();
         println!(
-            "  {} deep           {} ({:>3}%)",
+            "  {} explicit       {} ({:>3}%)",
             "●".green(),
-            fmt_count(deep, total),
-            pct(deep, total)
+            fmt_count(explicit, total),
+            pct(explicit, total)
         );
         println!(
-            "  {} shallow        {} ({:>3}%)",
+            "  {} framework auto {} ({:>3}%)",
             "◐".yellow(),
-            fmt_count(shallow, total),
-            pct(shallow, total)
+            fmt_count(framework, total),
+            pct(framework, total)
         );
         println!(
             "  {} unobserved     {} ({:>3}%)",
@@ -890,23 +887,10 @@ fn render_sections(report: &TelemetryReport) {
 
         // Per-route listing
         for r in &report.routes {
-            let quality = match r.trace_quality {
-                TraceQuality::Deep => "● deep".green().to_string(),
-                TraceQuality::Shallow => "◐ shallow".yellow().to_string(),
-                TraceQuality::Unobserved => "○ unobserved".normal().to_string(),
-            };
-            let sigs: Vec<String> = r
-                .signal_kinds
-                .iter()
-                .map(|k| {
-                    let icon = k.icon_colored();
-                    format!("{} {}", icon, k.label())
-                })
-                .collect();
-            let sig_str = if sigs.is_empty() {
-                String::new()
-            } else {
-                format!("  {}", sigs.join("  "))
+            let quality = match r.anchor_kind {
+                AnchorKind::Explicit => "● explicit".green().to_string(),
+                AnchorKind::FrameworkAuto => "◐ framework".yellow().to_string(),
+                AnchorKind::None => "○ unobserved".normal().to_string(),
             };
             let loc = match r.line {
                 Some(l) => format!("{}:{}", r.file, l).bright_black(),
@@ -919,9 +903,6 @@ fn render_sections(report: &TelemetryReport) {
                 quality,
                 loc,
             );
-            if !sig_str.is_empty() {
-                println!("  {:>17}{}", "", sig_str.bright_black());
-            }
         }
     }
     println!();
@@ -1045,7 +1026,12 @@ fn render_merged(report: &TelemetryReport) {
             );
         }
 
-        println!("\n  trace: {}", format_quality_text(&r.trace_quality));
+        let trace_str = match r.anchor_kind {
+            AnchorKind::Explicit => "● explicit".green(),
+            AnchorKind::FrameworkAuto => "◐ framework auto".yellow(),
+            AnchorKind::None => "○ unobserved".normal(),
+        };
+        println!("\n  trace: {}", trace_str);
     }
 
     // Show which routes reach this function (if function target)
@@ -1123,32 +1109,32 @@ fn render_catalog(report: &TelemetryReport) {
     let read_deep = report
         .routes
         .iter()
-        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
+        .filter(|r| !is_write_method(&r.method) && r.anchor_kind == AnchorKind::Explicit)
         .count();
     let read_shallow = report
         .routes
         .iter()
-        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
+        .filter(|r| !is_write_method(&r.method) && r.anchor_kind == AnchorKind::FrameworkAuto)
         .count();
     let read_none = report
         .routes
         .iter()
-        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Unobserved)
+        .filter(|r| !is_write_method(&r.method) && r.anchor_kind == AnchorKind::None)
         .count();
     let write_deep = report
         .routes
         .iter()
-        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
+        .filter(|r| is_write_method(&r.method) && r.anchor_kind == AnchorKind::Explicit)
         .count();
     let write_shallow = report
         .routes
         .iter()
-        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
+        .filter(|r| is_write_method(&r.method) && r.anchor_kind == AnchorKind::FrameworkAuto)
         .count();
     let write_none = report
         .routes
         .iter()
-        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Unobserved)
+        .filter(|r| is_write_method(&r.method) && r.anchor_kind == AnchorKind::None)
         .count();
     let db_covered = report.db_queries.covered;
     let db_total = report.db_queries.total;
@@ -1305,24 +1291,24 @@ fn render_summary(report: &TelemetryReport) {
             if n == 0 {
                 continue;
             }
-            let deep = routes
+            let explicit = routes
                 .iter()
-                .filter(|r| r.trace_quality == TraceQuality::Deep)
+                .filter(|r| r.anchor_kind == AnchorKind::Explicit)
                 .count();
-            let shallow = routes
+            let framework = routes
                 .iter()
-                .filter(|r| r.trace_quality == TraceQuality::Shallow)
+                .filter(|r| r.anchor_kind == AnchorKind::FrameworkAuto)
                 .count();
             let unobserved = routes
                 .iter()
-                .filter(|r| r.trace_quality == TraceQuality::Unobserved)
+                .filter(|r| r.anchor_kind == AnchorKind::None)
                 .count();
             println!(
                 "  {} ({:>3})   explicit attrs {:>3}   framework auto {:>3}   no span {:>3}   {}",
                 label,
                 n,
-                deep,
-                shallow,
+                explicit,
+                framework,
                 unobserved,
                 methods.bright_black(),
             );
@@ -1391,25 +1377,6 @@ fn render_summary(report: &TelemetryReport) {
     println!();
 }
 
-// ── Helper: top directory clusters for absent logging ───────────────────────
-
-fn top_logging_clusters(logging: &[FileLogging], n: usize) -> Vec<(String, usize)> {
-    let mut dir_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    for entry in logging {
-        if entry.quality != LoggingQuality::None_ {
-            continue;
-        }
-        if let Some(parent) = std::path::Path::new(&entry.file).parent() {
-            let dir = parent.to_string_lossy().to_string();
-            if !dir.is_empty() {
-                *dir_counts.entry(dir).or_insert(0) += 1;
-            }
-        }
-    }
-    let mut sorted: Vec<(String, usize)> = dir_counts.into_iter().collect();
-    sorted.sort_by(|a, b| b.1.cmp(&a.1));
-    sorted.into_iter().take(n).collect()
-}
 
 // ── Rendering: compact (--compact flag) ───────────────────────────────────────
 
@@ -1422,24 +1389,21 @@ fn render_compact(report: &TelemetryReport) {
     println!();
 
     for r in &report.routes {
-        let quality = format_quality_text(&r.trace_quality);
-        let sigs: Vec<String> = r
-            .signal_kinds
-            .iter()
-            .map(|k| format!("{} {}", k.icon_colored(), k.label()))
-            .collect();
-        let sig_str = sigs.join(" ");
+        let quality = match r.anchor_kind {
+            AnchorKind::Explicit => "● explicit".green(),
+            AnchorKind::FrameworkAuto => "◐ framework".yellow(),
+            AnchorKind::None => "○ none".normal(),
+        };
         let loc: colored::ColoredString = match r.line {
             Some(l) => format!("  {}:{}", r.file, l).bright_black(),
             None => r.file.bright_black(),
         };
         println!(
-            "  {:<8} {}  trace:{} {:<12}  sig:{}",
+            "  {:<8} {}  {}  {}",
             format!("{}{}", r.method.magenta().bold(), ":").dimmed(),
             r.path.bright_yellow(),
             quality,
             loc,
-            sig_str.bright_black(),
         );
     }
 
@@ -1455,8 +1419,8 @@ fn render_legend() {
     println!("{}", "  ── Legend ──".bright_black());
     println!(
         "  {}  {}",
-        "trace  ● deep / ◐ shallow / ○ unobserved".dimmed(),
-        "— quality".bright_black()
+        "trace  ● explicit / ◐ framework auto / ○ unobserved".dimmed(),
+        "— span kind".bright_black()
     );
     println!(
         "  {}  {}",
@@ -1535,13 +1499,6 @@ fn is_write_method(method: &str) -> bool {
     matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
 }
 
-fn format_quality_text(q: &TraceQuality) -> colored::ColoredString {
-    match q {
-        TraceQuality::Deep => "● deep".green(),
-        TraceQuality::Shallow => "◐ shallow".yellow(),
-        TraceQuality::Unobserved => "○unobserved".normal(),
-    }
-}
 
 fn fmt_count(n: usize, total: usize) -> String {
     if total == 0 {

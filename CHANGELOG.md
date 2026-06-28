@@ -10,6 +10,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.51] — 2026-06-28
+
+### Changed
+
+- **`RouteTelemetry` schema overhauled for agent usability.**
+  - `trace_quality` (deep/shallow/unobserved) replaced by `anchor_kind`
+    (`explicit` | `framework_auto` | `none`) — a fact, not a grade.
+  - `callees` list added: every callee with `name`, `file`, `line`, `role`,
+    `depth`, and its own `anchor_kind`. Agents no longer need to re-grep.
+  - `unobserved` field added: the `UnobservedPaths` struct grouped by role
+    (`db`, `http`, `remote`, `logic`) with `deepest` path for impact sizing.
+  - `logging` and `metrics` fields added per route, co-located with the handler.
+  - `signal_kinds` and `anchor_grain` removed (superseded by above).
+- **Duplicate routes removed** from directory-level output.
+- **`LoggingQuality::None_` serializes as `"none"`** (was `"none_"`).
+
 ## [1.0.50] — 2026-06-28
 
 ### Changed
