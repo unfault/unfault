@@ -231,7 +231,6 @@ pub enum StatementKind {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RouteLogs {
     pub kind: LoggingQuality,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub library: Option<String>,
 }
 
@@ -239,7 +238,6 @@ pub struct RouteLogs {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct RouteMetrics {
     pub present: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub library: Option<String>,
 }
 
@@ -254,8 +252,8 @@ pub struct CalleeInfo {
     /// How deep from the handler (1 = direct callee).
     pub depth: i32,
     pub anchor_kind: AnchorKind,
-    /// Attributes/span-name when anchor_kind is explicit.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Attributes/span-name when anchor_kind is explicit; empty array otherwise.
+    #[serde(default)]
     pub anchor_attributes: Vec<String>,
 }
 
@@ -266,8 +264,8 @@ pub struct RouteTelemetry {
     pub handler: String,
     pub location: Location,
     pub anchor_kind: AnchorKind,
-    /// Attributes/span-name when anchor_kind is explicit.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    /// Attributes/span-name when anchor_kind is explicit; empty array otherwise.
+    #[serde(default)]
     pub anchor_attributes: Vec<String>,
     /// Counts excluding builtins and constructors.
     pub total_callees: usize,
@@ -338,10 +336,9 @@ pub struct BoundaryCallSite {
     pub in_route: String,
     pub in_function: String,
     pub anchor_kind: AnchorKind,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub anchor_attributes: Vec<String>,
-    /// For db entries: SQL verb inferred from the call expression.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// SQL verb for db entries; HTTP method for http entries; null for remote.
     pub statement_kind: Option<StatementKind>,
 }
 
@@ -695,6 +692,17 @@ fn callee_kind_from_name(name: &str) -> CalleeKind {
     CalleeKind::Function
 }
 
+fn infer_http_method_kind(call_expr: &str) -> Option<StatementKind> {
+    let last = call_expr.split('.').last().unwrap_or(call_expr).to_lowercase();
+    match last.as_str() {
+        "get" | "head" | "options" => Some(StatementKind::Select),
+        "post" => Some(StatementKind::Insert),
+        "put" | "patch" => Some(StatementKind::Update),
+        "delete" => Some(StatementKind::Delete),
+        _ => None,
+    }
+}
+
 fn infer_statement_kind(call_expr: &str) -> StatementKind {
     let last = call_expr.split('.').last().unwrap_or(call_expr).to_lowercase();
     match last.as_str() {
@@ -743,7 +751,13 @@ fn build_boundaries(routes: &[RouteTelemetry]) -> Boundaries {
                     s.statement_kind = Some(infer_statement_kind(&callee.name));
                     db.push(s);
                 }
-                NodeRole::HttpClient => http.push(site),
+                NodeRole::HttpClient => {
+                    // Infer HTTP method from call expression (e.g. "requests.get" → Select-like).
+                    // We map HTTP verbs to statement_kind for consistency.
+                    let mut s = site;
+                    s.statement_kind = infer_http_method_kind(&callee.name);
+                    http.push(s);
+                }
                 NodeRole::RemoteCall { .. } => remote.push(site),
                 _ => {}
             }

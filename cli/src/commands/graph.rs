@@ -1453,6 +1453,7 @@ fn collect_nodes<'a>(node: &'a CoverageNode, out: &mut Vec<&'a CoverageNode>) {
 }
 
 fn build_unobserved_paths(anchor: &CoverageNode) -> UnobservedPaths {
+    let anchor_file = anchor.file.clone();
     let mut by_role = UnobservedByRole::default();
     let mut deepest_depth: i32 = 0;
     let mut deepest_path: Vec<PathHop> = Vec::new();
@@ -1463,6 +1464,7 @@ fn build_unobserved_paths(anchor: &CoverageNode) -> UnobservedPaths {
     }];
     walk_unobserved_callees(
         &anchor.children,
+        &anchor_file,
         &mut path_so_far,
         1,
         &mut by_role,
@@ -1483,6 +1485,7 @@ fn build_unobserved_paths(anchor: &CoverageNode) -> UnobservedPaths {
 
 fn walk_unobserved_callees(
     children: &[CoverageNode],
+    fallback_file: &str,
     path_so_far: &mut Vec<PathHop>,
     depth: i32,
     by_role: &mut UnobservedByRole,
@@ -1490,16 +1493,17 @@ fn walk_unobserved_callees(
     deepest_path: &mut Vec<PathHop>,
 ) {
     for child in children {
+        let file = if child.file.is_empty() { fallback_file.to_string() } else { child.file.clone() };
         let mut child_path = path_so_far.clone();
         child_path.push(PathHop {
             name: child.name.clone(),
-            location: Location::new(child.file.clone(), child.line),
+            location: Location::new(file.clone(), child.line),
         });
 
         if matches!(child.span, SpanSignal::None) {
             let callee = UnobservedCallee {
                 name: child.name.clone(),
-                location: Location::new(child.file.clone(), child.line),
+                location: Location::new(file.clone(), child.line),
                 role: child.role.clone(),
                 depth,
                 path: child_path.clone(),
@@ -1518,6 +1522,7 @@ fn walk_unobserved_callees(
 
         walk_unobserved_callees(
             &child.children,
+            &file,
             &mut child_path,
             depth + 1,
             by_role,

@@ -20,19 +20,19 @@ pub mod traversal;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use petgraph::Direction;
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
+use petgraph::Direction;
 use serde::{Deserialize, Serialize};
 
 // Re-export NodeIndex so downstream crates don't need a direct petgraph dependency
 pub use petgraph::graph::NodeIndex as GraphNodeIndex;
 
 use crate::parse::ast::FileId;
-use crate::semantics::SourceSemantics;
 use crate::semantics::common::CommonSemantics;
 use crate::semantics::python::fastapi::FastApiFileSummary;
 use crate::semantics::python::model::PyFileSemantics;
+use crate::semantics::SourceSemantics;
 use crate::types::context::Language;
 use unfault_core::semantics::python::flask::FlaskFileSummary;
 
@@ -942,7 +942,7 @@ fn add_function_nodes(
             http_path: None,
             decorators: vec![],
             is_writer: false,
-            line: None,
+            line: Some(func.location.line),
             column: None,
             request_schema: None,
             response_schema: None,
@@ -1146,12 +1146,17 @@ fn add_fastapi_nodes(
                 ref mut http_method,
                 ref mut http_path,
                 ref mut is_handler,
+                ref mut line,
                 ..
             } = cg.graph[fn_idx]
             {
                 *is_handler = true;
                 *http_method = Some(route.http_method.clone());
                 *http_path = Some(full_path.clone());
+                // Prefer the route's location if the function node has no line yet.
+                if line.is_none() {
+                    *line = Some(route.location.range.start_line);
+                }
             }
         }
     }
@@ -1197,7 +1202,7 @@ fn add_flask_nodes(
             http_path: Some(route.path.clone()),
             decorators: vec![],
             is_writer: false,
-            line: None,
+            line: Some(route.location.range.start_line),
             column: None,
             request_schema: None,
             response_schema: None,
@@ -1217,8 +1222,8 @@ mod tests {
     use super::*;
     use crate::parse::ast::FileId;
     use crate::parse::python::parse_python_file;
-    use crate::semantics::SourceSemantics;
     use crate::semantics::python::model::PyFileSemantics;
+    use crate::semantics::SourceSemantics;
     use crate::types::context::{Language, SourceFile};
 
     /// Helper to parse Python source and build semantics with framework analysis
@@ -1530,14 +1535,12 @@ async def fetch_user(user_id):
         assert!(stats.function_count >= 2);
 
         // Functions should be in lookup
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "process_data".to_string()))
-        );
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "fetch_user".to_string()))
-        );
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "process_data".to_string())));
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "fetch_user".to_string())));
     }
 
     #[test]
@@ -1854,14 +1857,12 @@ def handler():
         let cg = build_code_graph(&sem_entries);
 
         // Both functions should be in the graph
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "helper".to_string()))
-        );
-        assert!(
-            cg.function_nodes
-                .contains_key(&(file_id, "handler".to_string()))
-        );
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "helper".to_string())));
+        assert!(cg
+            .function_nodes
+            .contains_key(&(file_id, "handler".to_string())));
 
         // There should be a Calls edge from handler -> helper
         let handler_idx = *cg

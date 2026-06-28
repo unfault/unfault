@@ -10,6 +10,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.54] — 2026-06-28
+
+### Fixed
+
+- **Route handler `location.line` now populated** for FastAPI, Flask, and all
+  other language handlers. The graph builder was setting `line: None` on
+  handler `Function` nodes; it now reads from `func.location.line` (general
+  case) and `route.location.range.start_line` (framework-specific back-fill).
+
+### Changed
+
+- **`anchor_attributes`, `logs.library`, `metrics.library` always emitted.**
+  Previously omitted when empty/null; now always present so agents don't need
+  to handle absent keys.
+
+- **`unobserved.by_role` entries inherit anchor file** when callee file is
+  empty, consistent with the callee list fallback added in v1.0.52.
+
+- **HTTP boundary `statement_kind`** inferred from call expression
+  (`get`→select, `post`→insert, `put`/`patch`→update, `delete`→delete).
+
+- **`statement_kind` always present** on `BoundaryCallSite` (null for remote
+  and unrecognised http calls).
+
 ## [1.0.53] — 2026-06-28
 
 ### Changed
