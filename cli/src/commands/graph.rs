@@ -2032,25 +2032,28 @@ fn stub_callees_from_raw_calls(
         // Skip rules that apply ONLY to plain logic calls (never to known
         // boundaries — db_session.get must survive).
         if matches!(inferred_role, NodeRole::Logic) {
-            // Drop dunder methods, very short names, and the obvious noise.
+            // Drop dunder methods and very short names.
             if name.len() < 3 || (name.starts_with('_') && name.ends_with('_')) {
                 continue;
             }
-            // Match case-insensitively so both `Depends` (FastAPI marker)
-            // and `depends` are dropped.
+            // Drop Python/JS builtins, framework markers, response constructors.
+            // Capitalized single-word names are almost always constructors or
+            // type references (Response, PublishResponse, HTTPException, Any).
+            let first_char = name.chars().next().unwrap_or('a');
+            if first_char.is_uppercase() {
+                continue;
+            }
             const LOGIC_SKIP: &[&str] = &[
-                "depends",
-                "depend",
-                "httpexception",
-                "isinstance",
-                "len",
-                "str",
-                "int",
-                "list",
-                "dict",
-                "tuple",
-                "set",
-                "print",
+                // Python builtins
+                "any", "all", "map", "filter", "zip", "sorted", "reversed",
+                "enumerate", "range", "iter", "next", "len", "str", "int",
+                "float", "bool", "list", "dict", "tuple", "set", "type",
+                "print", "repr", "hash", "id", "callable", "getattr",
+                "setattr", "hasattr", "delattr", "super", "vars", "dir",
+                // FastAPI / Starlette markers
+                "depends", "depend",
+                // Common JS/TS globals
+                "console", "promise", "object", "array", "json",
             ];
             let name_lower = name.to_lowercase();
             if LOGIC_SKIP.contains(&name_lower.as_str()) {
@@ -2065,20 +2068,40 @@ fn stub_callees_from_raw_calls(
             continue;
         }
 
-        // See if there's a resolved Function node in the graph with this name
-        // (could be same file or cross-file that was resolved).
-        let resolved = graph.graph.node_indices().find(|&idx| {
-            if let GraphNode::Function {
-                name: fn_name,
-                file_id: fid,
-                ..
-            } = &graph.graph[idx]
-            {
-                fn_name == name && fid == file_id
+        // See if there's a resolved Function node in the graph with this name.
+        // First try same-file resolution; if that fails, try a global search
+        // and use the result only when unambiguous (exactly one match).
+        let resolved = {
+            let same_file = graph.graph.node_indices().find(|&idx| {
+                if let GraphNode::Function {
+                    name: fn_name,
+                    file_id: fid,
+                    ..
+                } = &graph.graph[idx]
+                {
+                    fn_name == name && fid == file_id
+                } else {
+                    false
+                }
+            });
+            if same_file.is_some() {
+                same_file
             } else {
-                false
+                // Global search — only use if unambiguous.
+                let matches: Vec<_> = graph
+                    .graph
+                    .node_indices()
+                    .filter(|&idx| {
+                        if let GraphNode::Function { name: fn_name, .. } = &graph.graph[idx] {
+                            fn_name == name
+                        } else {
+                            false
+                        }
+                    })
+                    .collect();
+                if matches.len() == 1 { Some(matches[0]) } else { None }
             }
-        });
+        };
 
         let (file, line, span, role) = if let Some(idx) = resolved {
             let node = &graph.graph[idx];

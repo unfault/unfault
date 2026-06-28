@@ -257,10 +257,32 @@ pub struct FileMetrics {
     pub library: Option<String>,
 }
 
+/// A single boundary call site with location, for the flat aggregator view.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BoundaryStats {
-    pub total: usize,
-    pub covered: usize,
+pub struct BoundaryCallSite {
+    /// Call expression or function name.
+    pub name: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// The route handler that contains this call.
+    pub in_route: String,
+    /// The direct enclosing function (may equal in_route for shallow calls).
+    pub in_function: String,
+    pub anchor_kind: AnchorKind,
+}
+
+/// Flat inventory of all boundary call sites across the report, grouped by
+/// kind. Lets an agent answer "all unobserved http calls" without walking
+/// every route.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct Boundaries {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub db: Vec<BoundaryCallSite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http: Vec<BoundaryCallSite>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote: Vec<BoundaryCallSite>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -272,10 +294,8 @@ pub struct TelemetryReport {
     pub logging: Vec<FileLogging>,
     /// Per-file metrics, used for directory-level catalog view.
     pub metrics: Vec<FileMetrics>,
-    /// Directory-level boundary totals (counts only, for summary view).
-    pub db_queries: BoundaryStats,
-    pub http_clients: BoundaryStats,
-    pub remote_calls: BoundaryStats,
+    /// Flat aggregator view of all boundary call sites across all routes.
+    pub boundaries: Boundaries,
 }
 
 // ── Analysis: scope (directory / file) ────────────────────────────────────────
@@ -318,15 +338,8 @@ fn analyze_file_list(
     verbose: bool,
 ) -> Option<TelemetryReport> {
     let mut routes: Vec<RouteTelemetry> = Vec::new();
-    let mut all_db = 0usize;
-    let mut all_db_covered = 0usize;
-    let mut all_http = 0usize;
-    let mut all_http_covered = 0usize;
-    let mut all_remote = 0usize;
-    let mut all_remote_covered = 0usize;
 
     for file_path in files {
-        // Find all route handler functions in this file
         let handlers: Vec<(String, String, String, Option<u32>)> = graph
             .graph
             .node_indices()
@@ -355,17 +368,10 @@ fn analyze_file_list(
         let fl = file_logging_quality(graph, file_path);
         let fm = file_metrics(graph, file_path);
         for (method, path, handler, line) in &handlers {
-            // Deduplicate: skip if we already have this (method, path, handler) triple
             if routes.iter().any(|r: &RouteTelemetry| r.method == *method && r.path == *path && r.handler == *handler) {
                 continue;
             }
             if let Some(rt) = analyze_single_route(graph, path, Some(method), verbose) {
-                all_db += rt.db_queries.total;
-                all_db_covered += rt.db_queries.covered;
-                all_http += rt.http_clients.total;
-                all_http_covered += rt.http_clients.covered;
-                all_remote += rt.remote_calls.total;
-                all_remote_covered += rt.remote_calls.covered;
                 routes.push(RouteTelemetry {
                     method: method.clone(),
                     path: path.clone(),
@@ -392,6 +398,7 @@ fn analyze_file_list(
         .collect();
 
     let metrics: Vec<FileMetrics> = files.iter().map(|f| file_metrics(graph, f)).collect();
+    let boundaries = build_boundaries(&routes);
 
     Some(TelemetryReport {
         target: target.to_string(),
@@ -399,18 +406,7 @@ fn analyze_file_list(
         routes,
         logging,
         metrics,
-        db_queries: BoundaryStats {
-            total: all_db,
-            covered: all_db_covered,
-        },
-        http_clients: BoundaryStats {
-            total: all_http,
-            covered: all_http_covered,
-        },
-        remote_calls: BoundaryStats {
-            total: all_remote,
-            covered: all_remote_covered,
-        },
+        boundaries,
     })
 }
 
@@ -422,9 +418,6 @@ struct RouteTraversal {
     instrumented_callees: usize,
     callees: Vec<CalleeInfo>,
     unobserved: UnobservedPaths,
-    db_queries: BoundaryStats,
-    http_clients: BoundaryStats,
-    remote_calls: BoundaryStats,
 }
 
 fn analyze_route(
@@ -441,32 +434,31 @@ fn analyze_route(
 
     let fl = file_logging_quality(graph, &anchor_file);
     let fm = file_metrics(graph, &anchor_file);
+    let routes_vec = vec![RouteTelemetry {
+        method: ctx.anchor.role.method_str().unwrap_or_default().to_string(),
+        path: ctx.anchor.role.path_str().unwrap_or_default().to_string(),
+        handler: ctx.anchor.name.clone(),
+        file: anchor_file.clone(),
+        line: ctx.anchor.line,
+        anchor_kind: rt.anchor_kind,
+        total_callees: rt.total_callees,
+        instrumented_callees: rt.instrumented_callees,
+        callees: rt.callees,
+        unobserved: rt.unobserved,
+        logging: fl.quality,
+        logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
+        metrics: fm.present,
+        metrics_library: fm.library,
+    }];
     let report = TelemetryReport {
         target: format!("{} {}", ctx.anchor.role.method_str().unwrap_or(""), path)
             .trim()
             .to_string(),
         target_kind: "route".to_string(),
-        routes: vec![RouteTelemetry {
-            method: ctx.anchor.role.method_str().unwrap_or_default().to_string(),
-            path: ctx.anchor.role.path_str().unwrap_or_default().to_string(),
-            handler: ctx.anchor.name.clone(),
-            file: anchor_file.clone(),
-            line: ctx.anchor.line,
-            anchor_kind: rt.anchor_kind,
-            total_callees: rt.total_callees,
-            instrumented_callees: rt.instrumented_callees,
-            callees: rt.callees,
-            unobserved: rt.unobserved,
-            logging: fl.quality,
-            logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
-            metrics: fm.present,
-            metrics_library: fm.library,
-        }],
         logging: vec![file_logging_quality(graph, &anchor_file)],
         metrics: vec![file_metrics(graph, &anchor_file)],
-        db_queries: rt.db_queries,
-        http_clients: rt.http_clients,
-        remote_calls: rt.remote_calls,
+        boundaries: build_boundaries(&routes_vec),
+        routes: routes_vec,
     };
 
     Some(report)
@@ -481,30 +473,29 @@ fn analyze_function(graph: &CodeGraph, name: &str, verbose: bool) -> Option<Tele
 
     let fl = file_logging_quality(graph, &anchor_file);
     let fm = file_metrics(graph, &anchor_file);
+    let routes_vec = vec![RouteTelemetry {
+        method: ctx.anchor.role.method_str().unwrap_or_default().to_string(),
+        path: ctx.anchor.role.path_str().unwrap_or_default().to_string(),
+        handler: ctx.anchor.name.clone(),
+        file: anchor_file.clone(),
+        line: ctx.anchor.line,
+        anchor_kind: rt.anchor_kind,
+        total_callees: rt.total_callees,
+        instrumented_callees: rt.instrumented_callees,
+        callees: rt.callees,
+        unobserved: rt.unobserved,
+        logging: fl.quality,
+        logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
+        metrics: fm.present,
+        metrics_library: fm.library,
+    }];
     let report = TelemetryReport {
         target: name.to_string(),
         target_kind: "function".to_string(),
-        routes: vec![RouteTelemetry {
-            method: ctx.anchor.role.method_str().unwrap_or_default().to_string(),
-            path: ctx.anchor.role.path_str().unwrap_or_default().to_string(),
-            handler: ctx.anchor.name.clone(),
-            file: anchor_file.clone(),
-            line: ctx.anchor.line,
-            anchor_kind: rt.anchor_kind,
-            total_callees: rt.total_callees,
-            instrumented_callees: rt.instrumented_callees,
-            callees: rt.callees,
-            unobserved: rt.unobserved,
-            logging: fl.quality,
-            logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
-            metrics: fm.present,
-            metrics_library: fm.library,
-        }],
         logging: vec![file_logging_quality(graph, &anchor_file)],
         metrics: vec![file_metrics(graph, &anchor_file)],
-        db_queries: rt.db_queries,
-        http_clients: rt.http_clients,
-        remote_calls: rt.remote_calls,
+        boundaries: build_boundaries(&routes_vec),
+        routes: routes_vec,
     };
 
     Some(report)
@@ -547,23 +538,12 @@ fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
         .filter(|c| c.anchor_kind != AnchorKind::None)
         .count();
 
-    // Boundary stats from callee list
-    let db_total = callees.iter().filter(|c| matches!(c.role, NodeRole::Database)).count();
-    let db_covered = callees.iter().filter(|c| matches!(c.role, NodeRole::Database) && c.anchor_kind != AnchorKind::None).count();
-    let http_total = callees.iter().filter(|c| matches!(c.role, NodeRole::HttpClient)).count();
-    let http_covered = callees.iter().filter(|c| matches!(c.role, NodeRole::HttpClient) && c.anchor_kind != AnchorKind::None).count();
-    let remote_total = callees.iter().filter(|c| matches!(c.role, NodeRole::RemoteCall { .. })).count();
-    let remote_covered = callees.iter().filter(|c| matches!(c.role, NodeRole::RemoteCall { .. }) && c.anchor_kind != AnchorKind::None).count();
-
     RouteTraversal {
         anchor_kind: span_to_anchor_kind(&ctx.anchor.span),
         total_callees,
         instrumented_callees,
         callees,
         unobserved: ctx.unobserved_paths.clone(),
-        db_queries: BoundaryStats { total: db_total, covered: db_covered },
-        http_clients: BoundaryStats { total: http_total, covered: http_covered },
-        remote_calls: BoundaryStats { total: remote_total, covered: remote_covered },
     }
 }
 
@@ -573,6 +553,39 @@ fn span_to_anchor_kind(span: &SpanSignal) -> AnchorKind {
         SpanSignal::AutoInstrumented { .. } => AnchorKind::FrameworkAuto,
         SpanSignal::None => AnchorKind::None,
     }
+}
+
+/// Build the flat cross-route boundary inventory from the assembled route list.
+fn build_boundaries(routes: &[RouteTelemetry]) -> Boundaries {
+    let mut db: Vec<BoundaryCallSite> = Vec::new();
+    let mut http: Vec<BoundaryCallSite> = Vec::new();
+    let mut remote: Vec<BoundaryCallSite> = Vec::new();
+
+    for route in routes {
+        let route_label = if route.method.is_empty() {
+            route.path.clone()
+        } else {
+            format!("{} {}", route.method, route.path)
+        };
+        for callee in &route.callees {
+            let site = BoundaryCallSite {
+                name: callee.name.clone(),
+                file: callee.file.clone(),
+                line: callee.line,
+                in_route: route_label.clone(),
+                in_function: route.handler.clone(),
+                anchor_kind: callee.anchor_kind.clone(),
+            };
+            match &callee.role {
+                NodeRole::Database => db.push(site),
+                NodeRole::HttpClient => http.push(site),
+                NodeRole::RemoteCall { .. } => remote.push(site),
+                _ => {}
+            }
+        }
+    }
+
+    Boundaries { db, http, remote }
 }
 
 // ── Helpers: find nodes ───────────────────────────────────────────────────────
@@ -1136,10 +1149,10 @@ fn render_catalog(report: &TelemetryReport) {
         .iter()
         .filter(|r| is_write_method(&r.method) && r.anchor_kind == AnchorKind::None)
         .count();
-    let db_covered = report.db_queries.covered;
-    let db_total = report.db_queries.total;
-    let http_covered = report.http_clients.covered;
-    let http_total = report.http_clients.total;
+    let db_total = report.boundaries.db.len();
+    let db_covered = report.boundaries.db.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let http_total = report.boundaries.http.len();
+    let http_covered = report.boundaries.http.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
 
     println!();
     println!("Telemetry in {}", report.target.bright_white().bold());
@@ -1433,64 +1446,45 @@ fn render_legend() {
 // ── Shared rendering helpers ─────────────────────────────────────────────────
 
 fn render_boundaries_section(report: &TelemetryReport) {
-    let has_boundaries = report.db_queries.total > 0
-        || report.http_clients.total > 0
-        || report.remote_calls.total > 0;
+    let b = &report.boundaries;
+    let has_boundaries = !b.db.is_empty() || !b.http.is_empty() || !b.remote.is_empty();
 
+    println!("  {}Boundaries{}", "──".cyan(), "──".cyan());
     if !has_boundaries {
-        println!("  {}Boundaries{}", "──".cyan(), "──".cyan());
         println!("  No downstream calls detected.");
         return;
     }
 
-    println!("  {}Boundaries{}", "──".cyan(), "──".cyan());
-    render_boundary_row("db queries", &report.db_queries);
-    render_boundary_row("http clients", &report.http_clients);
-    render_boundary_row("remote calls", &report.remote_calls);
+    render_boundary_group("db queries", &b.db);
+    render_boundary_group("http clients", &b.http);
+    render_boundary_group("remote calls", &b.remote);
 }
 
-fn render_boundary_row(label: &str, stats: &BoundaryStats) {
-    if stats.total == 0 {
-        let pct_str = "–".dimmed();
-        println!("  {:<16}  0 /  0  {}", label.dimmed(), pct_str);
+fn render_boundary_group(label: &str, sites: &[BoundaryCallSite]) {
+    if sites.is_empty() {
         return;
     }
-    let pct = (stats.covered as f64 / stats.total as f64 * 100.0) as usize;
-    let icon = if pct == 100 {
-        "●".green()
-    } else if pct > 0 {
-        "◐".yellow()
-    } else {
-        "○".normal()
-    };
+    let total = sites.len();
+    let covered = sites.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let pct = (covered as f64 / total as f64 * 100.0) as usize;
+    let icon = if pct == 100 { "●".green() } else if pct > 0 { "◐".yellow() } else { "○".normal() };
     let pct_str = format!("{}%", pct);
-    let colored_pct = if pct == 100 {
-        pct_str.green()
-    } else if pct >= 50 {
-        pct_str.yellow()
-    } else {
-        pct_str.red()
-    };
-    println!(
-        "  {}  {:<16} {:>2} / {:>2}  {}",
-        icon, label, stats.covered, stats.total, colored_pct,
-    );
+    let colored_pct = if pct == 100 { pct_str.green() } else if pct >= 50 { pct_str.yellow() } else { pct_str.red() };
+    println!("  {}  {:<16} {:>2} / {:>2}  {}", icon, label, covered, total, colored_pct);
 }
 
 fn render_boundaries_line(report: &TelemetryReport) {
+    let b = &report.boundaries;
+    let db_total = b.db.len();
+    let db_covered = b.db.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let http_total = b.http.len();
+    let http_covered = b.http.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let remote_total = b.remote.len();
+    let remote_covered = b.remote.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
     let parts: Vec<String> = vec![
-        format!(
-            "db {} / {}",
-            report.db_queries.covered, report.db_queries.total
-        ),
-        format!(
-            "http {} / {}",
-            report.http_clients.covered, report.http_clients.total
-        ),
-        format!(
-            "remote {} / {}",
-            report.remote_calls.covered, report.remote_calls.total
-        ),
+        format!("db {} / {}", db_covered, db_total),
+        format!("http {} / {}", http_covered, http_total),
+        format!("remote {} / {}", remote_covered, remote_total),
     ];
     println!("  boundaries:  {}", parts.join("    ").bright_black());
 }

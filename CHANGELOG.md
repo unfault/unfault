@@ -10,6 +10,30 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.52] — 2026-06-28
+
+### Added
+
+- **`boundaries` flat list on `TelemetryReport`.**
+  Replaces the old `db_queries`/`http_clients`/`remote_calls` count-only
+  structs with a `Boundaries` struct containing flat lists of
+  `BoundaryCallSite` entries (name, file, line, in_route, in_function,
+  anchor_kind). Agents can now answer "all unobserved http call sites" without
+  walking every route.
+
+### Changed
+
+- **Callee noise filter extended.**
+  Python builtins (`any`, `all`, `map`, `filter`, `zip`, etc.) and
+  capitalized single-word names (constructors, type references, response
+  wrappers) are now filtered from the stub callee list.
+
+- **Cross-module stub resolution improved.**
+  When a stub callee has no same-file match, a global graph search resolves
+  it to a real node if and only if the name is unambiguous (exactly one
+  `Function` node with that name). This fills `file`/`line` for most
+  cross-module callees that previously showed as empty.
+
 ## [1.0.51] — 2026-06-28
 
 ### Changed
