@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.46] — 2026-06-28
+
+### Changed
+
+- **`unfault telemetry` directory view now groups traces by method**
+  (──Traces by Method──) with read/write breakdown, method annotations
+  at end of each line, compact legend with trace/log prefixes, and no
+  per-route/per-file detail. Merged view omits redundant signal-kind
+  icon from the trace line.
+
 ## [1.0.45] — 2026-06-28
 
 ### Fixed

@@ -778,7 +778,10 @@ fn render_sections(report: &TelemetryReport) {
             .iter()
             .filter(|r| is_write_method(&r.method))
             .collect();
-        for (routes, label) in [(&reads, "read "), (&writes, "write")] {
+        for (routes, label, methods) in [
+            (&reads, "read ", "(GET)"),
+            (&writes, "write", "(POST/PUT/PATCH/DELETE)"),
+        ] {
             let n = routes.len();
             if n == 0 {
                 continue;
@@ -796,7 +799,7 @@ fn render_sections(report: &TelemetryReport) {
                 .filter(|r| r.trace_quality == TraceQuality::Unobserved)
                 .count();
             println!(
-                "  {} ({:>3})   {} {} ({:>3}%)  {} {} ({:>3}%)  {} {} ({:>3}%)",
+                "  {} ({:>3})   {} {} ({:>3}%)  {} {} ({:>3}%)  {} {} ({:>3}%)  {}",
                 label,
                 n,
                 "●".green(),
@@ -808,6 +811,7 @@ fn render_sections(report: &TelemetryReport) {
                 "○".normal(),
                 fmt_count(unobserved, n),
                 pct(unobserved, n),
+                methods.bright_black(),
             );
         }
     } else {
@@ -1087,21 +1091,17 @@ fn render_compact(report: &TelemetryReport) {
 // ── Legend ────────────────────────────────────────────────────────────────────
 
 fn render_legend() {
+    println!();
     println!("{}", "  ── Legend ──".bright_black());
     println!(
         "  {}  {}",
-        "● deep / ◐ shallow / ○ unobserved".dimmed(),
-        "— trace quality".bright_black()
+        "trace  ● deep / ◐ shallow / ○ unobserved".dimmed(),
+        "— quality".bright_black()
     );
     println!(
         "  {}  {}",
-        "◉ structured / ○ plain / · none".dimmed(),
-        "— logging quality".bright_black()
-    );
-    println!(
-        "  {}  {}",
-        "◉ trace / ≡ log / ⬡ metric / ✖ err".dimmed(),
-        "— signal kind".bright_black()
+        "log    ◉ structured / ○ plain / · none".dimmed(),
+        "— quality".bright_black()
     );
     println!();
 }
