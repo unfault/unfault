@@ -894,48 +894,63 @@ pub struct CoverageTreeSummary {
     pub remote_calls: usize,
 }
 
+/// A resolved source location.  `line` may be None when the parser didn't
+/// record it; `file` is never empty (falls back to the caller's file).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Location {
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
+impl Location {
+    pub fn new(file: impl Into<String>, line: Option<u32>) -> Self {
+        Self { file: file.into(), line }
+    }
+}
+
 /// A single callee that produces no signal — useful for agents hunting for
 /// observability gaps that could hinder debugging.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct UnobservedCallee {
     pub name: String,
-    pub file: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
+    pub location: Location,
     /// What kind of work (db, http, remote, logic).
     pub role: NodeRole,
     /// How far from the anchor (1 = direct callee of the handler).
     pub depth: i32,
-    /// Full call path from the anchor, e.g.
-    /// ["POST /orders", "create_order", "pricing.calculate"]
-    pub path: Vec<String>,
+    /// Full call path from the anchor as location-bearing hops.
+    pub path: Vec<PathHop>,
 }
 
-/// Flattened inventory of every unobserved callee in the coverage tree,
-/// grouped by boundary type so agents can answer "which db calls have no
-/// span?" in one field access instead of walking the full tree.
+/// A single hop in an unobserved call path.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct PathHop {
+    pub name: String,
+    pub location: Location,
+}
+
+/// Flattened inventory of every unobserved callee in the coverage tree.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct UnobservedByRole {
+    #[serde(default)]
+    pub database: Vec<UnobservedCallee>,
+    #[serde(default)]
+    pub http: Vec<UnobservedCallee>,
+    #[serde(default)]
+    pub remote: Vec<UnobservedCallee>,
+    #[serde(default)]
+    pub logic: Vec<UnobservedCallee>,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct UnobservedPaths {
-    /// Total across all groups.
     pub total: usize,
-    /// True when the anchor node itself has no span — everything below is
-    /// effectively invisible.
     pub anchor_unobserved: bool,
-    /// Database calls with no span.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub db: Vec<UnobservedCallee>,
-    /// HTTP client calls with no span.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub http: Vec<UnobservedCallee>,
-    /// Cross-service remote calls with no span.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub remote: Vec<UnobservedCallee>,
-    /// Business-logic nodes with no span.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub logic: Vec<UnobservedCallee>,
-    /// The path from anchor to the deepest unobserved callee, for impact sizing.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub deepest: Vec<String>,
+    pub by_role: UnobservedByRole,
+    /// Path from anchor to the deepest unobserved callee.
+    #[serde(default)]
+    pub deepest: Vec<PathHop>,
 }
 
 /// Top-level result returned by execute_coverage.
@@ -1438,69 +1453,62 @@ fn collect_nodes<'a>(node: &'a CoverageNode, out: &mut Vec<&'a CoverageNode>) {
 }
 
 fn build_unobserved_paths(anchor: &CoverageNode) -> UnobservedPaths {
-    let mut db: Vec<UnobservedCallee> = Vec::new();
-    let mut http: Vec<UnobservedCallee> = Vec::new();
-    let mut remote: Vec<UnobservedCallee> = Vec::new();
-    let mut logic: Vec<UnobservedCallee> = Vec::new();
+    let mut by_role = UnobservedByRole::default();
     let mut deepest_depth: i32 = 0;
-    let mut deepest_path: Vec<String> = Vec::new();
+    let mut deepest_path: Vec<PathHop> = Vec::new();
 
-    let mut path_so_far = vec![anchor.name.clone()];
+    let mut path_so_far = vec![PathHop {
+        name: anchor.name.clone(),
+        location: Location::new(anchor.file.clone(), anchor.line),
+    }];
     walk_unobserved_callees(
         &anchor.children,
         &mut path_so_far,
         1,
-        &mut db,
-        &mut http,
-        &mut remote,
-        &mut logic,
+        &mut by_role,
         &mut deepest_depth,
         &mut deepest_path,
     );
 
-    let total = db.len() + http.len() + remote.len() + logic.len();
+    let total = by_role.database.len() + by_role.http.len() + by_role.remote.len() + by_role.logic.len();
     let anchor_unobserved = matches!(anchor.span, SpanSignal::None);
 
     UnobservedPaths {
         total,
         anchor_unobserved,
-        db,
-        http,
-        remote,
-        logic,
+        by_role,
         deepest: deepest_path,
     }
 }
 
 fn walk_unobserved_callees(
     children: &[CoverageNode],
-    path_so_far: &mut Vec<String>,
+    path_so_far: &mut Vec<PathHop>,
     depth: i32,
-    db: &mut Vec<UnobservedCallee>,
-    http: &mut Vec<UnobservedCallee>,
-    remote: &mut Vec<UnobservedCallee>,
-    logic: &mut Vec<UnobservedCallee>,
+    by_role: &mut UnobservedByRole,
     deepest_depth: &mut i32,
-    deepest_path: &mut Vec<String>,
+    deepest_path: &mut Vec<PathHop>,
 ) {
     for child in children {
         let mut child_path = path_so_far.clone();
-        child_path.push(child.name.clone());
+        child_path.push(PathHop {
+            name: child.name.clone(),
+            location: Location::new(child.file.clone(), child.line),
+        });
 
         if matches!(child.span, SpanSignal::None) {
             let callee = UnobservedCallee {
                 name: child.name.clone(),
-                file: child.file.clone(),
-                line: child.line,
+                location: Location::new(child.file.clone(), child.line),
                 role: child.role.clone(),
                 depth,
                 path: child_path.clone(),
             };
             match &child.role {
-                NodeRole::Database => db.push(callee),
-                NodeRole::HttpClient => http.push(callee),
-                NodeRole::RemoteCall { .. } => remote.push(callee),
-                _ => logic.push(callee),
+                NodeRole::Database => by_role.database.push(callee),
+                NodeRole::HttpClient => by_role.http.push(callee),
+                NodeRole::RemoteCall { .. } => by_role.remote.push(callee),
+                _ => by_role.logic.push(callee),
             }
             if depth > *deepest_depth {
                 *deepest_depth = depth;
@@ -1512,10 +1520,7 @@ fn walk_unobserved_callees(
             &child.children,
             &mut child_path,
             depth + 1,
-            db,
-            http,
-            remote,
-            logic,
+            by_role,
             deepest_depth,
             deepest_path,
         );

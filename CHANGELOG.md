@@ -10,6 +10,43 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.53] — 2026-06-28
+
+### Changed
+
+- **Full schema overhaul to match the output contract.**
+
+  Every named thing now carries `location: { file, line }` instead of flat
+  `file` + `line` fields.  File is never empty: unresolved callees fall back
+  to the handler's file so an agent always lands in the right file.
+
+  `RouteTelemetry` gains:
+  - `location` (was flat `file`/`line`)
+  - `anchor_attributes` — span name / SDK library when `anchor_kind` is explicit
+  - `logs: { kind, library }` (was flat `logging` + `logging_library`)
+  - `metrics: { present, library }` (was flat `metrics` + `metrics_library`)
+
+  `CalleeInfo` gains `kind: function | method | builtin | construct` and
+  `anchor_attributes`.  Counts (`total_callees`, `instrumented_callees`)
+  now exclude builtins and constructors.
+
+  `BoundaryCallSite` gains `kind`, `location`, `anchor_attributes`, and
+  `statement_kind` (select/insert/update/delete/commit/rollback/raw/other)
+  for db entries.  `db`, `http`, and `remote` arrays are always present
+  in `Boundaries` even when empty.
+
+  `UnobservedPaths` restructured: groups moved into `by_role: { database,
+  http, remote, logic }`.  `deepest` is now `[{ name, location }]` instead
+  of bare strings.
+
+  `TelemetryReport` gains `corpus: { files, routes_total, routes_read,
+  routes_write }`.  `logging` and `metrics` are now `{ files, clusters }`
+  sections; clusters group files by path prefix (min 5 files) with a
+  quality breakdown.
+
+  `target_kind` vocabulary: `"route"` and `"function"` unified to `"module"`.
+  `"file"` and `"directory"` unchanged.
+
 ## [1.0.52] — 2026-06-28
 
 ### Added

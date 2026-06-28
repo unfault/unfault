@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 
 use crate::commands::graph::{
-    CoverageContext, CoverageNode, NodeRole, SignalKind, SpanSignal, UnobservedPaths,
+    CoverageContext, CoverageNode, Location, NodeRole, SignalKind, SpanSignal, UnobservedPaths,
     build_coverage_context, build_graph_with_spinner,
 };
 use crate::exit_codes::*;
@@ -203,17 +203,60 @@ impl LoggingQuality {
 
 // ── Report types ──────────────────────────────────────────────────────────────
 
-/// A single callee in the route's call tree, with its instrumentation state.
+/// Syntactic kind of a callee call site.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CalleeKind {
+    Function,
+    Method,
+    Builtin,
+    Construct,
+}
+
+/// SQL-level statement kind inferred from the call expression.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StatementKind {
+    Select,
+    Insert,
+    Update,
+    Delete,
+    Commit,
+    Rollback,
+    Raw,
+    Other,
+}
+
+/// Per-route logging signal.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RouteLogs {
+    pub kind: LoggingQuality,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library: Option<String>,
+}
+
+/// Per-route metrics signal.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RouteMetrics {
+    pub present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library: Option<String>,
+}
+
+/// A single callee in the route's call tree.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CalleeInfo {
     pub name: String,
-    pub file: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
+    pub location: Location,
     pub role: NodeRole,
+    /// Syntactic kind of the call site.
+    pub kind: CalleeKind,
     /// How deep from the handler (1 = direct callee).
     pub depth: i32,
     pub anchor_kind: AnchorKind,
+    /// Attributes/span-name when anchor_kind is explicit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchor_attributes: Vec<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -221,26 +264,18 @@ pub struct RouteTelemetry {
     pub method: String,
     pub path: String,
     pub handler: String,
-    pub file: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
-    /// What kind of span the handler itself carries.
+    pub location: Location,
     pub anchor_kind: AnchorKind,
+    /// Attributes/span-name when anchor_kind is explicit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchor_attributes: Vec<String>,
+    /// Counts excluding builtins and constructors.
     pub total_callees: usize,
     pub instrumented_callees: usize,
-    /// Flat list of all callees with their instrumentation state.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub callees: Vec<CalleeInfo>,
-    /// All callees with no span, grouped by role.
     pub unobserved: UnobservedPaths,
-    /// Logging quality for the file this handler lives in.
-    pub logging: LoggingQuality,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub logging_library: Option<String>,
-    /// Whether the handler's file emits metrics.
-    pub metrics: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub metrics_library: Option<String>,
+    pub logs: RouteLogs,
+    pub metrics: RouteMetrics,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -257,31 +292,76 @@ pub struct FileMetrics {
     pub library: Option<String>,
 }
 
-/// A single boundary call site with location, for the flat aggregator view.
+/// A logging cluster — files grouped by path prefix with quality breakdown.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct BoundaryCallSite {
-    /// Call expression or function name.
-    pub name: String,
-    pub file: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub line: Option<u32>,
-    /// The route handler that contains this call.
-    pub in_route: String,
-    /// The direct enclosing function (may equal in_route for shallow calls).
-    pub in_function: String,
-    pub anchor_kind: AnchorKind,
+pub struct LoggingCluster {
+    pub path_prefix: String,
+    pub file_count: usize,
+    pub quality_breakdown: LoggingBreakdown,
 }
 
-/// Flat inventory of all boundary call sites across the report, grouped by
-/// kind. Lets an agent answer "all unobserved http calls" without walking
-/// every route.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LoggingBreakdown {
+    pub structured: usize,
+    pub plain: usize,
+    pub none: usize,
+}
+
+/// Logging section: flat file list + clusters.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct LoggingSection {
+    pub files: Vec<FileLogging>,
+    pub clusters: Vec<LoggingCluster>,
+}
+
+/// Metrics cluster.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MetricsCluster {
+    pub path_prefix: String,
+    pub file_count: usize,
+    pub present_count: usize,
+}
+
+/// Metrics section: flat file list + clusters.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MetricsSection {
+    pub files: Vec<FileMetrics>,
+    pub clusters: Vec<MetricsCluster>,
+}
+
+/// A single boundary call site.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BoundaryCallSite {
+    pub name: String,
+    pub kind: CalleeKind,
+    pub location: Location,
+    pub in_route: String,
+    pub in_function: String,
+    pub anchor_kind: AnchorKind,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchor_attributes: Vec<String>,
+    /// For db entries: SQL verb inferred from the call expression.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub statement_kind: Option<StatementKind>,
+}
+
+/// Corpus counts (derived from routes + logging).
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Corpus {
+    pub files: usize,
+    pub routes_total: usize,
+    pub routes_read: usize,
+    pub routes_write: usize,
+}
+
+/// Flat aggregator of boundary call sites, always present even when empty.
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct Boundaries {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub db: Vec<BoundaryCallSite>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub http: Vec<BoundaryCallSite>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub remote: Vec<BoundaryCallSite>,
 }
 
@@ -289,12 +369,10 @@ pub struct Boundaries {
 pub struct TelemetryReport {
     pub target: String,
     pub target_kind: String,
+    pub corpus: Corpus,
     pub routes: Vec<RouteTelemetry>,
-    /// Per-file logging, used for directory-level catalog view.
-    pub logging: Vec<FileLogging>,
-    /// Per-file metrics, used for directory-level catalog view.
-    pub metrics: Vec<FileMetrics>,
-    /// Flat aggregator view of all boundary call sites across all routes.
+    pub logging: LoggingSection,
+    pub metrics: MetricsSection,
     pub boundaries: Boundaries,
 }
 
@@ -376,36 +454,44 @@ fn analyze_file_list(
                     method: method.clone(),
                     path: path.clone(),
                     handler: handler.clone(),
-                    file: file_path.clone(),
-                    line: *line,
+                    location: Location::new(file_path.clone(), *line),
                     anchor_kind: rt.anchor_kind,
+                    anchor_attributes: rt.anchor_attributes,
                     total_callees: rt.total_callees,
                     instrumented_callees: rt.instrumented_callees,
                     callees: rt.callees,
                     unobserved: rt.unobserved,
-                    logging: fl.quality.clone(),
-                    logging_library: if fl.library.is_empty() { None } else { Some(fl.library.clone()) },
-                    metrics: fm.present,
-                    metrics_library: fm.library.clone(),
+                    logs: RouteLogs {
+                        kind: fl.quality.clone(),
+                        library: if fl.library.is_empty() { None } else { Some(fl.library.clone()) },
+                    },
+                    metrics: RouteMetrics {
+                        present: fm.present,
+                        library: fm.library.clone(),
+                    },
                 });
             }
         }
     }
 
-    let logging: Vec<FileLogging> = files
-        .iter()
-        .map(|f| file_logging_quality(graph, f))
-        .collect();
-
-    let metrics: Vec<FileMetrics> = files.iter().map(|f| file_metrics(graph, f)).collect();
+    let logging_files: Vec<FileLogging> = files.iter().map(|f| file_logging_quality(graph, f)).collect();
+    let metrics_files: Vec<FileMetrics> = files.iter().map(|f| file_metrics(graph, f)).collect();
     let boundaries = build_boundaries(&routes);
+
+    let corpus = Corpus {
+        files: logging_files.len(),
+        routes_total: routes.len(),
+        routes_read: routes.iter().filter(|r| !is_write_method(&r.method)).count(),
+        routes_write: routes.iter().filter(|r| is_write_method(&r.method)).count(),
+    };
 
     Some(TelemetryReport {
         target: target.to_string(),
         target_kind: kind.to_string(),
+        corpus,
         routes,
-        logging,
-        metrics,
+        logging: build_logging_section(logging_files),
+        metrics: build_metrics_section(metrics_files),
         boundaries,
     })
 }
@@ -414,6 +500,7 @@ fn analyze_file_list(
 
 struct RouteTraversal {
     anchor_kind: AnchorKind,
+    anchor_attributes: Vec<String>,
     total_callees: usize,
     instrumented_callees: usize,
     callees: Vec<CalleeInfo>,
@@ -438,25 +525,30 @@ fn analyze_route(
         method: ctx.anchor.role.method_str().unwrap_or_default().to_string(),
         path: ctx.anchor.role.path_str().unwrap_or_default().to_string(),
         handler: ctx.anchor.name.clone(),
-        file: anchor_file.clone(),
-        line: ctx.anchor.line,
+        location: Location::new(anchor_file.clone(), ctx.anchor.line),
         anchor_kind: rt.anchor_kind,
+        anchor_attributes: rt.anchor_attributes,
         total_callees: rt.total_callees,
         instrumented_callees: rt.instrumented_callees,
         callees: rt.callees,
         unobserved: rt.unobserved,
-        logging: fl.quality,
-        logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
-        metrics: fm.present,
-        metrics_library: fm.library,
+        logs: RouteLogs { kind: fl.quality, library: if fl.library.is_empty() { None } else { Some(fl.library) } },
+        metrics: RouteMetrics { present: fm.present, library: fm.library },
     }];
+    let logging_file = file_logging_quality(graph, &anchor_file);
+    let metrics_file = file_metrics(graph, &anchor_file);
+    let corpus = Corpus {
+        files: 1,
+        routes_total: routes_vec.len(),
+        routes_read: routes_vec.iter().filter(|r| !is_write_method(&r.method)).count(),
+        routes_write: routes_vec.iter().filter(|r| is_write_method(&r.method)).count(),
+    };
     let report = TelemetryReport {
-        target: format!("{} {}", ctx.anchor.role.method_str().unwrap_or(""), path)
-            .trim()
-            .to_string(),
-        target_kind: "route".to_string(),
-        logging: vec![file_logging_quality(graph, &anchor_file)],
-        metrics: vec![file_metrics(graph, &anchor_file)],
+        target: format!("{} {}", ctx.anchor.role.method_str().unwrap_or(""), path).trim().to_string(),
+        target_kind: "module".to_string(),
+        corpus,
+        logging: build_logging_section(vec![logging_file]),
+        metrics: build_metrics_section(vec![metrics_file]),
         boundaries: build_boundaries(&routes_vec),
         routes: routes_vec,
     };
@@ -477,23 +569,30 @@ fn analyze_function(graph: &CodeGraph, name: &str, verbose: bool) -> Option<Tele
         method: ctx.anchor.role.method_str().unwrap_or_default().to_string(),
         path: ctx.anchor.role.path_str().unwrap_or_default().to_string(),
         handler: ctx.anchor.name.clone(),
-        file: anchor_file.clone(),
-        line: ctx.anchor.line,
+        location: Location::new(anchor_file.clone(), ctx.anchor.line),
         anchor_kind: rt.anchor_kind,
+        anchor_attributes: rt.anchor_attributes,
         total_callees: rt.total_callees,
         instrumented_callees: rt.instrumented_callees,
         callees: rt.callees,
         unobserved: rt.unobserved,
-        logging: fl.quality,
-        logging_library: if fl.library.is_empty() { None } else { Some(fl.library) },
-        metrics: fm.present,
-        metrics_library: fm.library,
+        logs: RouteLogs { kind: fl.quality, library: if fl.library.is_empty() { None } else { Some(fl.library) } },
+        metrics: RouteMetrics { present: fm.present, library: fm.library },
     }];
+    let logging_file = file_logging_quality(graph, &anchor_file);
+    let metrics_file = file_metrics(graph, &anchor_file);
+    let corpus = Corpus {
+        files: 1,
+        routes_total: routes_vec.len(),
+        routes_read: routes_vec.iter().filter(|r| !is_write_method(&r.method)).count(),
+        routes_write: routes_vec.iter().filter(|r| is_write_method(&r.method)).count(),
+    };
     let report = TelemetryReport {
         target: name.to_string(),
-        target_kind: "function".to_string(),
-        logging: vec![file_logging_quality(graph, &anchor_file)],
-        metrics: vec![file_metrics(graph, &anchor_file)],
+        target_kind: "module".to_string(),
+        corpus,
+        logging: build_logging_section(vec![logging_file]),
+        metrics: build_metrics_section(vec![metrics_file]),
         boundaries: build_boundaries(&routes_vec),
         routes: routes_vec,
     };
@@ -512,34 +611,44 @@ fn analyze_single_route(
 }
 
 fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
+    let anchor_file = ctx.anchor.file.clone();
     let mut all_nodes: Vec<&CoverageNode> = Vec::new();
     collect_nodes(&ctx.anchor, &mut all_nodes);
     for c in &ctx.callers {
         collect_nodes(c, &mut all_nodes);
     }
 
-    // Build flat callee list (exclude anchor itself)
+    // Build flat callee list (exclude anchor itself).
+    // Builtins and constructors are tagged but excluded from counts.
     let callees: Vec<CalleeInfo> = all_nodes
         .iter()
         .filter(|n| n.depth != 0)
-        .map(|n| CalleeInfo {
-            name: n.name.clone(),
-            file: n.file.clone(),
-            line: n.line,
-            role: n.role.clone(),
-            depth: n.depth,
-            anchor_kind: span_to_anchor_kind(&n.span),
+        .map(|n| {
+            let ck = callee_kind_from_name(&n.name);
+            // Fall back to anchor file when callee has no file resolved.
+            let file = if n.file.is_empty() { anchor_file.clone() } else { n.file.clone() };
+            CalleeInfo {
+                name: n.name.clone(),
+                location: Location::new(file, n.line),
+                role: n.role.clone(),
+                kind: ck,
+                depth: n.depth,
+                anchor_kind: span_to_anchor_kind(&n.span),
+                anchor_attributes: span_to_attributes(&n.span),
+            }
         })
         .collect();
 
-    let total_callees = callees.len();
-    let instrumented_callees = callees
-        .iter()
-        .filter(|c| c.anchor_kind != AnchorKind::None)
-        .count();
+    // Counts exclude builtins and constructors.
+    let countable: Vec<&CalleeInfo> = callees.iter()
+        .filter(|c| matches!(c.kind, CalleeKind::Function | CalleeKind::Method))
+        .collect();
+    let total_callees = countable.len();
+    let instrumented_callees = countable.iter().filter(|c| c.anchor_kind != AnchorKind::None).count();
 
     RouteTraversal {
         anchor_kind: span_to_anchor_kind(&ctx.anchor.span),
+        anchor_attributes: span_to_attributes(&ctx.anchor.span),
         total_callees,
         instrumented_callees,
         callees,
@@ -552,6 +661,52 @@ fn span_to_anchor_kind(span: &SpanSignal) -> AnchorKind {
         SpanSignal::Decorator { .. } | SpanSignal::SdkImported { .. } => AnchorKind::Explicit,
         SpanSignal::AutoInstrumented { .. } => AnchorKind::FrameworkAuto,
         SpanSignal::None => AnchorKind::None,
+    }
+}
+
+fn span_to_attributes(span: &SpanSignal) -> Vec<String> {
+    match span {
+        SpanSignal::Decorator { name: Some(n), .. } => vec![n.clone()],
+        SpanSignal::SdkImported { library, .. } => vec![library.clone()],
+        _ => vec![],
+    }
+}
+
+fn callee_kind_from_name(name: &str) -> CalleeKind {
+    // Capitalised first letter → constructor or type reference.
+    if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+        return CalleeKind::Construct;
+    }
+    // Known Python/JS builtins.
+    const BUILTINS: &[&str] = &[
+        "any","all","map","filter","zip","sorted","reversed","enumerate",
+        "range","iter","next","len","str","int","float","bool","list",
+        "dict","tuple","set","type","print","repr","hash","id","callable",
+        "getattr","setattr","hasattr","delattr","super","vars","dir",
+        "console","promise","object","array","json",
+    ];
+    if BUILTINS.contains(&name.to_lowercase().as_str()) {
+        return CalleeKind::Builtin;
+    }
+    // Dot-notation → method call.
+    if name.contains('.') {
+        return CalleeKind::Method;
+    }
+    CalleeKind::Function
+}
+
+fn infer_statement_kind(call_expr: &str) -> StatementKind {
+    let last = call_expr.split('.').last().unwrap_or(call_expr).to_lowercase();
+    match last.as_str() {
+        "select" | "scalars" | "scalar" | "scalar_one" | "scalar_one_or_none"
+        | "fetchall" | "fetchone" | "all" | "first" | "one" | "one_or_none" => StatementKind::Select,
+        "insert" | "add" | "bulk_insert_mappings" => StatementKind::Insert,
+        "update" | "bulk_update_mappings" => StatementKind::Update,
+        "delete" | "remove" => StatementKind::Delete,
+        "commit" | "flush" => StatementKind::Commit,
+        "rollback" => StatementKind::Rollback,
+        "execute" | "exec" | "raw" => StatementKind::Raw,
+        _ => StatementKind::Other,
     }
 }
 
@@ -568,16 +723,26 @@ fn build_boundaries(routes: &[RouteTelemetry]) -> Boundaries {
             format!("{} {}", route.method, route.path)
         };
         for callee in &route.callees {
+            let kind = match callee.name.contains('.') {
+                true => CalleeKind::Method,
+                false => CalleeKind::Function,
+            };
             let site = BoundaryCallSite {
                 name: callee.name.clone(),
-                file: callee.file.clone(),
-                line: callee.line,
+                kind,
+                location: callee.location.clone(),
                 in_route: route_label.clone(),
                 in_function: route.handler.clone(),
                 anchor_kind: callee.anchor_kind.clone(),
+                anchor_attributes: callee.anchor_attributes.clone(),
+                statement_kind: None, // filled below for db
             };
             match &callee.role {
-                NodeRole::Database => db.push(site),
+                NodeRole::Database => {
+                    let mut s = site;
+                    s.statement_kind = Some(infer_statement_kind(&callee.name));
+                    db.push(s);
+                }
                 NodeRole::HttpClient => http.push(site),
                 NodeRole::RemoteCall { .. } => remote.push(site),
                 _ => {}
@@ -586,6 +751,76 @@ fn build_boundaries(routes: &[RouteTelemetry]) -> Boundaries {
     }
 
     Boundaries { db, http, remote }
+}
+
+/// Compute logging section with path-prefix clusters.
+fn build_logging_section(files: Vec<FileLogging>) -> LoggingSection {
+    let clusters = compute_logging_clusters(&files, 5);
+    LoggingSection { files, clusters }
+}
+
+fn compute_logging_clusters(files: &[FileLogging], min_size: usize) -> Vec<LoggingCluster> {
+    let mut prefix_map: std::collections::HashMap<String, Vec<&FileLogging>> =
+        std::collections::HashMap::new();
+    for f in files {
+        let prefix = std::path::Path::new(&f.file)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !prefix.is_empty() {
+            prefix_map.entry(prefix).or_default().push(f);
+        }
+    }
+    let mut clusters: Vec<LoggingCluster> = prefix_map
+        .into_iter()
+        .filter(|(_, v)| v.len() >= min_size)
+        .map(|(prefix, entries)| {
+            let structured = entries.iter().filter(|e| e.quality == LoggingQuality::Structured).count();
+            let plain = entries.iter().filter(|e| e.quality == LoggingQuality::Plain).count();
+            let none = entries.iter().filter(|e| e.quality == LoggingQuality::None_).count();
+            LoggingCluster {
+                path_prefix: prefix,
+                file_count: entries.len(),
+                quality_breakdown: LoggingBreakdown { structured, plain, none },
+            }
+        })
+        .collect();
+    clusters.sort_by(|a, b| b.file_count.cmp(&a.file_count));
+    clusters
+}
+
+/// Compute metrics section with path-prefix clusters.
+fn build_metrics_section(files: Vec<FileMetrics>) -> MetricsSection {
+    let clusters = compute_metrics_clusters(&files, 5);
+    MetricsSection { files, clusters }
+}
+
+fn compute_metrics_clusters(files: &[FileMetrics], min_size: usize) -> Vec<MetricsCluster> {
+    let mut prefix_map: std::collections::HashMap<String, Vec<&FileMetrics>> =
+        std::collections::HashMap::new();
+    for f in files {
+        let prefix = std::path::Path::new(&f.file)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_default();
+        if !prefix.is_empty() {
+            prefix_map.entry(prefix).or_default().push(f);
+        }
+    }
+    let mut clusters: Vec<MetricsCluster> = prefix_map
+        .into_iter()
+        .filter(|(_, v)| v.len() >= min_size)
+        .map(|(prefix, entries)| {
+            let present_count = entries.iter().filter(|e| e.present).count();
+            MetricsCluster {
+                path_prefix: prefix,
+                file_count: entries.len(),
+                present_count,
+            }
+        })
+        .collect();
+    clusters.sort_by(|a, b| b.file_count.cmp(&a.file_count));
+    clusters
 }
 
 // ── Helpers: find nodes ───────────────────────────────────────────────────────
@@ -905,9 +1140,9 @@ fn render_sections(report: &TelemetryReport) {
                 AnchorKind::FrameworkAuto => "◐ framework".yellow().to_string(),
                 AnchorKind::None => "○ unobserved".normal().to_string(),
             };
-            let loc = match r.line {
-                Some(l) => format!("{}:{}", r.file, l).bright_black(),
-                None => r.file.bright_black(),
+            let loc = match r.location.line {
+                Some(l) => format!("{}:{}", r.location.file, l).bright_black(),
+                None => r.location.file.bright_black(),
             };
             println!(
                 "  {:<8} {}  {}  {}",
@@ -923,17 +1158,17 @@ fn render_sections(report: &TelemetryReport) {
     // ── Logging section ──
     println!("  {}Logging{}", "──".cyan(), "──".cyan());
     let structured = report
-        .logging
+        .logging.files
         .iter()
         .filter(|l| l.quality == LoggingQuality::Structured)
         .count();
     let plain = report
-        .logging
+        .logging.files
         .iter()
         .filter(|l| l.quality == LoggingQuality::Plain)
         .count();
     let none = report
-        .logging
+        .logging.files
         .iter()
         .filter(|l| l.quality == LoggingQuality::None_)
         .count();
@@ -963,7 +1198,7 @@ fn render_sections(report: &TelemetryReport) {
     }
 
     if report.target_kind != "directory" {
-        for fl in &report.logging {
+        for fl in &report.logging.files {
             let icon = fl.quality.icon();
             let quality_str = match fl.quality {
                 LoggingQuality::Structured => format!("{} {}", icon.green(), "structured".green()),
@@ -982,9 +1217,9 @@ fn render_sections(report: &TelemetryReport) {
 
     // ── Metrics section ──
     println!("  {}Metrics{}", "──".cyan(), "──".cyan());
-    let has_metrics = report.metrics.iter().any(|m| m.present);
-    let present_count = report.metrics.iter().filter(|m| m.present).count();
-    let absent_count = report.metrics.iter().filter(|m| !m.present).count();
+    let has_metrics = report.metrics.files.iter().any(|m| m.present);
+    let present_count = report.metrics.files.iter().filter(|m| m.present).count();
+    let absent_count = report.metrics.files.iter().filter(|m| !m.present).count();
     if has_metrics {
         println!(
             "  ◉ present         {} file{}",
@@ -1000,7 +1235,7 @@ fn render_sections(report: &TelemetryReport) {
         );
     }
     if report.target_kind != "directory" {
-        for m in &report.metrics {
+        for m in &report.metrics.files {
             let status = if m.present {
                 format!(
                     "{} {}",
@@ -1031,12 +1266,12 @@ fn render_merged(report: &TelemetryReport) {
             report.target.bright_white().bold().to_string()
         };
         println!("  Telemetry Coverage for {}", header);
-        if let Some(line) = r.line {
-            println!(
-                "  {}  {}",
-                "at".bright_black(),
-                format!("{}:{}", r.file, line).bright_black()
-            );
+        let loc_str = match r.location.line {
+            Some(l) => format!("{}:{}", r.location.file, l),
+            None => r.location.file.clone(),
+        };
+        if !loc_str.is_empty() {
+            println!("  {}  {}", "at".bright_black(), loc_str.bright_black());
         }
 
         let trace_str = match r.anchor_kind {
@@ -1048,38 +1283,30 @@ fn render_merged(report: &TelemetryReport) {
     }
 
     // Show which routes reach this function (if function target)
-    if report.target_kind == "function" && report.routes.len() <= 1 {
+    if report.target_kind == "module" && report.routes.len() <= 1 {
         // The callers info is inside the CoverageContext — but we don't have it here
         // because we only stored the aggregate.  For now, boundaries are the key signal.
     }
 
     // Logging
-    if let Some(fl) = report.logging.first() {
-        let quality_str = match fl.quality {
+    if let Some(r) = report.routes.first() {
+        let quality_str = match r.logs.kind {
             LoggingQuality::Structured => format!("{} structured", "◉".green()),
             LoggingQuality::Plain => format!("{} plain", "○".normal()),
             LoggingQuality::None_ => format!("{} none", "·".dimmed()),
         };
-        let lib_str = if !fl.library.is_empty() {
-            format!("  ({})", fl.library.bright_black())
-        } else {
-            String::new()
-        };
+        let lib_str = r.logs.library.as_deref()
+            .map(|l| format!("  ({})", l.bright_black()))
+            .unwrap_or_default();
         println!("  logging: {}{}", quality_str, lib_str);
-    }
 
-    // Metrics
-    if let Some(m) = report.metrics.first() {
-        let status = if m.present {
-            format!(
-                "{} {}",
-                "◉".green(),
-                m.library.as_deref().unwrap_or("present").green()
-            )
+        // Metrics
+        let metrics_status = if r.metrics.present {
+            format!("{} {}", "◉".green(), r.metrics.library.as_deref().unwrap_or("present").green())
         } else {
             format!("{} {}", "○".normal(), "none".normal())
         };
-        println!("  metrics: {}", status);
+        println!("  metrics: {}", metrics_status);
     }
 
     println!();
@@ -1090,35 +1317,15 @@ fn render_merged(report: &TelemetryReport) {
 // ── Rendering: catalog (new default for directories) ─────────────────────────
 
 fn render_catalog(report: &TelemetryReport) {
-    let total_files = report.logging.len();
-    let total_routes = report.routes.len();
-    let reads = report
-        .routes
-        .iter()
-        .filter(|r| !is_write_method(&r.method))
-        .count();
-    let writes = report
-        .routes
-        .iter()
-        .filter(|r| is_write_method(&r.method))
-        .count();
-    let log_structured = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::Structured)
-        .count();
-    let log_plain = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::Plain)
-        .count();
-    let log_none_count = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::None_)
-        .count();
-    let metrics_present = report.metrics.iter().filter(|m| m.present).count();
-    let metrics_total = report.metrics.len();
+    let total_files = report.corpus.files;
+    let total_routes = report.corpus.routes_total;
+    let reads = report.corpus.routes_read;
+    let writes = report.corpus.routes_write;
+    let log_structured = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Structured).count();
+    let log_plain = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Plain).count();
+    let log_none_count = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::None_).count();
+    let metrics_present = report.metrics.files.iter().filter(|m| m.present).count();
+    let metrics_total = report.metrics.files.len();
     let read_deep = report
         .routes
         .iter()
@@ -1329,21 +1536,9 @@ fn render_summary(report: &TelemetryReport) {
         println!();
     }
 
-    let structured = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::Structured)
-        .count();
-    let plain = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::Plain)
-        .count();
-    let none = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::None_)
-        .count();
+    let structured = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Structured).count();
+    let plain = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Plain).count();
+    let none = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::None_).count();
 
     println!("  Logging");
     if structured > 0 {
@@ -1369,11 +1564,11 @@ fn render_summary(report: &TelemetryReport) {
     }
     println!();
 
-    let has_metrics = report.metrics.iter().any(|m| m.present);
-    let absent_count = report.metrics.iter().filter(|m| !m.present).count();
+    let has_metrics = report.metrics.files.iter().any(|m| m.present);
+    let absent_count = report.metrics.files.iter().filter(|m| !m.present).count();
     println!("  Metrics");
     if has_metrics {
-        let present_count = report.metrics.iter().filter(|m| m.present).count();
+        let present_count = report.metrics.files.iter().filter(|m| m.present).count();
         println!(
             "  present        {} file{}",
             present_count,
@@ -1407,9 +1602,9 @@ fn render_compact(report: &TelemetryReport) {
             AnchorKind::FrameworkAuto => "◐ framework".yellow(),
             AnchorKind::None => "○ none".normal(),
         };
-        let loc: colored::ColoredString = match r.line {
-            Some(l) => format!("  {}:{}", r.file, l).bright_black(),
-            None => r.file.bright_black(),
+        let loc: colored::ColoredString = match r.location.line {
+            Some(l) => format!("  {}:{}", r.location.file, l).bright_black(),
+            None => r.location.file.as_str().bright_black(),
         };
         println!(
             "  {:<8} {}  {}  {}",
