@@ -894,6 +894,50 @@ pub struct CoverageTreeSummary {
     pub remote_calls: usize,
 }
 
+/// A single callee that produces no signal — useful for agents hunting for
+/// observability gaps that could hinder debugging.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnobservedCallee {
+    pub name: String,
+    pub file: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+    /// What kind of work (db, http, remote, logic).
+    pub role: NodeRole,
+    /// How far from the anchor (1 = direct callee of the handler).
+    pub depth: i32,
+    /// Full call path from the anchor, e.g.
+    /// ["POST /orders", "create_order", "pricing.calculate"]
+    pub path: Vec<String>,
+}
+
+/// Flattened inventory of every unobserved callee in the coverage tree,
+/// grouped by boundary type so agents can answer "which db calls have no
+/// span?" in one field access instead of walking the full tree.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct UnobservedPaths {
+    /// Total across all groups.
+    pub total: usize,
+    /// True when the anchor node itself has no span — everything below is
+    /// effectively invisible.
+    pub anchor_unobserved: bool,
+    /// Database calls with no span.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub db: Vec<UnobservedCallee>,
+    /// HTTP client calls with no span.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub http: Vec<UnobservedCallee>,
+    /// Cross-service remote calls with no span.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remote: Vec<UnobservedCallee>,
+    /// Business-logic nodes with no span.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub logic: Vec<UnobservedCallee>,
+    /// The path from anchor to the deepest unobserved callee, for impact sizing.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub deepest: Vec<String>,
+}
+
 /// Top-level result returned by execute_coverage.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CoverageContext {
@@ -911,6 +955,9 @@ pub struct CoverageContext {
     pub callees: Vec<CoverageNode>,
     /// Summary counts.
     pub summary: CoverageTreeSummary,
+    /// Flattened inventory of every unobserved callee — one field access for agents.
+    #[serde(default)]
+    pub unobserved_paths: UnobservedPaths,
 }
 
 // ── Route entry (used by routes command, kept here) ───────────────────────────
@@ -1370,6 +1417,8 @@ pub(crate) fn build_coverage_context(
             .count(),
     };
 
+    let unobserved_paths = build_unobserved_paths(&anchor);
+
     Some(CoverageContext {
         target: target.to_string(),
         resolved_as,
@@ -1377,6 +1426,7 @@ pub(crate) fn build_coverage_context(
         anchor,
         callees,
         summary,
+        unobserved_paths,
     })
 }
 
@@ -1384,6 +1434,91 @@ fn collect_nodes<'a>(node: &'a CoverageNode, out: &mut Vec<&'a CoverageNode>) {
     out.push(node);
     for child in &node.children {
         collect_nodes(child, out);
+    }
+}
+
+fn build_unobserved_paths(anchor: &CoverageNode) -> UnobservedPaths {
+    let mut db: Vec<UnobservedCallee> = Vec::new();
+    let mut http: Vec<UnobservedCallee> = Vec::new();
+    let mut remote: Vec<UnobservedCallee> = Vec::new();
+    let mut logic: Vec<UnobservedCallee> = Vec::new();
+    let mut deepest_depth: i32 = 0;
+    let mut deepest_path: Vec<String> = Vec::new();
+
+    let mut path_so_far = vec![anchor.name.clone()];
+    walk_unobserved_callees(
+        &anchor.children,
+        &mut path_so_far,
+        1,
+        &mut db,
+        &mut http,
+        &mut remote,
+        &mut logic,
+        &mut deepest_depth,
+        &mut deepest_path,
+    );
+
+    let total = db.len() + http.len() + remote.len() + logic.len();
+    let anchor_unobserved = matches!(anchor.span, SpanSignal::None);
+
+    UnobservedPaths {
+        total,
+        anchor_unobserved,
+        db,
+        http,
+        remote,
+        logic,
+        deepest: deepest_path,
+    }
+}
+
+fn walk_unobserved_callees(
+    children: &[CoverageNode],
+    path_so_far: &mut Vec<String>,
+    depth: i32,
+    db: &mut Vec<UnobservedCallee>,
+    http: &mut Vec<UnobservedCallee>,
+    remote: &mut Vec<UnobservedCallee>,
+    logic: &mut Vec<UnobservedCallee>,
+    deepest_depth: &mut i32,
+    deepest_path: &mut Vec<String>,
+) {
+    for child in children {
+        let mut child_path = path_so_far.clone();
+        child_path.push(child.name.clone());
+
+        if matches!(child.span, SpanSignal::None) {
+            let callee = UnobservedCallee {
+                name: child.name.clone(),
+                file: child.file.clone(),
+                line: child.line,
+                role: child.role.clone(),
+                depth,
+                path: child_path.clone(),
+            };
+            match &child.role {
+                NodeRole::Database => db.push(callee),
+                NodeRole::HttpClient => http.push(callee),
+                NodeRole::RemoteCall { .. } => remote.push(callee),
+                _ => logic.push(callee),
+            }
+            if depth > *deepest_depth {
+                *deepest_depth = depth;
+                *deepest_path = child_path.clone();
+            }
+        }
+
+        walk_unobserved_callees(
+            &child.children,
+            &mut child_path,
+            depth + 1,
+            db,
+            http,
+            remote,
+            logic,
+            deepest_depth,
+            deepest_path,
+        );
     }
 }
 

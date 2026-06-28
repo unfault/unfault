@@ -178,6 +178,15 @@ pub enum TraceQuality {
     Unobserved,
 }
 
+/// Whether a span is framework auto-instrumentation (coarse) or
+/// carries explicit per-function attributes (fine).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Grain {
+    Coarse,
+    Fine,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LoggingQuality {
@@ -206,6 +215,10 @@ pub struct RouteTelemetry {
     pub file: String,
     pub line: Option<u32>,
     pub trace_quality: TraceQuality,
+    /// Whether the handler's own span is framework auto-instrumentation
+    /// (coarse) or carries explicit per-function attributes (fine).
+    /// None when the handler has no span at all.
+    pub anchor_grain: Option<Grain>,
     pub total_callees: usize,
     pub instrumented_callees: usize,
     pub signal_kinds: Vec<SignalKind>,
@@ -332,6 +345,7 @@ fn analyze_file_list(
                     file: file_path.clone(),
                     line: *line,
                     trace_quality: rt.trace_quality,
+                    anchor_grain: rt.anchor_grain,
                     total_callees: rt.total_callees,
                     instrumented_callees: rt.instrumented_callees,
                     signal_kinds: rt.signal_kinds,
@@ -372,6 +386,7 @@ fn analyze_file_list(
 
 struct RouteTraversal {
     trace_quality: TraceQuality,
+    anchor_grain: Option<Grain>,
     total_callees: usize,
     instrumented_callees: usize,
     signal_kinds: Vec<SignalKind>,
@@ -404,6 +419,7 @@ fn analyze_route(
             file: anchor_file.clone(),
             line: ctx.anchor.line,
             trace_quality: rt.trace_quality,
+            anchor_grain: rt.anchor_grain,
             total_callees: rt.total_callees,
             instrumented_callees: rt.instrumented_callees,
             signal_kinds: rt.signal_kinds,
@@ -435,6 +451,7 @@ fn analyze_function(graph: &CodeGraph, name: &str, verbose: bool) -> Option<Tele
             file: anchor_file.clone(),
             line: ctx.anchor.line,
             trace_quality: rt.trace_quality,
+            anchor_grain: rt.anchor_grain,
             total_callees: rt.total_callees,
             instrumented_callees: rt.instrumented_callees,
             signal_kinds: rt.signal_kinds,
@@ -524,6 +541,7 @@ fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
 
     RouteTraversal {
         trace_quality,
+        anchor_grain: span_to_grain(&ctx.anchor.span),
         total_callees,
         instrumented_callees,
         signal_kinds: kinds,
@@ -548,6 +566,15 @@ fn span_signal_kind(span: &SpanSignal) -> SignalKind {
         SpanSignal::SdkImported { kind, .. } => kind.clone(),
         SpanSignal::AutoInstrumented { .. } => SignalKind::Trace,
         SpanSignal::None => SignalKind::Trace,
+    }
+}
+
+fn span_to_grain(span: &SpanSignal) -> Option<Grain> {
+    match span {
+        SpanSignal::AutoInstrumented { .. } => Some(Grain::Coarse),
+        SpanSignal::Decorator { .. } => Some(Grain::Fine),
+        SpanSignal::SdkImported { .. } => Some(Grain::Fine),
+        SpanSignal::None => None,
     }
 }
 
@@ -1076,6 +1103,57 @@ fn render_catalog(report: &TelemetryReport) {
         .iter()
         .filter(|r| is_write_method(&r.method))
         .count();
+    let log_structured = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Structured)
+        .count();
+    let log_plain = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Plain)
+        .count();
+    let log_none_count = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::None_)
+        .count();
+    let metrics_present = report.metrics.iter().filter(|m| m.present).count();
+    let metrics_total = report.metrics.len();
+    let read_deep = report
+        .routes
+        .iter()
+        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
+        .count();
+    let read_shallow = report
+        .routes
+        .iter()
+        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
+        .count();
+    let read_none = report
+        .routes
+        .iter()
+        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Unobserved)
+        .count();
+    let write_deep = report
+        .routes
+        .iter()
+        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
+        .count();
+    let write_shallow = report
+        .routes
+        .iter()
+        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
+        .count();
+    let write_none = report
+        .routes
+        .iter()
+        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Unobserved)
+        .count();
+    let db_covered = report.db_queries.covered;
+    let db_total = report.db_queries.total;
+    let http_covered = report.http_clients.covered;
+    let http_total = report.http_clients.total;
 
     println!();
     println!("Telemetry in {}", report.target.bright_white().bold());
@@ -1088,133 +1166,222 @@ fn render_catalog(report: &TelemetryReport) {
     );
     println!();
 
-    // ── Unobserved regions ──
-    println!("{}", "Unobserved regions".red().bold());
-
-    let metrics_absent = report.metrics.iter().filter(|m| !m.present).count();
-    let metrics_present = report.metrics.iter().filter(|m| m.present).count();
-    if metrics_absent == report.metrics.len() && metrics_absent > 0 {
+    // ── Paragraph 1: signal overview (logging, metrics) ──
+    if log_structured > 0 {
+        print!(
+            "Most of what {} says about itself is structured logging, across {} file{}; that is where the fine-grained signal lives, the decision points and branches a reader can use to follow what the system did.",
+            report.target,
+            log_structured,
+            if log_structured == 1 { "" } else { "s" },
+        );
+        if log_plain > 0 || log_none_count > 0 || metrics_total > metrics_present {
+            println!();
+            print!("Beyond that the area is quiet");
+        }
+        if metrics_present == 0 && metrics_total > 0 {
+            print!(": no file emits a metric");
+            if log_none_count > 0 {
+                print!(
+                    ", and {} file{} run without any logging at all",
+                    log_none_count,
+                    if log_none_count == 1 { "" } else { "s" }
+                );
+            }
+        } else if log_none_count > 0 {
+            print!(
+                ": {} file{} run without any logging at all",
+                log_none_count,
+                if log_none_count == 1 { "" } else { "s" }
+            );
+        }
+        let clusters = top_logging_clusters(&report.logging, 3);
+        if !clusters.is_empty() {
+            let parts: Vec<String> = clusters
+                .into_iter()
+                .map(|(dir, count)| {
+                    // Take the last directory component as the cluster label
+                    let label = std::path::Path::new(&dir)
+                        .file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or(dir);
+                    format!("{} ({})", label, count)
+                })
+                .collect();
+            if parts.len() == 1 {
+                print!(", the largest pool being {}", parts[0]);
+            } else {
+                print!(", the largest pools being {}", parts.join(", "));
+            }
+        }
+        println!(".");
+    } else if log_plain > 0 {
+        print!(
+            "{} uses plain logging across {} file{}",
+            report.target,
+            log_plain,
+            if log_plain == 1 { "" } else { "s" }
+        );
+        if log_none_count > 0 || metrics_present == 0 {
+            println!(".");
+            if metrics_present == 0 && metrics_total > 0 {
+                print!("No file emits a metric");
+                if log_none_count > 0 {
+                    print!(
+                        ", and {} file{} run without any logging at all",
+                        log_none_count,
+                        if log_none_count == 1 { "" } else { "s" }
+                    );
+                }
+            } else {
+                print!(
+                    "{} file{} run without any logging at all",
+                    log_none_count,
+                    if log_none_count == 1 { "" } else { "s" }
+                );
+            }
+        }
+        println!(".");
+    } else {
+        // No structured or plain logging at all
+        let none_msg =
+            if log_none_count == metrics_total && metrics_present == 0 && metrics_total > 0 {
+                "no file emits a metric or writes a log line".to_string()
+            } else {
+                let mut parts = Vec::new();
+                if log_none_count > 0 {
+                    parts.push(format!(
+                        "no logging in {} file{}",
+                        log_none_count,
+                        if log_none_count == 1 { "" } else { "s" }
+                    ));
+                }
+                if metrics_present == 0 && metrics_total > 0 {
+                    parts.push("no metrics".to_string());
+                }
+                parts.join(", ")
+            };
         println!(
-            "  Metrics absent across the whole area ({} of {} files emit any metric)",
-            metrics_present.to_string().yellow(),
-            report.metrics.len().to_string().yellow(),
+            "The area is quiet: {}; every signal would need to be added.",
+            none_msg
         );
     }
 
-    let log_none_count = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::None_)
-        .count();
-    let log_total = report.logging.len();
-    if log_none_count > 0 {
-        println!(
-            "  Logging absent in {} of {} files",
-            log_none_count.to_string().yellow(),
-            log_total.to_string().yellow(),
-        );
-        let clusters = top_logging_clusters(&report.logging, 3);
-        if !clusters.is_empty() {
-            println!("    largest clusters: {}", clusters.join(", "));
+    // ── Paragraph 2: tracing and boundaries ──
+    if total_routes > 0 {
+        println!();
+
+        if read_none > 0 || write_none > 0 {
+            print!("Tracing is partial");
+        } else {
+            print!("Tracing is broad but mostly coarse");
+        }
+        print!(". Spans cover every route, but ");
+        if read_shallow > 0 || write_shallow > 0 {
+            // Coarse dominant
+            let coarse_read_clause = if read_shallow > 0 {
+                format!("{} of {} reads", read_shallow, reads)
+            } else {
+                String::new()
+            };
+            let coarse_write_clause = if write_shallow > 0 {
+                format!("{} of {} writes", write_shallow, writes)
+            } else {
+                String::new()
+            };
+            let coarse_parts: Vec<&str> = [&coarse_read_clause, &coarse_write_clause]
+                .iter()
+                .filter(|s| !s.is_empty())
+                .map(|s| s.as_str())
+                .collect();
+            if coarse_parts.len() == 2 {
+                print!(
+                    "{} and {} are framework auto-instrumentation, the wrap-the-request kind that records that it ran and how long",
+                    coarse_parts[0], coarse_parts[1]
+                );
+            } else if read_shallow > 0 {
+                print!(
+                    "{} of {} reads are framework auto-instrumentation, the wrap-the-request kind that records that it ran and how long",
+                    read_shallow, reads
+                );
+            } else {
+                print!(
+                    "{} of {} writes are framework auto-instrumentation, the wrap-the-request kind that records that it ran and how long",
+                    write_shallow, writes
+                );
+            }
+            println!(".");
+        } else if read_none > 0 || write_none > 0 {
+            // Some have no span at all
+            if read_none > 0 {
+                print!("{} of {} reads have no span at all", read_none, reads);
+                if write_none > 0 {
+                    print!(", and {} of {} writes", write_none, writes);
+                }
+            } else {
+                print!("{} of {} writes have no span at all", write_none, writes);
+            }
+            println!(".");
+        } else {
+            // All deep
+            println!("every route carries explicit attributes.");
+        }
+
+        // Fine routes
+        let fine_total = read_deep + write_deep;
+        if fine_total > 0 {
+            if fine_total == 1 {
+                println!("Only one route goes further and carries its own attributes.");
+            } else {
+                println!(
+                    "Only {} routes go further and carry their own attributes.",
+                    fine_total
+                );
+            }
+        }
+
+        // Boundaries
+        let has_boundaries = db_total > 0 || http_total > 0;
+        if has_boundaries {
+            print!("At the boundaries the picture is similar");
+            let mut bound_clauses = Vec::new();
+            if db_total > 0 {
+                if db_covered == db_total {
+                    bound_clauses
+                        .push(format!("all {} db queries have an explicit span", db_total));
+                } else {
+                    bound_clauses.push(format!(
+                        "{} of {} db queries have an explicit span",
+                        db_covered, db_total
+                    ));
+                }
+            }
+            if http_total > 0 {
+                if http_covered == http_total {
+                    bound_clauses.push(format!("all {} http clients do", http_total));
+                } else {
+                    bound_clauses.push(format!(
+                        "{} of {} http clients do",
+                        http_covered, http_total
+                    ));
+                }
+            }
+            let rest_coarse =
+                db_total.saturating_sub(db_covered) + http_total.saturating_sub(http_covered);
+            if rest_coarse > 0 {
+                bound_clauses.push(format!(
+                    "the rest are visible only through their surrounding wrap"
+                ));
+            }
+            println!("; {}.", bound_clauses.join(", "));
         }
     }
 
-    let db_uncovered = report
-        .db_queries
-        .total
-        .saturating_sub(report.db_queries.covered);
-    if db_uncovered > 0 {
-        println!(
-            "  {} of {} db queries have no span",
-            db_uncovered.to_string().yellow(),
-            report.db_queries.total.to_string().yellow(),
-        );
-    }
-
-    let http_uncovered = report
-        .http_clients
-        .total
-        .saturating_sub(report.http_clients.covered);
-    if http_uncovered > 0 {
-        println!(
-            "  {} of {} http clients have no span",
-            http_uncovered.to_string().yellow(),
-            report.http_clients.total.to_string().yellow(),
-        );
-    }
+    // ── Paragraph 3: closing assessment ──
     println!();
-
-    // ── What's already said ──
-    println!("{}", "What's already said".green().bold());
-
-    let read_deep = report
-        .routes
-        .iter()
-        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
-        .count();
-    let read_shallow = report
-        .routes
-        .iter()
-        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
-        .count();
-    let write_deep = report
-        .routes
-        .iter()
-        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
-        .count();
-    let write_shallow = report
-        .routes
-        .iter()
-        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
-        .count();
-
     println!(
-        "  Spans      read routes: {} with explicit attributes, {} framework",
-        read_deep.to_string().green(),
-        read_shallow.to_string().yellow(),
-    );
-    println!(
-        "             write routes: {} with explicit attributes, {} framework auto",
-        write_deep.to_string().green(),
-        write_shallow.to_string().yellow(),
-    );
-
-    let log_structured = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::Structured)
-        .count();
-    let log_plain = report
-        .logging
-        .iter()
-        .filter(|l| l.quality == LoggingQuality::Plain)
-        .count();
-    println!(
-        "  Logging    structured in {} file{}, plain in {}",
-        log_structured.to_string().green(),
-        if log_structured == 1 { "" } else { "s" },
-        log_plain.to_string().yellow(),
-    );
-
-    if metrics_present == 0 {
-        println!("  Metrics    none");
-    } else {
-        println!(
-            "  Metrics    {} file{} have metrics",
-            metrics_present.to_string().green(),
-            if metrics_present == 1 { "" } else { "s" },
-        );
-    }
-
-    println!(
-        "  Db         {} of {} calls have a span",
-        report.db_queries.covered.to_string().green(),
-        report.db_queries.total.to_string().yellow(),
-    );
-    println!(
-        "  Http       {} of {} calls have a span",
-        report.http_clients.covered.to_string().green(),
-        report.http_clients.total.to_string().yellow(),
+        "This shape gives clear answers to \"is it up, is it slow\", and \
+         patchier answers to \"what was it doing when it broke\" outside \
+         the routes already instrumented in detail."
     );
 
     println!();
@@ -1345,7 +1512,7 @@ fn render_summary(report: &TelemetryReport) {
 
 // ── Helper: top directory clusters for absent logging ───────────────────────
 
-fn top_logging_clusters(logging: &[FileLogging], n: usize) -> Vec<String> {
+fn top_logging_clusters(logging: &[FileLogging], n: usize) -> Vec<(String, usize)> {
     let mut dir_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     for entry in logging {
         if entry.quality != LoggingQuality::None_ {
@@ -1360,11 +1527,7 @@ fn top_logging_clusters(logging: &[FileLogging], n: usize) -> Vec<String> {
     }
     let mut sorted: Vec<(String, usize)> = dir_counts.into_iter().collect();
     sorted.sort_by(|a, b| b.1.cmp(&a.1));
-    sorted
-        .into_iter()
-        .take(n)
-        .map(|(dir, count)| format!("{}/ ({} files)", dir, count))
-        .collect()
+    sorted.into_iter().take(n).collect()
 }
 
 // ── Rendering: compact (--compact flag) ───────────────────────────────────────

@@ -10,6 +10,26 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.49] — 2026-06-28
+
+### Added
+
+- **`Grain` enum and `anchor_grain` field on `RouteTelemetry`.**
+  Each route now records whether its span is framework auto-instrumentation
+  (`coarse`) or carries explicit per-function attributes (`fine`), surfaced
+  in JSON output at `route_telemetry[].anchor_grain`.
+
+- **`UnobservedCallee` / `UnobservedPaths` structs on `CoverageContext`.**
+  `CoverageContext` now carries `unobserved_paths` — a flattened, role-grouped
+  inventory of every callee node without a span. Agents can answer "which db
+  calls have no span?" in one field access (`coverage.unobserved_paths.db`).
+  Groups: `db`, `http`, `remote`, `logic`, plus `deepest` for impact sizing.
+
+- **Catalog narrative uses coarse/fine vocabulary.**
+  The default `telemetry <directory>` output now describes instrumentation
+  quality as "coarse" (framework auto) vs "fine" (explicit attributes),
+  and uses "unobserved" instead of dark-region metaphors.
+
 ## [1.0.48] — 2026-06-28
 
 ### Changed
