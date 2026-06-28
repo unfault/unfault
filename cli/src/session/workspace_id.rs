@@ -68,10 +68,10 @@ pub fn normalize_git_remote(remote: &str) -> String {
     else if let Some(pos) = remote.find("://") {
         remote = remote[(pos + 3)..].to_string();
         // Remove credentials if present (user:pass@host)
-        if let Some(at_pos) = remote.find('@') {
-            if at_pos < remote.find('/').unwrap_or(remote.len()) {
-                remote = remote[(at_pos + 1)..].to_string();
-            }
+        if let Some(at_pos) = remote.find('@')
+            && at_pos < remote.find('/').unwrap_or(remote.len())
+        {
+            remote = remote[(at_pos + 1)..].to_string();
         }
     }
 
@@ -238,14 +238,14 @@ pub fn compute_workspace_id(
     }
 
     // Priority 2: Project manifest name
-    if let Some(files) = meta_files {
-        if let Some(project_name) = extract_project_name_from_meta_files(files) {
-            let hash = compute_hash(&format!("manifest:{}", project_name));
-            return Some(WorkspaceIdResult {
-                id: format!("wks_{}", hash),
-                source: WorkspaceIdSource::Manifest,
-            });
-        }
+    if let Some(files) = meta_files
+        && let Some(project_name) = extract_project_name_from_meta_files(files)
+    {
+        let hash = compute_hash(&format!("manifest:{}", project_name));
+        return Some(WorkspaceIdResult {
+            id: format!("wks_{}", hash),
+            source: WorkspaceIdSource::Manifest,
+        });
     }
 
     // Priority 3: Workspace label
@@ -279,13 +279,12 @@ pub fn get_git_changed_files(workspace_root: &Path) -> Vec<String> {
         .args(["diff", "--name-only", "HEAD"])
         .current_dir(workspace_root)
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            for line in String::from_utf8_lossy(&output.stdout).lines() {
-                let line = line.trim();
-                if !line.is_empty() {
-                    changed.push(line.to_string());
-                }
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let line = line.trim();
+            if !line.is_empty() {
+                changed.push(line.to_string());
             }
         }
     }
@@ -295,13 +294,12 @@ pub fn get_git_changed_files(workspace_root: &Path) -> Vec<String> {
         .args(["ls-files", "--others", "--exclude-standard"])
         .current_dir(workspace_root)
         .output()
+        && output.status.success()
     {
-        if output.status.success() {
-            for line in String::from_utf8_lossy(&output.stdout).lines() {
-                let line = line.trim();
-                if !line.is_empty() && !changed.contains(&line.to_string()) {
-                    changed.push(line.to_string());
-                }
+        for line in String::from_utf8_lossy(&output.stdout).lines() {
+            let line = line.trim();
+            if !line.is_empty() && !changed.contains(&line.to_string()) {
+                changed.push(line.to_string());
             }
         }
     }

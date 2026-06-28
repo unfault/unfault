@@ -173,31 +173,29 @@ fn extract_timeout_from_call(
     };
     let args_text = parsed.text_for_node(&args_node);
 
-    if callee == "asyncio.wait_for" {
-        if let Some(timeout_start) = args_text.find("timeout") {
-            let before = &args_text[..timeout_start].trim_end();
-            if let Some(digit_start) =
-                before.rfind(|c: char| c.is_ascii_digit() || c == '-' || c == '+')
-            {
-                let number: String = args_text[digit_start..]
-                    .chars()
-                    .take_while(|c: &char| {
-                        c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+'
-                    })
-                    .collect();
-                if let Ok(seconds) = number.parse::<f64>() {
-                    return (true, Some(seconds));
-                }
+    if callee == "asyncio.wait_for"
+        && let Some(timeout_start) = args_text.find("timeout")
+    {
+        let before = &args_text[..timeout_start].trim_end();
+        if let Some(digit_start) =
+            before.rfind(|c: char| c.is_ascii_digit() || c == '-' || c == '+')
+        {
+            let number: String = args_text[digit_start..]
+                .chars()
+                .take_while(|c: &char| c.is_ascii_digit() || *c == '.' || *c == '-' || *c == '+')
+                .collect();
+            if let Ok(seconds) = number.parse::<f64>() {
+                return (true, Some(seconds));
             }
         }
     }
 
-    if callee == "asyncio.timeout" || callee == "asyncio.timeout_at" {
-        if let Some(open_paren) = args_text.find('(') {
-            let inner = &args_text[open_paren + 1..args_text.len().saturating_sub(1)];
-            if let Ok(seconds) = inner.trim().parse::<f64>() {
-                return (true, Some(seconds));
-            }
+    if (callee == "asyncio.timeout" || callee == "asyncio.timeout_at")
+        && let Some(open_paren) = args_text.find('(')
+    {
+        let inner = &args_text[open_paren + 1..args_text.len().saturating_sub(1)];
+        if let Ok(seconds) = inner.trim().parse::<f64>() {
+            return (true, Some(seconds));
         }
     }
 

@@ -291,7 +291,7 @@ impl DbOperation {
 }
 
 /// Connection pool configuration status
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ConnectionPoolConfig {
     /// Whether pool size is configured
     pub has_pool_size: bool,
@@ -335,22 +335,6 @@ impl ConnectionPoolConfig {
             missing.push("pool_recycle/max_lifetime");
         }
         missing
-    }
-}
-
-impl Default for ConnectionPoolConfig {
-    fn default() -> Self {
-        Self {
-            has_pool_size: false,
-            pool_size: None,
-            has_max_overflow: false,
-            max_overflow: None,
-            has_pool_timeout: false,
-            pool_timeout: None,
-            has_max_lifetime: false,
-            max_lifetime: None,
-            location: None,
-        }
     }
 }
 

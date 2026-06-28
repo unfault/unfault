@@ -144,25 +144,24 @@ impl Rule for RustMissingSelectTimeoutRule {
                     select.function_name.as_deref().unwrap_or("<unknown>")
                 );
 
-                let fix_preview = format!(
-                    "// Add a timeout branch:\n\
-                     tokio::select! {{\n\
+                let fix_preview = "// Add a timeout branch:\n\
+                     tokio::select! {\n\
                          // ... existing branches ...\n\
-                         _ = tokio::time::sleep(Duration::from_secs(30)) => {{\n\
+                         _ = tokio::time::sleep(Duration::from_secs(30)) => {\n\
                              tracing::warn!(\"operation timed out\");\n\
                              return Err(Error::Timeout);\n\
-                         }}\n\
-                     }}\n\n\
+                         }\n\
+                     }\n\n\
                      // Or wrap with timeout:\n\
-                     match tokio::time::timeout(Duration::from_secs(30), async {{\n\
-                         tokio::select! {{\n\
+                     match tokio::time::timeout(Duration::from_secs(30), async {\n\
+                         tokio::select! {\n\
                              // ... existing branches ...\n\
-                         }}\n\
-                     }}).await {{\n\
+                         }\n\
+                     }).await {\n\
                          Ok(result) => result,\n\
                          Err(_) => return Err(Error::Timeout),\n\
-                     }}"
-                );
+                     }"
+                .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,
@@ -302,7 +301,7 @@ async fn shutdown_signal() {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()

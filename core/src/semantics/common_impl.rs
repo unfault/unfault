@@ -442,7 +442,7 @@ fn convert_python_function(
     let calls: Vec<FunctionCall> = all_calls
         .iter()
         .filter(|call| call.start_byte >= py_func.start_byte && call.end_byte <= py_func.end_byte)
-        .map(|call| convert_py_call_site(call))
+        .map(convert_py_call_site)
         .collect();
 
     Some(FunctionDef {
@@ -1025,7 +1025,7 @@ fn convert_go_function(
     let calls: Vec<FunctionCall> = all_calls
         .iter()
         .filter(|call| call.start_byte >= go_func.start_byte && call.end_byte <= go_func.end_byte)
-        .map(|call| convert_go_call_site(call))
+        .map(convert_go_call_site)
         .collect();
 
     Some(FunctionDef {
@@ -1119,7 +1119,7 @@ fn convert_go_method(
         .filter(|call| {
             call.start_byte >= go_method.start_byte && call.end_byte <= go_method.end_byte
         })
-        .map(|call| convert_go_call_site(call))
+        .map(convert_go_call_site)
         .collect();
 
     Some(FunctionDef {
@@ -1483,7 +1483,7 @@ fn convert_rust_function(
             call.function_call.location.start_byte >= rust_func.start_byte
                 && call.function_call.location.end_byte <= rust_func.end_byte
         })
-        .map(|call| convert_rust_call_site(call))
+        .map(convert_rust_call_site)
         .collect();
 
     Some(FunctionDef {
@@ -2072,7 +2072,7 @@ fn convert_ts_function(
             call.function_call.location.start_byte >= ts_func.start_byte
                 && call.function_call.location.end_byte <= ts_func.end_byte
         })
-        .map(|call| convert_ts_call_site(call))
+        .map(convert_ts_call_site)
         .collect();
 
     Some(FunctionDef {
@@ -2157,7 +2157,7 @@ fn convert_ts_method(
             call.function_call.location.start_byte >= method.start_byte
                 && call.function_call.location.end_byte <= method.end_byte
         })
-        .map(|call| convert_ts_call_site(call))
+        .map(convert_ts_call_site)
         .collect();
 
     Some(FunctionDef {

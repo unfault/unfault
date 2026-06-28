@@ -18,6 +18,12 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 #[derive(Debug)]
 pub struct PythonHttpMissingTimeoutRule;
 
+impl Default for PythonHttpMissingTimeoutRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PythonHttpMissingTimeoutRule {
     pub fn new() -> Self {
         Self

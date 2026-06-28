@@ -87,26 +87,25 @@ impl Rule for GoGoroutineLeakRule {
 
                     let patch = generate_context_cancellation_patch(goroutine, *file_id);
 
-                    let fix_preview = format!(
-                        "// Before:\n\
-                         // go func() {{\n\
-                         //     for {{\n\
+                    let fix_preview = "// Before:\n\
+                         // go func() {\n\
+                         //     for {\n\
                          //         work()\n\
-                         //     }}\n\
-                         // }}()\n\
+                         //     }\n\
+                         // }()\n\
                          //\n\
                          // After:\n\
-                         // go func(ctx context.Context) {{\n\
-                         //     for {{\n\
-                         //         select {{\n\
+                         // go func(ctx context.Context) {\n\
+                         //     for {\n\
+                         //         select {\n\
                          //         case <-ctx.Done():\n\
                          //             return\n\
                          //         default:\n\
                          //             work()\n\
-                         //         }}\n\
-                         //     }}\n\
-                         // }}(ctx)"
-                    );
+                         //         }\n\
+                         //     }\n\
+                         // }(ctx)"
+                        .to_string();
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),

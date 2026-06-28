@@ -1,6 +1,6 @@
 [package]
 name = "unfault-core"
-version = "0.5.34"
+version = "0.5.35"
 edition.workspace = true
 authors.workspace = true
 license.workspace = true

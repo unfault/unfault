@@ -61,6 +61,16 @@ pub struct IrBuildResult {
 ///
 /// Returns `Some(graph)` if the cache file exists and its stored aggregate
 /// hash matches `expected_hash`. Returns `None` otherwise.
+/// Format version for the on-disk graph cache.
+/// Bump when the encoding format changes incompatibly so old caches are
+/// rejected cleanly instead of producing a confusing deserialize error.
+///
+/// v1: positional/array encoding — could not round-trip `GraphNode`'s
+///     `#[serde(tag = "kind")]` + `skip_serializing_if` fields.
+/// v2: struct-map encoding — fields are written as `{name: value}` so
+///     absent optional fields are filled from `Default` on read.
+const GRAPH_CACHE_VERSION: u8 = 2;
+
 fn try_load_graph_cache(
     path: &std::path::Path,
     expected_hash: u64,
@@ -68,9 +78,16 @@ fn try_load_graph_cache(
 ) -> Option<unfault_core::graph::CodeGraph> {
     use std::io::BufReader;
 
-    // The file is: [aggregate_hash: u64 LE][msgpack graph bytes]
+    // The file is: [version: u8][aggregate_hash: u64 LE][msgpack graph bytes]
     let mut file = std::fs::File::open(path).ok()?;
     use std::io::Read;
+
+    let mut version_buf = [0u8; 1];
+    file.read_exact(&mut version_buf).ok()?;
+    if version_buf[0] != GRAPH_CACHE_VERSION {
+        return None;
+    }
+
     let mut header = [0u8; 8];
     file.read_exact(&mut header).ok()?;
     let stored_hash = u64::from_le_bytes(header);
@@ -106,9 +123,15 @@ fn save_graph_cache(
 
     let file = std::fs::File::create(path)?;
     let mut writer = BufWriter::new(file);
-    // Write 8-byte aggregate hash header, then msgpack graph
+    // Write 1-byte format version, 8-byte aggregate hash header, then msgpack graph
+    // using struct-map encoding so fields with `#[serde(skip_serializing_if = …)]`
+    // round-trip correctly through rmp_serde.
+    writer.write_all(&[GRAPH_CACHE_VERSION])?;
     writer.write_all(&aggregate_hash.to_le_bytes())?;
-    rmp_serde::encode::write(&mut writer, graph)?;
+    use serde::Serialize;
+    let mut ser = rmp_serde::Serializer::new(&mut writer).with_struct_map();
+    graph.serialize(&mut ser)?;
+    writer.flush()?;
     Ok(())
 }
 
@@ -164,9 +187,7 @@ pub fn build_ir(
         .par_iter()
         .enumerate()
         .map(|(index, file_path)| {
-            let Some(language) = detect_language(file_path) else {
-                return None;
-            };
+            let language = detect_language(file_path)?;
 
             let content = match std::fs::read_to_string(file_path) {
                 Ok(c) => c,
@@ -206,13 +227,13 @@ pub fn build_ir(
                     };
                     let mut sem = PyFileSemantics::from_parsed(&parsed);
                     // Analyze frameworks (FastAPI, etc.)
-                    if let Err(e) = sem.analyze_frameworks(&parsed) {
-                        if verbose {
-                            eprintln!(
-                                "Warning: Framework analysis failed for {}: {}",
-                                relative_path, e
-                            );
-                        }
+                    if let Err(e) = sem.analyze_frameworks(&parsed)
+                        && verbose
+                    {
+                        eprintln!(
+                            "Warning: Framework analysis failed for {}: {}",
+                            relative_path, e
+                        );
                     }
                     SourceSemantics::Python(sem)
                 }
@@ -228,13 +249,13 @@ pub fn build_ir(
                     };
                     let mut sem = GoFileSemantics::from_parsed(&parsed);
                     // Analyze frameworks (Gin, etc.)
-                    if let Err(e) = sem.analyze_frameworks(&parsed) {
-                        if verbose {
-                            eprintln!(
-                                "Warning: Framework analysis failed for {}: {}",
-                                relative_path, e
-                            );
-                        }
+                    if let Err(e) = sem.analyze_frameworks(&parsed)
+                        && verbose
+                    {
+                        eprintln!(
+                            "Warning: Framework analysis failed for {}: {}",
+                            relative_path, e
+                        );
                     }
                     SourceSemantics::Go(sem)
                 }
@@ -266,13 +287,13 @@ pub fn build_ir(
                     };
                     let mut sem = TsFileSemantics::from_parsed(&parsed);
                     // Analyze frameworks (Express, etc.)
-                    if let Err(e) = sem.analyze_frameworks(&parsed) {
-                        if verbose {
-                            eprintln!(
-                                "Warning: Framework analysis failed for {}: {}",
-                                relative_path, e
-                            );
-                        }
+                    if let Err(e) = sem.analyze_frameworks(&parsed)
+                        && verbose
+                    {
+                        eprintln!(
+                            "Warning: Framework analysis failed for {}: {}",
+                            relative_path, e
+                        );
                     }
                     SourceSemantics::Typescript(sem)
                 }
@@ -294,11 +315,9 @@ pub fn build_ir(
     let mut semantics_entries: Vec<(FileId, Arc<SourceSemantics>)> = Vec::new();
     let mut all_semantics: Vec<SourceSemantics> = Vec::new();
 
-    for result in results {
-        if let Some((file_id, semantics)) = result {
-            all_semantics.push(semantics.clone());
-            semantics_entries.push((file_id, Arc::new(semantics)));
-        }
+    for (file_id, semantics) in results.into_iter().flatten() {
+        all_semantics.push(semantics.clone());
+        semantics_entries.push((file_id, Arc::new(semantics)));
     }
 
     if verbose {
@@ -397,9 +416,7 @@ pub fn build_ir_cached(
             .par_iter()
             .enumerate()
             .map(|(index, file_path)| {
-                let Some(language) = detect_language(file_path) else {
-                    return None;
-                };
+                let language = detect_language(file_path)?;
 
                 let relative_path = file_path
                     .strip_prefix(workspace_path)
@@ -482,13 +499,13 @@ pub fn build_ir_cached(
                             }
                         };
                         let mut sem = PyFileSemantics::from_parsed(&parsed);
-                        if let Err(e) = sem.analyze_frameworks(&parsed) {
-                            if verbose {
-                                eprintln!(
-                                    "Warning: Framework analysis failed for {}: {}",
-                                    relative_path, e
-                                );
-                            }
+                        if let Err(e) = sem.analyze_frameworks(&parsed)
+                            && verbose
+                        {
+                            eprintln!(
+                                "Warning: Framework analysis failed for {}: {}",
+                                relative_path, e
+                            );
                         }
                         SourceSemantics::Python(sem)
                     }
@@ -504,13 +521,13 @@ pub fn build_ir_cached(
                             }
                         };
                         let mut sem = GoFileSemantics::from_parsed(&parsed);
-                        if let Err(e) = sem.analyze_frameworks(&parsed) {
-                            if verbose {
-                                eprintln!(
-                                    "Warning: Framework analysis failed for {}: {}",
-                                    relative_path, e
-                                );
-                            }
+                        if let Err(e) = sem.analyze_frameworks(&parsed)
+                            && verbose
+                        {
+                            eprintln!(
+                                "Warning: Framework analysis failed for {}: {}",
+                                relative_path, e
+                            );
                         }
                         SourceSemantics::Go(sem)
                     }
@@ -544,13 +561,13 @@ pub fn build_ir_cached(
                             }
                         };
                         let mut sem = TsFileSemantics::from_parsed(&parsed);
-                        if let Err(e) = sem.analyze_frameworks(&parsed) {
-                            if verbose {
-                                eprintln!(
-                                    "Warning: Framework analysis failed for {}: {}",
-                                    relative_path, e
-                                );
-                            }
+                        if let Err(e) = sem.analyze_frameworks(&parsed)
+                            && verbose
+                        {
+                            eprintln!(
+                                "Warning: Framework analysis failed for {}: {}",
+                                relative_path, e
+                            );
                         }
                         SourceSemantics::Typescript(sem)
                     }
@@ -599,11 +616,9 @@ pub fn build_ir_cached(
     let mut all_semantics: Vec<SourceSemantics> = Vec::new();
     let mut content_hashes: Vec<u64>;
 
-    for result in results {
-        if let Some((file_id, semantics)) = result {
-            all_semantics.push(semantics.clone());
-            semantics_entries.push((file_id, Arc::new(semantics)));
-        }
+    for (file_id, semantics) in results.into_iter().flatten() {
+        all_semantics.push(semantics.clone());
+        semantics_entries.push((file_id, Arc::new(semantics)));
     }
 
     // Get final cache stats

@@ -69,18 +69,17 @@ impl Rule for PythonUnboundedRetryRule {
                 let args = &call.args_repr;
 
                 // Check for tenacity.retry without stop parameter
-                if callee == "retry" || callee == "tenacity.retry" {
-                    if !args.contains("stop=")
-                        && !args.contains("stop_after_attempt")
-                        && !args.contains("stop_after_delay")
-                    {
-                        // Use third_party_from_import line for `from tenacity import stop_after_attempt`
-                        let import_line = py.import_insertion_line_for(
-                            ImportInsertionType::third_party_from_import(),
-                        );
-                        let patch =
-                            generate_tenacity_retry_patch(call, *file_id, &py.imports, import_line);
-                        findings.push(RuleFinding {
+                if (callee == "retry" || callee == "tenacity.retry")
+                    && !args.contains("stop=")
+                    && !args.contains("stop_after_attempt")
+                    && !args.contains("stop_after_delay")
+                {
+                    // Use third_party_from_import line for `from tenacity import stop_after_attempt`
+                    let import_line = py
+                        .import_insertion_line_for(ImportInsertionType::third_party_from_import());
+                    let patch =
+                        generate_tenacity_retry_patch(call, *file_id, &py.imports, import_line);
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Tenacity retry without stop condition".to_string(),
                             description: Some(
@@ -106,14 +105,16 @@ impl Rule for PythonUnboundedRetryRule {
                             ),
                             tags: vec!["retry".to_string(), "infinite-loop".to_string(), "stability".to_string()],
                         });
-                    }
                 }
 
                 // Check for backoff decorators without max_tries
-                if callee.starts_with("backoff.") && callee.contains("on_") {
-                    if !args.contains("max_tries=") && !args.contains("max_time=") {
-                        let patch = generate_backoff_patch(call, *file_id);
-                        findings.push(RuleFinding {
+                if callee.starts_with("backoff.")
+                    && callee.contains("on_")
+                    && !args.contains("max_tries=")
+                    && !args.contains("max_time=")
+                {
+                    let patch = generate_backoff_patch(call, *file_id);
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Backoff decorator without max_tries".to_string(),
                             description: Some(
@@ -139,7 +140,6 @@ impl Rule for PythonUnboundedRetryRule {
                             ),
                             tags: vec!["retry".to_string(), "infinite-loop".to_string(), "stability".to_string()],
                         });
-                    }
                 }
             }
         }

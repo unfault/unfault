@@ -6,7 +6,7 @@ use crate::types::meta::ReviewSessionMeta;
 use crate::types::sre_diagnostic::SystemHazard;
 
 /// Result of a full review session.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ReviewSessionResult {
     pub meta: ReviewSessionMeta,
     pub contexts: Vec<ContextResult>,
@@ -27,15 +27,4 @@ pub struct ContextResult {
     pub context_id: String,
     pub label: String,
     pub findings: Vec<Finding>,
-}
-
-impl Default for ReviewSessionResult {
-    fn default() -> Self {
-        Self {
-            meta: ReviewSessionMeta::default(),
-            contexts: Vec::new(),
-            runtime_dependencies: Vec::new(),
-            system_hazards: Vec::new(),
-        }
-    }
 }

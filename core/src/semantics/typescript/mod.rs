@@ -680,7 +680,7 @@ async function main() {
             .iter()
             .filter(|op| matches!(op.operation_type, model::TsAsyncOperationType::Await))
             .collect();
-        assert!(awaits.len() >= 1);
+        assert!(!awaits.is_empty());
     }
 
     #[test]

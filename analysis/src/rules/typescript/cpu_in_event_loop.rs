@@ -150,10 +150,10 @@ struct CpuOperationDetection {
 /// Check if the file has request handler patterns (Express, Fastify, etc.)
 fn has_request_handler(ts: &TsFileSemantics) -> bool {
     // Check for Express routes
-    if let Some(ref express) = ts.express {
-        if !express.routes.is_empty() {
-            return true;
-        }
+    if let Some(ref express) = ts.express
+        && !express.routes.is_empty()
+    {
+        return true;
     }
 
     // Check for HTTP handler imports

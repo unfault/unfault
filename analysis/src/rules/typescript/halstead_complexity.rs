@@ -171,18 +171,18 @@ impl Rule for TypescriptHalsteadComplexityRule {
 
                 let metrics = estimate_halstead_from_function(func, ts);
 
-                if let Some(severity) = metrics.severity() {
-                    if metrics.total_operators >= MIN_OPERATORS {
-                        findings.push(create_finding(
-                            self.id(),
-                            *file_id,
-                            &ts.path,
-                            &func.name,
-                            func.location.range.start_line + 1,
-                            &metrics,
-                            severity,
-                        ));
-                    }
+                if let Some(severity) = metrics.severity()
+                    && metrics.total_operators >= MIN_OPERATORS
+                {
+                    findings.push(create_finding(
+                        self.id(),
+                        *file_id,
+                        &ts.path,
+                        &func.name,
+                        func.location.range.start_line + 1,
+                        &metrics,
+                        severity,
+                    ));
                 }
             }
 
@@ -201,19 +201,19 @@ impl Rule for TypescriptHalsteadComplexityRule {
 
                     let metrics = estimate_halstead_from_method(method, ts);
 
-                    if let Some(severity) = metrics.severity() {
-                        if metrics.total_operators >= MIN_OPERATORS {
-                            let full_name = format!("{}.{}", class.name, method.name);
-                            findings.push(create_finding(
-                                self.id(),
-                                *file_id,
-                                &ts.path,
-                                &full_name,
-                                method.location.range.start_line + 1,
-                                &metrics,
-                                severity,
-                            ));
-                        }
+                    if let Some(severity) = metrics.severity()
+                        && metrics.total_operators >= MIN_OPERATORS
+                    {
+                        let full_name = format!("{}.{}", class.name, method.name);
+                        findings.push(create_finding(
+                            self.id(),
+                            *file_id,
+                            &ts.path,
+                            &full_name,
+                            method.location.range.start_line + 1,
+                            &metrics,
+                            severity,
+                        ));
                     }
                 }
             }
@@ -644,7 +644,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = TypescriptHalsteadComplexityRule::default();
+        let rule = TypescriptHalsteadComplexityRule;
         assert_eq!(rule.id(), "typescript.halstead_complexity");
     }
 

@@ -66,61 +66,20 @@ impl Rule for TypescriptUnsafeAnyRule {
             // Check function parameters with `any` type
             for func in &ts.functions {
                 for param in &func.params {
-                    if let Some(ref type_ann) = param.type_annotation {
-                        if type_ann.contains("any") && !type_ann.contains("unknown") {
-                            let title = format!(
-                                "Parameter `{}` in function `{}` uses `any` type",
-                                param.name, func.name
-                            );
-                            let description = format!(
-                                "The parameter `{}` has type `any`, which disables type checking. \
+                    if let Some(ref type_ann) = param.type_annotation
+                        && type_ann.contains("any")
+                        && !type_ann.contains("unknown")
+                    {
+                        let title = format!(
+                            "Parameter `{}` in function `{}` uses `any` type",
+                            param.name, func.name
+                        );
+                        let description = format!(
+                            "The parameter `{}` has type `any`, which disables type checking. \
                                  Consider using `unknown` for values of uncertain type, or define \
                                  a more specific type or interface.",
-                                param.name
-                            );
-
-                            findings.push(RuleFinding {
-                                rule_id: self.id().to_string(),
-                                title,
-                                description: Some(description),
-                                kind: FindingKind::AntiPattern,
-                                severity: Severity::Low,
-                                confidence: 1.0,
-                                dimension: Dimension::Correctness,
-                                file_id: *file_id,
-                                file_path: ts.path.clone(),
-                                line: Some(func.location.range.start_line + 1),
-                                column: Some(func.location.range.start_col + 1),
-                                end_line: None,
-                                end_column: None,
-                                byte_range: None,
-                                patch: None,
-                                fix_preview: Some(format!("// Consider: {} : unknown", param.name)),
-                                tags: vec![
-                                    "typescript".into(),
-                                    "type-safety".into(),
-                                    "any".into(),
-                                    "anti-pattern".into(),
-                                ],
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Check variables with `any` type
-            for var in &ts.variables {
-                if let Some(ref type_ann) = var.type_annotation {
-                    if type_ann.contains("any") && !type_ann.contains("unknown") {
-                        let title = format!("Variable `{}` uses `any` type", var.name);
-                        let description = format!(
-                            "The variable `{}` has type `any`, which disables type checking. \
-                             Consider using `unknown` for values of uncertain type, or define \
-                             a more specific type or interface.",
-                            var.name
+                            param.name
                         );
-
-                        let patch = generate_patch(*file_id, var.location.range.start_line + 1);
 
                         findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
@@ -132,16 +91,13 @@ impl Rule for TypescriptUnsafeAnyRule {
                             dimension: Dimension::Correctness,
                             file_id: *file_id,
                             file_path: ts.path.clone(),
-                            line: Some(var.location.range.start_line + 1),
-                            column: Some(var.location.range.start_col + 1),
+                            line: Some(func.location.range.start_line + 1),
+                            column: Some(func.location.range.start_col + 1),
                             end_line: None,
                             end_column: None,
                             byte_range: None,
-                            patch: Some(patch),
-                            fix_preview: Some(format!(
-                                "// Consider: const {}: unknown = ...",
-                                var.name
-                            )),
+                            patch: None,
+                            fix_preview: Some(format!("// Consider: {} : unknown", param.name)),
                             tags: vec![
                                 "typescript".into(),
                                 "type-safety".into(),
@@ -150,6 +106,52 @@ impl Rule for TypescriptUnsafeAnyRule {
                             ],
                         });
                     }
+                }
+            }
+
+            // Check variables with `any` type
+            for var in &ts.variables {
+                if let Some(ref type_ann) = var.type_annotation
+                    && type_ann.contains("any")
+                    && !type_ann.contains("unknown")
+                {
+                    let title = format!("Variable `{}` uses `any` type", var.name);
+                    let description = format!(
+                        "The variable `{}` has type `any`, which disables type checking. \
+                             Consider using `unknown` for values of uncertain type, or define \
+                             a more specific type or interface.",
+                        var.name
+                    );
+
+                    let patch = generate_patch(*file_id, var.location.range.start_line + 1);
+
+                    findings.push(RuleFinding {
+                        rule_id: self.id().to_string(),
+                        title,
+                        description: Some(description),
+                        kind: FindingKind::AntiPattern,
+                        severity: Severity::Low,
+                        confidence: 1.0,
+                        dimension: Dimension::Correctness,
+                        file_id: *file_id,
+                        file_path: ts.path.clone(),
+                        line: Some(var.location.range.start_line + 1),
+                        column: Some(var.location.range.start_col + 1),
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
+                        patch: Some(patch),
+                        fix_preview: Some(format!(
+                            "// Consider: const {}: unknown = ...",
+                            var.name
+                        )),
+                        tags: vec![
+                            "typescript".into(),
+                            "type-safety".into(),
+                            "any".into(),
+                            "anti-pattern".into(),
+                        ],
+                    });
                 }
             }
         }

@@ -84,7 +84,7 @@ impl Rule for PythonUnsafeEvalRule {
                         file_id: *file_id,
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
-                        column: Some(call.function_call.location.column as u32),
+                        column: Some(call.function_call.location.column),
                         end_line: None,
                         end_column: None,
                         byte_range: None,
@@ -116,7 +116,7 @@ impl Rule for PythonUnsafeEvalRule {
                         file_id: *file_id,
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
-                        column: Some(call.function_call.location.column as u32),
+                        column: Some(call.function_call.location.column),
                         end_line: None,
                         end_column: None,
                         byte_range: None,
@@ -148,7 +148,7 @@ impl Rule for PythonUnsafeEvalRule {
                         file_id: *file_id,
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
-                        column: Some(call.function_call.location.column as u32),
+                        column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -178,7 +178,7 @@ impl Rule for PythonUnsafeEvalRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -223,7 +223,7 @@ impl Rule for PythonUnsafeEvalRule {
                                 file_id: *file_id,
                                 file_path: py.path.clone(),
                                 line: Some(call.function_call.location.line),
-                                column: Some(call.function_call.location.column as u32),
+                                column: Some(call.function_call.location.column),
                                 end_line: None,
                                 end_column: None,
             byte_range: None,
@@ -266,7 +266,7 @@ impl Rule for PythonUnsafeEvalRule {
                                 file_id: *file_id,
                                 file_path: py.path.clone(),
                                 line: Some(call.function_call.location.line),
-                                column: Some(call.function_call.location.column as u32),
+                                column: Some(call.function_call.location.column),
                                 end_line: None,
                                 end_column: None,
             byte_range: None,
@@ -299,7 +299,7 @@ impl Rule for PythonUnsafeEvalRule {
                         file_id: *file_id,
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
-                        column: Some(call.function_call.location.column as u32),
+                        column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -310,10 +310,12 @@ impl Rule for PythonUnsafeEvalRule {
                 }
 
                 // Check for yaml.load() without SafeLoader
-                if callee == "yaml.load" {
-                    if !args.contains("Loader=") && !args.contains("SafeLoader") {
-                        let patch = generate_yaml_safe_load_patch(call, *file_id);
-                        findings.push(RuleFinding {
+                if callee == "yaml.load"
+                    && !args.contains("Loader=")
+                    && !args.contains("SafeLoader")
+                {
+                    let patch = generate_yaml_safe_load_patch(call, *file_id);
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Unsafe YAML loading".to_string(),
                             description: Some(
@@ -329,7 +331,7 @@ impl Rule for PythonUnsafeEvalRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -337,13 +339,13 @@ impl Rule for PythonUnsafeEvalRule {
                             fix_preview: Some(YAML_FIX.to_string()),
                             tags: vec!["security".to_string(), "yaml".to_string(), "rce".to_string()],
                         });
-                    }
                 }
 
                 // Check for subprocess with shell=True
-                if callee.starts_with("subprocess.") {
-                    if args.contains("shell=True") || args.contains("shell = True") {
-                        findings.push(RuleFinding {
+                if callee.starts_with("subprocess.")
+                    && (args.contains("shell=True") || args.contains("shell = True"))
+                {
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Subprocess with shell=True".to_string(),
                             description: Some(
@@ -359,7 +361,7 @@ impl Rule for PythonUnsafeEvalRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -367,7 +369,6 @@ impl Rule for PythonUnsafeEvalRule {
                             fix_preview: Some(SHELL_FIX.to_string()),
                             tags: vec!["security".to_string(), "shell-injection".to_string()],
                         });
-                    }
                 }
 
                 // Check for os.system()
@@ -388,7 +389,7 @@ impl Rule for PythonUnsafeEvalRule {
                         file_id: *file_id,
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
-                        column: Some(call.function_call.location.column as u32),
+                        column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,

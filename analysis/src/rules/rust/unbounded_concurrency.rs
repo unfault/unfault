@@ -278,23 +278,22 @@ fn create_finding(
         func_name, spawn_count
     );
 
-    let fix_preview = format!(
-        r#"// Before (unbounded):
-for item in items {{
+    let fix_preview = r#"// Before (unbounded):
+for item in items {
     tokio::spawn(process(item));
-}}
+}
 
 // After (limited to 10 concurrent):
 use tokio::sync::Semaphore;
 let semaphore = Arc::new(Semaphore::new(10));
-for item in items {{
+for item in items {
     let permit = semaphore.clone().acquire_owned().await?;
-    tokio::spawn(async move {{
+    tokio::spawn(async move {
         let _permit = permit;
         process(item).await
-    }});
-}}"#
-    );
+    });
+}"#
+    .to_string();
 
     RuleFinding {
         rule_id: rule_id.to_string(),

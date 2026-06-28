@@ -155,10 +155,10 @@ fn walk_for_routes(
     match node.kind() {
         // Look for function items with Rocket-style attributes
         "function_item" => {
-            if framework == RustFrameworkType::Rocket {
-                if let Some(route) = extract_rocket_route(parsed, &node) {
-                    summary.routes.push(route);
-                }
+            if framework == RustFrameworkType::Rocket
+                && let Some(route) = extract_rocket_route(parsed, &node)
+            {
+                summary.routes.push(route);
             }
         }
         // Look for method calls for route registration

@@ -385,20 +385,20 @@ fn generate_static_regex_patch(
 /// Extract the regex pattern string from the expression.
 fn extract_regex_pattern(expr: &str) -> String {
     // Look for r"..." or r#"..."# or "..." patterns
-    if let Some(start) = expr.find("r#\"") {
-        if let Some(end) = expr[start + 3..].find("\"#") {
-            return format!("r#\"{}\"#", &expr[start + 3..start + 3 + end]);
-        }
+    if let Some(start) = expr.find("r#\"")
+        && let Some(end) = expr[start + 3..].find("\"#")
+    {
+        return format!("r#\"{}\"#", &expr[start + 3..start + 3 + end]);
     }
-    if let Some(start) = expr.find("r\"") {
-        if let Some(end) = expr[start + 2..].find('"') {
-            return format!("r\"{}\"", &expr[start + 2..start + 2 + end]);
-        }
+    if let Some(start) = expr.find("r\"")
+        && let Some(end) = expr[start + 2..].find('"')
+    {
+        return format!("r\"{}\"", &expr[start + 2..start + 2 + end]);
     }
-    if let Some(start) = expr.find('"') {
-        if let Some(end) = expr[start + 1..].find('"') {
-            return format!("\"{}\"", &expr[start + 1..start + 1 + end]);
-        }
+    if let Some(start) = expr.find('"')
+        && let Some(end) = expr[start + 1..].find('"')
+    {
+        return format!("\"{}\"", &expr[start + 1..start + 1 + end]);
     }
     "r\"PATTERN\"".to_string()
 }

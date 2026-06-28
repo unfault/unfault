@@ -69,34 +69,34 @@ fn check_express_instantiation(
     // const router = Router()
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "variable_declarator" {
-                let name = child
-                    .child_by_field_name("name")
-                    .map(|n| parsed.text_for_node(&n));
+        if let Some(child) = node.child(i)
+            && child.kind() == "variable_declarator"
+        {
+            let name = child
+                .child_by_field_name("name")
+                .map(|n| parsed.text_for_node(&n));
 
-                let value = child
-                    .child_by_field_name("value")
-                    .map(|n| parsed.text_for_node(&n));
+            let value = child
+                .child_by_field_name("value")
+                .map(|n| parsed.text_for_node(&n));
 
-                if let (Some(var_name), Some(value_text)) = (name, value) {
-                    let location = parsed.location_for_node(&child);
+            if let (Some(var_name), Some(value_text)) = (name, value) {
+                let location = parsed.location_for_node(&child);
 
-                    // Check for express() call
-                    if value_text.contains("express()") {
-                        summary.apps.push(ExpressApp {
-                            variable_name: var_name.clone(),
-                            location: location.clone(),
-                        });
-                    }
+                // Check for express() call
+                if value_text.contains("express()") {
+                    summary.apps.push(ExpressApp {
+                        variable_name: var_name.clone(),
+                        location: location.clone(),
+                    });
+                }
 
-                    // Check for Router() call
-                    if value_text.contains("Router()") || value_text.contains("express.Router()") {
-                        summary.routers.push(ExpressRouter {
-                            variable_name: var_name,
-                            location,
-                        });
-                    }
+                // Check for Router() call
+                if value_text.contains("Router()") || value_text.contains("express.Router()") {
+                    summary.routers.push(ExpressRouter {
+                        variable_name: var_name,
+                        location,
+                    });
                 }
             }
         }
@@ -181,12 +181,11 @@ fn extract_route_info(
         }
 
         // Check for error handler middleware (if there are 3+ arguments)
-        if args_node.named_child_count() >= 3 {
-            if let Some(last_arg) = args_node.named_child(args_node.named_child_count() - 1) {
-                if has_four_params(&last_arg) {
-                    has_error_handler = true;
-                }
-            }
+        if args_node.named_child_count() >= 3
+            && let Some(last_arg) = args_node.named_child(args_node.named_child_count() - 1)
+            && has_four_params(&last_arg)
+        {
+            has_error_handler = true;
         }
     }
 
@@ -227,41 +226,40 @@ fn extract_middleware_info(
 ) -> ExpressMiddleware {
     let mut middleware_name = "unknown".to_string();
 
-    if let Some(args_node) = node.child_by_field_name("arguments") {
-        if let Some(first_arg) = args_node.named_child(0) {
-            let text = parsed.text_for_node(&first_arg);
+    if let Some(args_node) = node.child_by_field_name("arguments")
+        && let Some(first_arg) = args_node.named_child(0)
+    {
+        let text = parsed.text_for_node(&first_arg);
 
-            // Extract middleware name from common patterns
-            if text.contains("cors") {
-                middleware_name = "cors".to_string();
-            } else if text.contains("helmet") {
-                middleware_name = "helmet".to_string();
-            } else if text.contains("express.json") || text.contains("bodyParser.json") {
-                middleware_name = "json".to_string();
-            } else if text.contains("express.urlencoded") || text.contains("bodyParser.urlencoded")
-            {
-                middleware_name = "urlencoded".to_string();
-            } else if text.contains("express.static") {
-                middleware_name = "static".to_string();
-            } else if text.contains("morgan") {
-                middleware_name = "morgan".to_string();
-            } else if text.contains("compression") {
-                middleware_name = "compression".to_string();
-            } else if text.contains("cookieParser") || text.contains("cookie-parser") {
-                middleware_name = "cookieParser".to_string();
-            } else if text.contains("session") {
-                middleware_name = "session".to_string();
-            } else if text.contains("passport") {
-                middleware_name = "passport".to_string();
-            } else if text.contains("rateLimit") {
-                middleware_name = "rateLimit".to_string();
-            } else if first_arg.kind() == "identifier" {
-                middleware_name = text;
-            } else if first_arg.kind() == "call_expression" {
-                // Get function name from call
-                if let Some(func) = first_arg.child_by_field_name("function") {
-                    middleware_name = parsed.text_for_node(&func);
-                }
+        // Extract middleware name from common patterns
+        if text.contains("cors") {
+            middleware_name = "cors".to_string();
+        } else if text.contains("helmet") {
+            middleware_name = "helmet".to_string();
+        } else if text.contains("express.json") || text.contains("bodyParser.json") {
+            middleware_name = "json".to_string();
+        } else if text.contains("express.urlencoded") || text.contains("bodyParser.urlencoded") {
+            middleware_name = "urlencoded".to_string();
+        } else if text.contains("express.static") {
+            middleware_name = "static".to_string();
+        } else if text.contains("morgan") {
+            middleware_name = "morgan".to_string();
+        } else if text.contains("compression") {
+            middleware_name = "compression".to_string();
+        } else if text.contains("cookieParser") || text.contains("cookie-parser") {
+            middleware_name = "cookieParser".to_string();
+        } else if text.contains("session") {
+            middleware_name = "session".to_string();
+        } else if text.contains("passport") {
+            middleware_name = "passport".to_string();
+        } else if text.contains("rateLimit") {
+            middleware_name = "rateLimit".to_string();
+        } else if first_arg.kind() == "identifier" {
+            middleware_name = text;
+        } else if first_arg.kind() == "call_expression" {
+            // Get function name from call
+            if let Some(func) = first_arg.child_by_field_name("function") {
+                middleware_name = parsed.text_for_node(&func);
             }
         }
     }

@@ -378,24 +378,24 @@ impl LintScanState {
         }
         let mut lines = 0;
 
-        eprint!("→ Linting {}...\n", self.workspace_label.bold());
+        eprintln!("→ Linting {}...", self.workspace_label.bold());
         lines += 1;
 
         if !self.languages.is_empty() {
-            eprint!("  Languages: {}\n", self.languages.join(", ").dimmed());
+            eprintln!("  Languages: {}", self.languages.join(", ").dimmed());
             lines += 1;
         }
         if !self.frameworks.is_empty() {
-            eprint!("  Frameworks: {}\n", self.frameworks.join(", ").dimmed());
+            eprintln!("  Frameworks: {}", self.frameworks.join(", ").dimmed());
             lines += 1;
         }
 
-        eprint!("  Dimensions: {}\n", dimensions.join(", ").dimmed());
+        eprintln!("  Dimensions: {}", dimensions.join(", ").dimmed());
         lines += 1;
 
         if self.file_count > 0 {
-            eprint!(
-                "  Found {} matching source {}\n",
+            eprintln!(
+                "  Found {} matching source {}",
                 self.file_count.to_string().bright_green(),
                 if self.file_count == 1 {
                     "file"

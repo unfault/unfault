@@ -104,25 +104,24 @@ impl Rule for GoUnhandledErrorGoroutineRule {
 
                 let patch = generate_error_handling_patch(goroutine, *file_id);
 
-                let fix_preview = format!(
-                    "// Before:\n\
-                     // go func() {{\n\
+                let fix_preview = "// Before:\n\
+                     // go func() {\n\
                      //     err := doWork()\n\
                      //     // err is lost!\n\
-                     // }}()\n\
+                     // }()\n\
                      //\n\
                      // After (with recover and error channel):\n\
-                     // go func() {{\n\
-                     //     defer func() {{\n\
-                     //         if r := recover(); r != nil {{\n\
+                     // go func() {\n\
+                     //     defer func() {\n\
+                     //         if r := recover(); r != nil {\n\
                      //             errCh <- fmt.Errorf(\"panic: %v\", r)\n\
-                     //         }}\n\
-                     //     }}()\n\
-                     //     if err := doWork(); err != nil {{\n\
+                     //         }\n\
+                     //     }()\n\
+                     //     if err := doWork(); err != nil {\n\
                      //         errCh <- err\n\
-                     //     }}\n\
-                     // }}()"
-                );
+                     //     }\n\
+                     // }()"
+                    .to_string();
 
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),

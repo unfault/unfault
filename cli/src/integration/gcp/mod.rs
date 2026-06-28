@@ -109,21 +109,19 @@ pub fn find_credentials() -> Option<PathBuf> {
 /// Detect the GCP project ID from the environment.
 pub fn get_project_id() -> Option<String> {
     for var in &["GOOGLE_CLOUD_PROJECT", "GCP_PROJECT", "GCLOUD_PROJECT"] {
-        if let Ok(p) = env::var(var) {
-            if !p.is_empty() {
-                return Some(p);
-            }
+        if let Ok(p) = env::var(var)
+            && !p.is_empty()
+        {
+            return Some(p);
         }
     }
 
-    if let Some(creds_path) = find_credentials() {
-        if let Ok(contents) = std::fs::read_to_string(&creds_path) {
-            if let Ok(creds) = serde_json::from_str::<AdcFile>(&contents) {
-                if let Some(p) = creds.quota_project_id {
-                    return Some(p);
-                }
-            }
-        }
+    if let Some(creds_path) = find_credentials()
+        && let Ok(contents) = std::fs::read_to_string(&creds_path)
+        && let Ok(creds) = serde_json::from_str::<AdcFile>(&contents)
+        && let Some(p) = creds.quota_project_id
+    {
+        return Some(p);
     }
 
     get_project_from_gcloud_config()
@@ -145,12 +143,12 @@ fn get_project_from_gcloud_config() -> Option<String> {
 
     for line in contents.lines() {
         let line = line.trim();
-        if line.starts_with("project") {
-            if let Some(value) = line.split('=').nth(1) {
-                let p = value.trim().to_string();
-                if !p.is_empty() {
-                    return Some(p);
-                }
+        if line.starts_with("project")
+            && let Some(value) = line.split('=').nth(1)
+        {
+            let p = value.trim().to_string();
+            if !p.is_empty() {
+                return Some(p);
             }
         }
     }

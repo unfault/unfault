@@ -238,7 +238,7 @@ pub fn compute_propagation(finding: &Finding, graph: &CodeGraph) -> PropagationP
                 if !has_importers
                     && best_entrypoint
                         .as_ref()
-                        .map_or(true, |(_, p, _)| next_no_fail < *p)
+                        .is_none_or(|(_, p, _)| next_no_fail < *p)
                 {
                     best_entrypoint = Some((next_idx, next_no_fail, path.clone()));
                 }
@@ -291,10 +291,7 @@ pub fn compute_propagation(finding: &Finding, graph: &CodeGraph) -> PropagationP
             match &graph.graph[next_idx] {
                 GraphNode::Slo { name, .. } => {
                     let slo_name = name.clone();
-                    if best_slo
-                        .as_ref()
-                        .map_or(true, |(_, p, _)| next_no_fail < *p)
-                    {
+                    if best_slo.as_ref().is_none_or(|(_, p, _)| next_no_fail < *p) {
                         best_slo = Some((next_idx, next_no_fail, slo_name));
                     }
                     // Terminal — don't enqueue
@@ -309,7 +306,7 @@ pub fn compute_propagation(finding: &Finding, graph: &CodeGraph) -> PropagationP
                     let svc_label = format!("remote:{}", name);
                     if best_entrypoint
                         .as_ref()
-                        .map_or(true, |(_, p, _)| next_no_fail < *p)
+                        .is_none_or(|(_, p, _)| next_no_fail < *p)
                     {
                         best_entrypoint = Some((next_idx, next_no_fail, svc_label));
                     }

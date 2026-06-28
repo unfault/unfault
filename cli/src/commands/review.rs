@@ -85,6 +85,7 @@ pub struct ReviewArgs {
 /// * `Ok(EXIT_CONFIG_ERROR)` - Configuration error
 /// * `Ok(EXIT_AUTH_ERROR)` - Authentication error
 /// * `Ok(EXIT_NETWORK_ERROR)` - Network error
+///
 /// State for progressive display during scanning.
 struct ScanDisplayState {
     workspace_label: String,
@@ -412,10 +413,11 @@ async fn execute_client_parse(
         );
 
         // Bust the cache when --refresh-cache is passed, then load as normal.
-        if args.refresh_cache && !project_id.is_empty() {
-            if let Ok(ref c) = cache {
-                c.invalidate(&project_id, workspace_label);
-            }
+        if args.refresh_cache
+            && !project_id.is_empty()
+            && let Ok(ref c) = cache
+        {
+            c.invalidate(&project_id, workspace_label);
         }
 
         // Attempt a cache load when we have a project ID.
@@ -564,24 +566,25 @@ async fn execute_client_parse(
             }
 
             // Persist to cache for next run (best-effort, never fatal)
-            if any_fetch_attempted && !project_id.is_empty() {
-                if let Ok(c) = cache {
-                    let cached_patterns: Vec<_> = fetched_patterns
-                        .iter()
-                        .map(crate::enrichment_cache::CachedRemoteCallPattern::from)
-                        .collect();
-                    let cached_route_obs: Vec<_> = fetched_route_observations
-                        .iter()
-                        .map(crate::enrichment_cache::CachedObservedRoute::from)
-                        .collect();
-                    let _ = c.save(
-                        &project_id,
-                        workspace_label,
-                        fetched_slos,
-                        cached_patterns,
-                        cached_route_obs,
-                    );
-                }
+            if any_fetch_attempted
+                && !project_id.is_empty()
+                && let Ok(c) = cache
+            {
+                let cached_patterns: Vec<_> = fetched_patterns
+                    .iter()
+                    .map(crate::enrichment_cache::CachedRemoteCallPattern::from)
+                    .collect();
+                let cached_route_obs: Vec<_> = fetched_route_observations
+                    .iter()
+                    .map(crate::enrichment_cache::CachedObservedRoute::from)
+                    .collect();
+                let _ = c.save(
+                    &project_id,
+                    workspace_label,
+                    fetched_slos,
+                    cached_patterns,
+                    cached_route_obs,
+                );
             }
         }
 
@@ -627,15 +630,15 @@ async fn execute_client_parse(
         .map(|r| r.id.clone())
         .unwrap_or_else(|| format!("wks_{}", uuid::Uuid::new_v4().simple()));
 
-    if args.verbose {
-        if let Some(ref result) = workspace_id_result {
-            eprintln!(
-                "\n{} Workspace ID: {} (source: {:?})",
-                "DEBUG".yellow(),
-                result.id,
-                result.source
-            );
-        }
+    if args.verbose
+        && let Some(ref result) = workspace_id_result
+    {
+        eprintln!(
+            "\n{} Workspace ID: {} (source: {:?})",
+            "DEBUG".yellow(),
+            result.id,
+            result.source
+        );
     }
 
     // Step 4: Run analysis locally
@@ -1204,26 +1207,26 @@ fn render_system_hazard(hazard: &IrSystemHazard) {
     //
     // This is the zoom-out: code decision → system consequence.
     // Only shown when the World Model found a meaningful anchor.
-    if hazard.aggregate_risk > 0.0 {
-        if let Some(ref goal) = hazard.macro_goal {
-            let anchor = goal.rsplit('/').next().unwrap_or(goal);
-            if hazard.anchored_to_slo {
-                println!(
-                    "{}{}  {}  {}",
-                    indent,
-                    "↳ puts".dimmed(),
-                    anchor.bright_white().bold(),
-                    format!("at risk  ({:.0}%)", hazard.aggregate_risk).yellow(),
-                );
-            } else {
-                println!(
-                    "{}{}  {}  {}",
-                    indent,
-                    "↳ propagates to".dimmed(),
-                    anchor.white(),
-                    "(entrypoint)".dimmed(),
-                );
-            }
+    if hazard.aggregate_risk > 0.0
+        && let Some(ref goal) = hazard.macro_goal
+    {
+        let anchor = goal.rsplit('/').next().unwrap_or(goal);
+        if hazard.anchored_to_slo {
+            println!(
+                "{}{}  {}  {}",
+                indent,
+                "↳ puts".dimmed(),
+                anchor.bright_white().bold(),
+                format!("at risk  ({:.0}%)", hazard.aggregate_risk).yellow(),
+            );
+        } else {
+            println!(
+                "{}{}  {}  {}",
+                indent,
+                "↳ propagates to".dimmed(),
+                anchor.white(),
+                "(entrypoint)".dimmed(),
+            );
         }
     }
 

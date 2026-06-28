@@ -94,10 +94,10 @@ pub fn summarize_django(file: &ParsedFile) -> Option<DjangoFileSummary> {
 }
 
 fn collect_django_apps(file: &ParsedFile, node: Node, out: &mut Vec<DjangoApp>) {
-    if node.kind() == "assignment" {
-        if let Some(app) = extract_django_app(file, node) {
-            out.push(app);
-        }
+    if node.kind() == "assignment"
+        && let Some(app) = extract_django_app(file, node)
+    {
+        out.push(app);
     }
 
     let mut cursor = node.walk();
@@ -134,10 +134,10 @@ fn extract_django_app(file: &ParsedFile, node: Node) -> Option<DjangoApp> {
 }
 
 fn collect_django_views(file: &ParsedFile, node: Node, out: &mut Vec<DjangoView>) {
-    if node.kind() == "function_definition" || node.kind() == "async_function_definition" {
-        if let Some(view) = extract_django_view(file, node) {
-            out.push(view);
-        }
+    if (node.kind() == "function_definition" || node.kind() == "async_function_definition")
+        && let Some(view) = extract_django_view(file, node)
+    {
+        out.push(view);
     }
 
     let mut cursor = node.walk();
@@ -191,10 +191,10 @@ fn body_has_try_except(body: Node) -> bool {
 
 fn collect_django_urls(file: &ParsedFile, root: Node, out: &mut Vec<DjangoUrlPattern>) {
     fn walk(file: &ParsedFile, node: Node, out: &mut Vec<DjangoUrlPattern>) {
-        if node.kind() == "call" {
-            if let Some(url) = extract_django_url(file, node) {
-                out.push(url);
-            }
+        if node.kind() == "call"
+            && let Some(url) = extract_django_url(file, node)
+        {
+            out.push(url);
         }
 
         let mut child = node.child(0);
@@ -268,10 +268,10 @@ fn extract_django_url(file: &ParsedFile, node: Node) -> Option<DjangoUrlPattern>
 }
 
 fn collect_django_middleware(file: &ParsedFile, node: Node, out: &mut Vec<DjangoMiddleware>) {
-    if node.kind() == "assignment" {
-        if let Some(mw) = extract_django_middleware(file, node) {
-            out.push(mw);
-        }
+    if node.kind() == "assignment"
+        && let Some(mw) = extract_django_middleware(file, node)
+    {
+        out.push(mw);
     }
 
     let mut cursor = node.walk();
@@ -327,10 +327,10 @@ fn extract_django_middleware(file: &ParsedFile, node: Node) -> Option<DjangoMidd
 }
 
 fn collect_django_models(file: &ParsedFile, node: Node, out: &mut Vec<DjangoModel>) {
-    if node.kind() == "class_definition" {
-        if let Some(model) = extract_django_model(file, node) {
-            out.push(model);
-        }
+    if node.kind() == "class_definition"
+        && let Some(model) = extract_django_model(file, node)
+    {
+        out.push(model);
     }
 
     let mut cursor = node.walk();

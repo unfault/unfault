@@ -50,24 +50,23 @@ fn check_fastify_instantiation(
     summary: &mut FastifyFileSummary,
 ) {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "variable_declarator" {
-                let name = child
-                    .child_by_field_name("name")
-                    .map(|n| parsed.text_for_node(&n));
+        if let Some(child) = node.child(i)
+            && child.kind() == "variable_declarator"
+        {
+            let name = child
+                .child_by_field_name("name")
+                .map(|n| parsed.text_for_node(&n));
 
-                let value = child
-                    .child_by_field_name("value")
-                    .map(|n| parsed.text_for_node(&n));
+            let value = child
+                .child_by_field_name("value")
+                .map(|n| parsed.text_for_node(&n));
 
-                if let (Some(var_name), Some(value_text)) = (name, value) {
-                    if value_text.contains("fastify()")
-                        || value_text.contains("Fastify()")
-                        || value_text.contains("require('fastify')")
-                    {
-                        summary.apps.push(var_name.clone());
-                    }
-                }
+            if let (Some(var_name), Some(value_text)) = (name, value)
+                && (value_text.contains("fastify()")
+                    || value_text.contains("Fastify()")
+                    || value_text.contains("require('fastify')"))
+            {
+                summary.apps.push(var_name.clone());
             }
         }
     }
@@ -112,10 +111,10 @@ fn check_fastify_routes_and_middleware(
         summary.middlewares.push(middleware);
     }
 
-    if callee.ends_with(".register") || callee.contains(".register(") {
-        if let Some(name) = extract_register_name(parsed, node) {
-            summary.middlewares.push(name);
-        }
+    if (callee.ends_with(".register") || callee.contains(".register("))
+        && let Some(name) = extract_register_name(parsed, node)
+    {
+        summary.middlewares.push(name);
     }
 }
 
@@ -166,32 +165,31 @@ fn extract_middleware_name(
 ) -> FastifyMiddleware {
     let mut middleware_name = "unknown".to_string();
 
-    if let Some(args_node) = node.child_by_field_name("arguments") {
-        if let Some(first_arg) = args_node.named_child(0) {
-            let text = parsed.text_for_node(&first_arg);
+    if let Some(args_node) = node.child_by_field_name("arguments")
+        && let Some(first_arg) = args_node.named_child(0)
+    {
+        let text = parsed.text_for_node(&first_arg);
 
-            if text.contains("cors") {
-                middleware_name = "cors".to_string();
-            } else if text.contains("helmet") {
-                middleware_name = "helmet".to_string();
-            } else if text.contains("fastify.json") || text.contains("bodyParser.json") {
-                middleware_name = "json".to_string();
-            } else if text.contains("fastify.urlencoded") || text.contains("bodyParser.urlencoded")
-            {
-                middleware_name = "urlencoded".to_string();
-            } else if text.contains("fastify.static") {
-                middleware_name = "static".to_string();
-            } else if text.contains("morgan") {
-                middleware_name = "morgan".to_string();
-            } else if text.contains("compression") {
-                middleware_name = "compression".to_string();
-            } else if first_arg.kind() == "identifier" {
-                middleware_name = text;
-            } else if first_arg.kind() == "call_expression" {
-                if let Some(func) = first_arg.child_by_field_name("function") {
-                    middleware_name = parsed.text_for_node(&func);
-                }
-            }
+        if text.contains("cors") {
+            middleware_name = "cors".to_string();
+        } else if text.contains("helmet") {
+            middleware_name = "helmet".to_string();
+        } else if text.contains("fastify.json") || text.contains("bodyParser.json") {
+            middleware_name = "json".to_string();
+        } else if text.contains("fastify.urlencoded") || text.contains("bodyParser.urlencoded") {
+            middleware_name = "urlencoded".to_string();
+        } else if text.contains("fastify.static") {
+            middleware_name = "static".to_string();
+        } else if text.contains("morgan") {
+            middleware_name = "morgan".to_string();
+        } else if text.contains("compression") {
+            middleware_name = "compression".to_string();
+        } else if first_arg.kind() == "identifier" {
+            middleware_name = text;
+        } else if first_arg.kind() == "call_expression"
+            && let Some(func) = first_arg.child_by_field_name("function")
+        {
+            middleware_name = parsed.text_for_node(&func);
         }
     }
 
@@ -207,42 +205,42 @@ fn extract_register_name(
 ) -> Option<FastifyMiddleware> {
     let location = parsed.location_for_node(node);
 
-    if let Some(args_node) = node.child_by_field_name("arguments") {
-        if let Some(first_arg) = args_node.named_child(0) {
-            let text = parsed.text_for_node(&first_arg);
-            let text_lower = text.to_lowercase();
+    if let Some(args_node) = node.child_by_field_name("arguments")
+        && let Some(first_arg) = args_node.named_child(0)
+    {
+        let text = parsed.text_for_node(&first_arg);
+        let text_lower = text.to_lowercase();
 
-            let middleware_name = if text_lower.contains("cors") {
-                "cors".to_string()
-            } else if text_lower.contains("helmet") {
-                "helmet".to_string()
-            } else if text_lower.contains("fastify-jwt")
-                || text_lower.contains("@fastify/jwt")
-                || text_lower.contains("jwt")
-            {
-                "fastify-jwt".to_string()
-            } else if text_lower.contains("fastify-cookie")
-                || text_lower.contains("@fastify/cookie")
-                || text_lower.contains("cookie")
-            {
-                "fastify-cookie".to_string()
-            } else if text_lower.contains("fastify-rate-limit")
-                || text_lower.contains("@fastify/rate-limit")
-                || text_lower.contains("rate-limit")
-                || text_lower.contains("ratelimit")
-            {
-                "fastify-rate-limit".to_string()
-            } else if first_arg.kind() == "identifier" {
-                text
-            } else {
-                return None;
-            };
+        let middleware_name = if text_lower.contains("cors") {
+            "cors".to_string()
+        } else if text_lower.contains("helmet") {
+            "helmet".to_string()
+        } else if text_lower.contains("fastify-jwt")
+            || text_lower.contains("@fastify/jwt")
+            || text_lower.contains("jwt")
+        {
+            "fastify-jwt".to_string()
+        } else if text_lower.contains("fastify-cookie")
+            || text_lower.contains("@fastify/cookie")
+            || text_lower.contains("cookie")
+        {
+            "fastify-cookie".to_string()
+        } else if text_lower.contains("fastify-rate-limit")
+            || text_lower.contains("@fastify/rate-limit")
+            || text_lower.contains("rate-limit")
+            || text_lower.contains("ratelimit")
+        {
+            "fastify-rate-limit".to_string()
+        } else if first_arg.kind() == "identifier" {
+            text
+        } else {
+            return None;
+        };
 
-            return Some(FastifyMiddleware {
-                middleware_name,
-                location,
-            });
-        }
+        return Some(FastifyMiddleware {
+            middleware_name,
+            location,
+        });
     }
 
     None
@@ -431,7 +429,7 @@ const app = fastify();
 app.register(cors, { origin: true });
 "#;
         let summary = parse_and_summarize(src).unwrap();
-        assert!(summary.middlewares.len() >= 1);
+        assert!(!summary.middlewares.is_empty());
     }
 
     #[test]

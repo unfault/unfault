@@ -95,7 +95,7 @@ impl Rule for RedisMissingTtlRule {
                         .function_call
                         .callee_expr
                         .split('.')
-                        .last()
+                        .next_back()
                         .unwrap_or("operation");
 
                     let title = format!("Redis {} at line {} has no TTL", op_name, line);

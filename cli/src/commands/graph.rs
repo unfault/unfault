@@ -183,41 +183,41 @@ pub async fn execute_impact(args: ImpactArgs) -> Result<i32> {
 
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
-    if !args.verbose {
-        if let Some(impact) = crate::session::query_cache::get_impact(
+    if !args.verbose
+        && let Some(impact) = crate::session::query_cache::get_impact(
             &workspace_path,
             &args.file_path,
             args.max_depth as usize,
             &commit_sha,
-        ) {
-            if impact.affected_files.is_empty() {
-                eprintln!(
-                    "{} No downstream dependencies found for '{}'",
-                    "ℹ".cyan(),
-                    args.file_path
-                );
-                return Ok(EXIT_SUCCESS);
-            }
-            if args.json {
-                println!("{}", serde_json::to_string_pretty(&impact)?);
-            } else {
-                println!(
-                    "\n{} Impact analysis for {}",
-                    "📊".bright_blue(),
-                    args.file_path.bright_blue()
-                );
-                println!(
-                    "  {} {} file(s) affected:\n",
-                    "→".cyan(),
-                    impact.affected_files.len()
-                );
-                for file in &impact.affected_files {
-                    println!("    {}", file);
-                }
-                println!();
-            }
+        )
+    {
+        if impact.affected_files.is_empty() {
+            eprintln!(
+                "{} No downstream dependencies found for '{}'",
+                "ℹ".cyan(),
+                args.file_path
+            );
             return Ok(EXIT_SUCCESS);
         }
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&impact)?);
+        } else {
+            println!(
+                "\n{} Impact analysis for {}",
+                "📊".bright_blue(),
+                args.file_path.bright_blue()
+            );
+            println!(
+                "  {} {} file(s) affected:\n",
+                "→".cyan(),
+                impact.affected_files.len()
+            );
+            for file in &impact.affected_files {
+                println!("    {}", file);
+            }
+            println!();
+        }
+        return Ok(EXIT_SUCCESS);
     }
 
     // Build local graph
@@ -293,34 +293,34 @@ pub async fn execute_library(args: LibraryArgs) -> Result<i32> {
     }
 
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
-    if !args.verbose {
-        if let Some(deps) = crate::session::query_cache::get_library(
+    if !args.verbose
+        && let Some(deps) = crate::session::query_cache::get_library(
             &workspace_path,
             &args.library_name,
             &commit_sha,
-        ) {
-            if args.json {
-                println!("{}", serde_json::to_string_pretty(&deps)?);
-                return Ok(EXIT_SUCCESS);
-            }
-            println!(
-                "\n{} Files using '{}':",
-                "📦".bright_blue(),
-                args.library_name.bright_blue()
-            );
-            if deps.library_users.is_empty() && deps.dependencies.is_empty() {
-                println!("  No files found using '{}'", args.library_name);
-            } else {
-                for f in &deps.library_users {
-                    println!("    {}", f);
-                }
-                for f in &deps.dependencies {
-                    println!("    {}", f);
-                }
-            }
-            println!();
+        )
+    {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&deps)?);
             return Ok(EXIT_SUCCESS);
         }
+        println!(
+            "\n{} Files using '{}':",
+            "📦".bright_blue(),
+            args.library_name.bright_blue()
+        );
+        if deps.library_users.is_empty() && deps.dependencies.is_empty() {
+            println!("  No files found using '{}'", args.library_name);
+        } else {
+            for f in &deps.library_users {
+                println!("    {}", f);
+            }
+            for f in &deps.dependencies {
+                println!("    {}", f);
+            }
+        }
+        println!();
+        return Ok(EXIT_SUCCESS);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -382,37 +382,36 @@ pub async fn execute_deps(args: DepsArgs) -> Result<i32> {
     }
 
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
-    if !args.verbose {
-        if let Some(deps) =
+    if !args.verbose
+        && let Some(deps) =
             crate::session::query_cache::get_deps(&workspace_path, &args.file_path, &commit_sha)
-        {
-            if args.json {
-                println!("{}", serde_json::to_string_pretty(&deps)?);
-                return Ok(EXIT_SUCCESS);
-            }
-            println!(
-                "\n{} Dependencies of {}",
-                "📦".bright_blue(),
-                args.file_path.bright_blue()
-            );
-            if !deps.dependencies.is_empty() {
-                println!("  Internal modules:");
-                for d in &deps.dependencies {
-                    println!("    {}", d);
-                }
-            }
-            if !deps.library_users.is_empty() {
-                println!("  External libraries:");
-                for l in &deps.library_users {
-                    println!("    {}", l);
-                }
-            }
-            if deps.dependencies.is_empty() && deps.library_users.is_empty() {
-                println!("  No dependencies found for '{}'", args.file_path);
-            }
-            println!();
+    {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&deps)?);
             return Ok(EXIT_SUCCESS);
         }
+        println!(
+            "\n{} Dependencies of {}",
+            "📦".bright_blue(),
+            args.file_path.bright_blue()
+        );
+        if !deps.dependencies.is_empty() {
+            println!("  Internal modules:");
+            for d in &deps.dependencies {
+                println!("    {}", d);
+            }
+        }
+        if !deps.library_users.is_empty() {
+            println!("  External libraries:");
+            for l in &deps.library_users {
+                println!("    {}", l);
+            }
+        }
+        if deps.dependencies.is_empty() && deps.library_users.is_empty() {
+            println!("  No dependencies found for '{}'", args.file_path);
+        }
+        println!();
+        return Ok(EXIT_SUCCESS);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -480,36 +479,37 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
     // Cache the centrality path (importance_score uses a different return type — skip).
-    if !args.verbose && args.sort_by != "importance_score" {
-        if let Some(centrality) = crate::session::query_cache::get_critical(
+    if !args.verbose
+        && args.sort_by != "importance_score"
+        && let Some(centrality) = crate::session::query_cache::get_critical(
             &workspace_path,
             &args.sort_by,
             args.limit as usize,
             &commit_sha,
-        ) {
-            if args.json {
-                println!("{}", serde_json::to_string_pretty(&centrality)?);
-                return Ok(EXIT_SUCCESS);
-            }
-            println!(
-                "\n{} Most critical files (by import count):\n",
-                "📊".bright_blue()
-            );
-            if centrality.central_files.is_empty() {
-                println!("  No import relationships found.");
-            } else {
-                for (i, (path, score)) in centrality.central_files.iter().enumerate() {
-                    println!(
-                        "  {}. {} (imported {} times)",
-                        i + 1,
-                        path.bright_blue(),
-                        (*score as i32).to_string().yellow()
-                    );
-                }
-            }
-            println!();
+        )
+    {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&centrality)?);
             return Ok(EXIT_SUCCESS);
         }
+        println!(
+            "\n{} Most critical files (by import count):\n",
+            "📊".bright_blue()
+        );
+        if centrality.central_files.is_empty() {
+            println!("  No import relationships found.");
+        } else {
+            for (i, (path, score)) in centrality.central_files.iter().enumerate() {
+                println!(
+                    "  {}. {} (imported {} times)",
+                    i + 1,
+                    path.bright_blue(),
+                    (*score as i32).to_string().yellow()
+                );
+            }
+        }
+        println!();
+        return Ok(EXIT_SUCCESS);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -605,26 +605,25 @@ pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
     }
 
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
-    if !args.verbose {
-        if let Some(overview) = crate::session::query_cache::get_stats(&workspace_path, &commit_sha)
-        {
-            if args.json {
-                println!("{}", serde_json::to_string_pretty(&overview)?);
-                return Ok(EXIT_SUCCESS);
-            }
-            println!("\n{} Graph Statistics\n", "📊".bright_blue());
-            println!("  Files:      {}", overview.file_count.to_string().yellow());
-            println!(
-                "  Functions:  {}",
-                overview.function_count.to_string().yellow()
-            );
-            println!("  Languages:  {}", overview.languages.join(", ").cyan());
-            if !overview.frameworks.is_empty() {
-                println!("  Frameworks: {}", overview.frameworks.join(", ").cyan());
-            }
-            println!();
+    if !args.verbose
+        && let Some(overview) = crate::session::query_cache::get_stats(&workspace_path, &commit_sha)
+    {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&overview)?);
             return Ok(EXIT_SUCCESS);
         }
+        println!("\n{} Graph Statistics\n", "📊".bright_blue());
+        println!("  Files:      {}", overview.file_count.to_string().yellow());
+        println!(
+            "  Functions:  {}",
+            overview.function_count.to_string().yellow()
+        );
+        println!("  Languages:  {}", overview.languages.join(", ").cyan());
+        if !overview.frameworks.is_empty() {
+            println!("  Frameworks: {}", overview.frameworks.join(", ").cyan());
+        }
+        println!();
+        return Ok(EXIT_SUCCESS);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -980,15 +979,15 @@ pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
         args.file.as_deref().unwrap_or("")
     );
 
-    if !args.verbose {
-        if let Some(routes) = crate::session::query_cache::get::<Vec<RouteEntry>>(
+    if !args.verbose
+        && let Some(routes) = crate::session::query_cache::get::<Vec<RouteEntry>>(
             &workspace_path,
             "routes",
             &cache_params,
             &commit_sha,
-        ) {
-            return render_routes_output(routes, args.json);
-        }
+        )
+    {
+        return render_routes_output(routes, args.json);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -1156,15 +1155,16 @@ pub async fn execute_coverage(args: CoverageArgs) -> Result<i32> {
         env!("CARGO_PKG_VERSION"),
     );
 
-    if !args.verbose && !args.refresh_cache {
-        if let Some(ctx) = crate::session::query_cache::get::<CoverageContext>(
+    if !args.verbose
+        && !args.refresh_cache
+        && let Some(ctx) = crate::session::query_cache::get::<CoverageContext>(
             &workspace_path,
             "coverage",
             &cache_params,
             &commit_sha,
-        ) {
-            return render_coverage_output(&ctx, args.json);
-        }
+        )
+    {
+        return render_coverage_output(&ctx, args.json);
     }
 
     if args.verbose {
@@ -1626,10 +1626,10 @@ fn walk_callees_inner(
     if visited.contains(&from) {
         return;
     }
-    if let Some(max) = max_depth {
-        if depth as usize > max {
-            return;
-        }
+    if let Some(max) = max_depth
+        && depth as usize > max
+    {
+        return;
     }
     visited.insert(from);
 
@@ -1650,7 +1650,7 @@ fn walk_callees_inner(
         };
 
         let role = node_role(graph, callee_idx, callee_node, file_libs);
-        let span = node_span_signal(graph, callee_node, file_libs, &auto_instruments);
+        let span = node_span_signal(graph, callee_node, file_libs, auto_instruments);
 
         // Stop recursing at library-boundary nodes but still emit the node.
         let is_boundary = matches!(
@@ -1729,10 +1729,10 @@ fn walk_callers_inner(
     use petgraph::visit::EdgeRef as _;
     use unfault_analysis::graph::{GraphEdgeKind, GraphNode};
 
-    if let Some(max) = max_depth {
-        if depth as usize > max {
-            return;
-        }
+    if let Some(max) = max_depth
+        && depth as usize > max
+    {
+        return;
     }
 
     for edge in graph.graph.edges_directed(from, Direction::Incoming) {
@@ -1756,7 +1756,7 @@ fn walk_callers_inner(
         };
 
         let role = node_role(graph, caller_idx, caller_node, file_libs);
-        let span = node_span_signal(graph, caller_node, file_libs, &auto_instruments);
+        let span = node_span_signal(graph, caller_node, file_libs, auto_instruments);
 
         out.push(CoverageNode {
             name,
@@ -1819,7 +1819,10 @@ fn stub_route_callers_via_raw_calls(
 
         // Match the anchor name against the last segment of each raw call.
         let hit = raw_calls.iter().any(|call_expr| {
-            let last = call_expr.split('.').last().unwrap_or(call_expr.as_str());
+            let last = call_expr
+                .split('.')
+                .next_back()
+                .unwrap_or(call_expr.as_str());
             last == anchor_name
         });
         if !hit {
@@ -1828,7 +1831,7 @@ fn stub_route_callers_via_raw_calls(
 
         let file =
             unfault_analysis::graph::traversal::node_file_path_pub(graph, node).unwrap_or_default();
-        let span = node_span_signal(graph, node, file_libs, &auto_instruments);
+        let span = node_span_signal(graph, node, file_libs, auto_instruments);
         let role = node_role(graph, idx, node, file_libs);
 
         result.push(CoverageNode {
@@ -1880,7 +1883,10 @@ fn stub_callees_from_raw_calls(
         };
 
         // For display purposes the node name is the last segment of the call.
-        let name = call_expr.split('.').last().unwrap_or(call_expr.as_str());
+        let name = call_expr
+            .split('.')
+            .next_back()
+            .unwrap_or(call_expr.as_str());
 
         // Skip rules that apply ONLY to plain logic calls (never to known
         // boundaries — db_session.get must survive).
@@ -1942,7 +1948,7 @@ fn stub_callees_from_raw_calls(
             } else {
                 None
             };
-            let s = node_span_signal(graph, node, file_libs, &auto_instruments);
+            let s = node_span_signal(graph, node, file_libs, auto_instruments);
             // If the resolved function has its own classification, prefer it.
             // Otherwise keep the role we inferred from the call expression
             // (so unresolved db_session.get stays Database).
@@ -2124,16 +2130,16 @@ fn node_role(
 ///
 /// Recognised patterns (case-insensitive on the method name):
 /// - SQLAlchemy ORM:    session.execute, session.scalar, session.scalars,
-///                      session.add, session.delete, session.merge,
-///                      session.commit, session.rollback, session.flush,
-///                      session.refresh, session.query, session.get
+///   session.add, session.delete, session.merge,
+///   session.commit, session.rollback, session.flush,
+///   session.refresh, session.query, session.get
 /// - SQLAlchemy Core:   conn.execute, engine.execute, select(...),
-///                      insert(...), update(...), delete(...)
+///   insert(...), update(...), delete(...)
 /// - Django ORM:        .objects.get, .objects.filter, .objects.create,
-///                      .objects.all, .objects.update, .objects.delete,
-///                      .save(), .delete() on a model instance
+///   .objects.all, .objects.update, .objects.delete,
+///   .save(), .delete() on a model instance
 /// - Generic SQL/DB:    db.query, db.execute, db.fetchone, db.fetchall,
-///                      cursor.execute, cursor.fetchone
+///   cursor.execute, cursor.fetchone
 fn is_db_call_expr(expr: &str) -> bool {
     let lower = expr.to_lowercase();
     let last = lower.rsplit('.').next().unwrap_or(lower.as_str());
@@ -2177,27 +2183,25 @@ fn is_db_call_expr(expr: &str) -> bool {
         "bulk_insert_mappings",
         "bulk_update_mappings",
     ];
-    if DB_METHODS.contains(&last) {
-        if receiver.contains("session")
+    if DB_METHODS.contains(&last)
+        && (receiver.contains("session")
             || receiver.contains("db")
             || receiver.contains("conn")
             || receiver.contains("engine")
-            || receiver.contains("cursor")
-        {
-            return true;
-        }
+            || receiver.contains("cursor"))
+    {
+        return true;
     }
 
     // session.add / session.get / session.query / session.delete on Session-typed receivers.
-    if matches!(last, "add" | "get" | "query" | "delete" | "save") {
-        if receiver.ends_with("session")
+    if matches!(last, "add" | "get" | "query" | "delete" | "save")
+        && (receiver.ends_with("session")
             || receiver.ends_with("db_session")
             || receiver.ends_with("db")
             || receiver.contains(".session")
-            || receiver.contains("session.")
-        {
-            return true;
-        }
+            || receiver.contains("session."))
+    {
+        return true;
     }
 
     // Django: .objects.<anything>
@@ -2901,8 +2905,6 @@ mod coverage_tests {
     #[test]
     fn build_auto_instrument_set_from_graph_with_fastapi_instrumentor() {
         use crate::session::ir_builder::build_ir_cached;
-        use std::sync::Arc;
-        use unfault_core::semantics::SourceSemantics;
 
         // Build a tiny two-file workspace:
         //   tracing.py  — imports opentelemetry.instrumentation.fastapi and calls instrument_app
@@ -3002,57 +3004,57 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
     }
 
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
-    if !args.verbose {
-        if let Some(flow) = crate::session::query_cache::get_function_impact(
+    if !args.verbose
+        && let Some(flow) = crate::session::query_cache::get_function_impact(
             &workspace_path,
             &args.function,
             args.max_depth as usize,
             &commit_sha,
-        ) {
-            if args.json {
-                println!("{}", serde_json::to_string_pretty(&flow)?);
-                return Ok(EXIT_SUCCESS);
-            }
-            println!();
-            println!(
-                "{} {} {}",
-                "🔗".cyan(),
-                "Function Call Graph:".bold(),
-                function_name.bright_white()
-            );
-            println!();
-            if flow.paths.is_empty() {
-                println!("  {} No call paths found from this function.", "ℹ".blue());
-                println!();
-                return Ok(EXIT_SUCCESS);
-            }
-            println!(
-                "  {} Found {} call path(s)",
-                "→".cyan(),
-                flow.paths.len().to_string().bold()
-            );
-            println!();
-            for (i, path) in flow.paths.iter().enumerate() {
-                println!("  Path {}:", i + 1);
-                for node in path {
-                    let indent = "  ".repeat(node.depth + 2);
-                    let fi = node
-                        .file_path
-                        .as_deref()
-                        .map(|p| format!(" ({})", p))
-                        .unwrap_or_default();
-                    println!(
-                        "{}{} {}{}",
-                        indent,
-                        "→".cyan(),
-                        node.name.bright_white(),
-                        fi.dimmed()
-                    );
-                }
-                println!();
-            }
+        )
+    {
+        if args.json {
+            println!("{}", serde_json::to_string_pretty(&flow)?);
             return Ok(EXIT_SUCCESS);
         }
+        println!();
+        println!(
+            "{} {} {}",
+            "🔗".cyan(),
+            "Function Call Graph:".bold(),
+            function_name.bright_white()
+        );
+        println!();
+        if flow.paths.is_empty() {
+            println!("  {} No call paths found from this function.", "ℹ".blue());
+            println!();
+            return Ok(EXIT_SUCCESS);
+        }
+        println!(
+            "  {} Found {} call path(s)",
+            "→".cyan(),
+            flow.paths.len().to_string().bold()
+        );
+        println!();
+        for (i, path) in flow.paths.iter().enumerate() {
+            println!("  Path {}:", i + 1);
+            for node in path {
+                let indent = "  ".repeat(node.depth + 2);
+                let fi = node
+                    .file_path
+                    .as_deref()
+                    .map(|p| format!(" ({})", p))
+                    .unwrap_or_default();
+                println!(
+                    "{}{} {}{}",
+                    indent,
+                    "→".cyan(),
+                    node.name.bright_white(),
+                    fi.dimmed()
+                );
+            }
+            println!();
+        }
+        return Ok(EXIT_SUCCESS);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -3388,13 +3390,12 @@ pub async fn execute_brief(args: BriefArgs) -> Result<i32> {
 
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
-    if !args.verbose {
-        if let Some(ctx) = crate::session::query_cache::get::<
+    if !args.verbose
+        && let Some(ctx) = crate::session::query_cache::get::<
             unfault_core::types::graph_query::BriefContext,
         >(&workspace_path, "brief", &args.path, &commit_sha)
-        {
-            return render_brief_output(ctx, args.json);
-        }
+    {
+        return render_brief_output(ctx, args.json);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -3600,12 +3601,11 @@ pub async fn execute_path(args: PathArgs) -> Result<i32> {
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     let cache_key = format!("{}|{}", args.from, args.to);
 
-    if !args.verbose {
-        if let Some(ctx) =
+    if !args.verbose
+        && let Some(ctx) =
             crate::session::query_cache::get_path(&workspace_path, &cache_key, "", &commit_sha)
-        {
-            return render_path_output(ctx, args.json);
-        }
+    {
+        return render_path_output(ctx, args.json);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -3723,12 +3723,11 @@ pub async fn execute_handlers(args: HandlersArgs) -> Result<i32> {
 
     let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
-    if !args.verbose {
-        if let Some(ctx) =
+    if !args.verbose
+        && let Some(ctx) =
             crate::session::query_cache::get_handlers(&workspace_path, &args.pattern, &commit_sha)
-        {
-            return render_handlers_output(ctx, args.json);
-        }
+    {
+        return render_handlers_output(ctx, args.json);
     }
 
     let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
@@ -3987,7 +3986,7 @@ fn render_callers_output(
     // Group callers by depth for lookup.
     let mut by_depth: HashMap<usize, Vec<&CallerInfo>> = HashMap::new();
     for c in &ctx.callers {
-        by_depth.entry(c.depth).or_insert_with(Vec::new).push(c);
+        by_depth.entry(c.depth).or_default().push(c);
     }
 
     let _top_callers: &[&CallerInfo] = by_depth

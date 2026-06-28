@@ -69,12 +69,11 @@ impl RetryTemplate {
         RetryRecommendation {
             library: "backoff",
             import_statement: "use backoff::{ExponentialBackoff, Error};",
-            decorator: format!(
-                r#"backoff::retry(ExponentialBackoff::default(), || {{
+            decorator: r#"backoff::retry(ExponentialBackoff::default(), || {
     // Your operation here
     Ok(())
-}})"#
-            ),
+})"#
+            .to_string(),
             retryable_exceptions: vec!["reqwest::Error", "std::io::Error"],
         }
     }

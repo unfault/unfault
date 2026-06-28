@@ -46,6 +46,12 @@ struct RetryPatchContext<'a> {
 #[derive(Debug)]
 pub struct PythonHttpMissingRetryRule;
 
+impl Default for PythonHttpMissingRetryRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PythonHttpMissingRetryRule {
     pub fn new() -> Self {
         Self

@@ -72,9 +72,7 @@ impl Rule for GoRaceConditionRule {
                     );
 
                     // Generate patch suggestion
-                    let replacement = format!(
-                        "// Pass captured variables as parameters to avoid race:\n// go func(val Type) {{\n//     // use val instead of captured variable\n// }}(capturedVar)"
-                    );
+                    let replacement = "// Pass captured variables as parameters to avoid race:\n// go func(val Type) {\n//     // use val instead of captured variable\n// }(capturedVar)".to_string();
 
                     let patch = FilePatch {
                         file_id: *file_id,

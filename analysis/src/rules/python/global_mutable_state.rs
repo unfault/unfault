@@ -293,10 +293,9 @@ fn detect_mutable_type(value_repr: &str) -> Option<MutableType> {
         && trimmed.ends_with('}')
         && !trimmed.contains(':')
         && trimmed.len() > 2
+        && !is_comprehension(trimmed)
     {
-        if !is_comprehension(trimmed) {
-            return Some(MutableType::Set);
-        }
+        return Some(MutableType::Set);
     }
 
     None
@@ -603,7 +602,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonGlobalMutableStateRule::default();
+        let rule = PythonGlobalMutableStateRule;
         assert_eq!(rule.id(), "python.global_mutable_state");
     }
 

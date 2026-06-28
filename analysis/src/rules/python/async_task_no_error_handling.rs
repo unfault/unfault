@@ -124,20 +124,18 @@ fn create_finding(
 ) -> RuleFinding {
     let title = format!("Fire-and-forget async task: {}", task.function_name);
 
-    let description = format!(
-        "asyncio.create_task() called without error handling. If the task raises \
+    let description = "asyncio.create_task() called without error handling. If the task raises \
          an exception, it will be silently swallowed, making debugging difficult. \
          Store the task reference and add exception handling, or use \
          task.add_done_callback() to log errors."
-    );
+        .to_string();
 
     let patch = generate_error_handling_patch(task, file_id);
 
-    let fix_preview = format!(
-        "# Add error handling to async task:\n\
+    let fix_preview = "# Add error handling to async task:\n\
          # task = asyncio.create_task(coro())\n\
          # task.add_done_callback(lambda t: t.exception() and logger.error(t.exception()))"
-    );
+        .to_string();
 
     RuleFinding {
         rule_id: rule_id.to_string(),
@@ -256,7 +254,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonAsyncTaskNoErrorHandlingRule::default();
+        let rule = PythonAsyncTaskNoErrorHandlingRule;
         assert_eq!(rule.id(), "python.async_task_no_error_handling");
     }
 

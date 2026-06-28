@@ -130,8 +130,8 @@ impl RoutePattern {
 
         // Pattern 1: /users/:id (Gin, Echo style)
         for part in self.path.split('/') {
-            if part.starts_with(':') {
-                params.push(part[1..].to_string());
+            if let Some(rest) = part.strip_prefix(':') {
+                params.push(rest.to_string());
             }
         }
 

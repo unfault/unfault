@@ -166,11 +166,11 @@ impl CodeGraph {
         }
 
         // Special case: "src/auth/__init__.py" → "src.auth", "auth"
-        if path.ends_with("__init__.py") {
-            if let Some(dir_path) = path.strip_suffix("/__init__.py") {
-                let module_path = dir_path.replace('/', ".");
-                module_to_file.entry(module_path).or_insert(node_idx);
-            }
+        if path.ends_with("__init__.py")
+            && let Some(dir_path) = path.strip_suffix("/__init__.py")
+        {
+            let module_path = dir_path.replace('/', ".");
+            module_to_file.entry(module_path).or_insert(node_idx);
         }
     }
 
@@ -644,7 +644,7 @@ pub fn build_code_graph(sem_entries: &[(FileId, Arc<SourceSemantics>)]) -> CodeG
                 func_call
                     .caller_qualified_name
                     .split('.')
-                    .last()
+                    .next_back()
                     .unwrap_or("")
                     .to_string()
             } else {
@@ -766,15 +766,13 @@ fn resolve_cross_file_call(
 ) -> Option<NodeIndex> {
     // Strategy 1: direct import match — `from module import e` then `e()`
     for import in imports {
-        if import.imports_item(callee) {
-            if let Some(source_idx) = find_source_file(cg, &import.module_path, importing_file_path)
-            {
-                if let GraphNode::File { file_id, .. } = &cg.graph[source_idx] {
-                    let key = (*file_id, callee.to_string());
-                    if let Some(&node) = cg.function_nodes.get(&key) {
-                        return Some(node);
-                    }
-                }
+        if import.imports_item(callee)
+            && let Some(source_idx) = find_source_file(cg, &import.module_path, importing_file_path)
+            && let GraphNode::File { file_id, .. } = &cg.graph[source_idx]
+        {
+            let key = (*file_id, callee.to_string());
+            if let Some(&node) = cg.function_nodes.get(&key) {
+                return Some(node);
             }
         }
     }
@@ -792,19 +790,17 @@ fn resolve_cross_file_call(
                     || import
                         .module_path
                         .split('.')
-                        .last()
+                        .next_back()
                         .map(|last| last == module_alias)
                         .unwrap_or(false);
-                if matches {
-                    if let Some(source_idx) =
+                if matches
+                    && let Some(source_idx) =
                         find_source_file(cg, &import.module_path, importing_file_path)
-                    {
-                        if let GraphNode::File { file_id, .. } = &cg.graph[source_idx] {
-                            let key = (*file_id, func_name.to_string());
-                            if let Some(&node) = cg.function_nodes.get(&key) {
-                                return Some(node);
-                            }
-                        }
+                    && let GraphNode::File { file_id, .. } = &cg.graph[source_idx]
+                {
+                    let key = (*file_id, func_name.to_string());
+                    if let Some(&node) = cg.function_nodes.get(&key) {
+                        return Some(node);
                     }
                 }
             }
@@ -814,12 +810,11 @@ fn resolve_cross_file_call(
                 if import.imports_item(module_alias) {
                     let submodule = format!("{}.{}", import.module_path, module_alias);
                     if let Some(source_idx) = find_source_file(cg, &submodule, importing_file_path)
+                        && let GraphNode::File { file_id, .. } = &cg.graph[source_idx]
                     {
-                        if let GraphNode::File { file_id, .. } = &cg.graph[source_idx] {
-                            let key = (*file_id, func_name.to_string());
-                            if let Some(&node) = cg.function_nodes.get(&key) {
-                                return Some(node);
-                            }
+                        let key = (*file_id, func_name.to_string());
+                        if let Some(&node) = cg.function_nodes.get(&key) {
+                            return Some(node);
                         }
                     }
                 }
@@ -1141,18 +1136,17 @@ fn add_fastapi_nodes(
         // (identified by handler_name in the same file) so that the Function node
         // carries the full prefixed path too.
         let handler_key = (file_id, route.handler_name.clone());
-        if let Some(&fn_idx) = cg.function_nodes.get(&handler_key) {
-            if let GraphNode::Function {
+        if let Some(&fn_idx) = cg.function_nodes.get(&handler_key)
+            && let GraphNode::Function {
                 ref mut http_method,
                 ref mut http_path,
                 ref mut is_handler,
                 ..
             } = cg.graph[fn_idx]
-            {
-                *is_handler = true;
-                *http_method = Some(route.http_method.clone());
-                *http_path = Some(full_path.clone());
-            }
+        {
+            *is_handler = true;
+            *http_method = Some(route.http_method.clone());
+            *http_path = Some(full_path.clone());
         }
     }
 
@@ -1562,10 +1556,10 @@ import sqlalchemy
         assert!(stats.uses_library_edge_count >= 3);
 
         // Check categories
-        if let Some(&idx) = cg.external_modules.get("requests") {
-            if let GraphNode::ExternalModule { category, .. } = &cg.graph[idx] {
-                assert_eq!(*category, ModuleCategory::HttpClient);
-            }
+        if let Some(&idx) = cg.external_modules.get("requests")
+            && let GraphNode::ExternalModule { category, .. } = &cg.graph[idx]
+        {
+            assert_eq!(*category, ModuleCategory::HttpClient);
         }
     }
 

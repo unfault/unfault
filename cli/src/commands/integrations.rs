@@ -185,7 +185,7 @@ fn detect_dynatrace() -> IntegrationRow {
 
 // ── Live verification ─────────────────────────────────────────────────────────
 
-async fn verify_all(client: &Client, rows: &mut Vec<IntegrationRow>) {
+async fn verify_all(client: &Client, rows: &mut [IntegrationRow]) {
     for row in rows.iter_mut() {
         if matches!(row.state, State::NotDetected) {
             continue;
@@ -504,8 +504,8 @@ fn parse_rfc3339_secs(s: &str) -> Option<u64> {
     } else {
         [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     };
-    for i in 0..(d[1] as usize - 1) {
-        days += md[i];
+    for &d_in_month in &md[..(d[1] as usize - 1)] {
+        days += d_in_month;
     }
     days += d[2] - 1;
     Some(days * 86400 + t[0] * 3600 + t[1] * 60 + t[2])
@@ -538,7 +538,7 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 #[cfg(test)]

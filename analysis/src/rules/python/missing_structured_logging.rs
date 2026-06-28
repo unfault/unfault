@@ -384,15 +384,15 @@ fn expression_to_key(expr: &str) -> String {
     }
 
     // If it's a subscript like `data["key"]` or `data['key']`, extract the key
-    if expr.contains('[') {
-        if let Some(start) = expr.find('[') {
-            let prefix = &expr[..start];
-            // If there's a dot, use the part after the last dot
-            if let Some(dot_pos) = prefix.rfind('.') {
-                return snake_case(&prefix[dot_pos + 1..]);
-            }
-            return snake_case(prefix);
+    if expr.contains('[')
+        && let Some(start) = expr.find('[')
+    {
+        let prefix = &expr[..start];
+        // If there's a dot, use the part after the last dot
+        if let Some(dot_pos) = prefix.rfind('.') {
+            return snake_case(&prefix[dot_pos + 1..]);
         }
+        return snake_case(prefix);
     }
 
     // Simple variable name
@@ -664,7 +664,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonMissingStructuredLoggingRule::default();
+        let rule = PythonMissingStructuredLoggingRule;
         assert_eq!(rule.id(), "python.missing_structured_logging");
     }
 

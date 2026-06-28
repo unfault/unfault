@@ -93,7 +93,7 @@ pub fn enrich_graph(
         let files_to_link: Vec<&str> = if matched_files.is_empty() {
             http_caller_files.iter().map(|s| s.as_str()).collect()
         } else {
-            matched_files.iter().copied().collect()
+            matched_files.to_vec()
         };
 
         for file_path in files_to_link {
@@ -151,10 +151,10 @@ fn match_caller_files<'a>(
                     || caller_lower.contains(&name.to_lowercase())
                 {
                     // Find which file this handler belongs to
-                    if let Some(file_path) = find_file_for_function(idx, graph, http_caller_files) {
-                        if !matched.contains(&file_path) {
-                            matched.push(file_path);
-                        }
+                    if let Some(file_path) = find_file_for_function(idx, graph, http_caller_files)
+                        && !matched.contains(&file_path)
+                    {
+                        matched.push(file_path);
                     }
                 }
             }
@@ -283,7 +283,13 @@ mod tests {
         };
         let http_callers = vec!["src/checkout.py".to_string()];
 
-        enrich_graph(&mut graph, &[pattern.clone()], &http_callers, false).unwrap();
+        enrich_graph(
+            &mut graph,
+            std::slice::from_ref(&pattern),
+            &http_callers,
+            false,
+        )
+        .unwrap();
         let result2 = enrich_graph(&mut graph, &[pattern], &http_callers, false).unwrap();
 
         // Second call should add 0 new edges (duplicate)

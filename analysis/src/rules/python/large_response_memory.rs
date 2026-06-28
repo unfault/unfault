@@ -83,7 +83,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                                 file_id: *file_id,
                                 file_path: py.path.clone(),
                                 line: Some(call.function_call.location.line),
-                                column: Some(call.function_call.location.column as u32),
+                                column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -96,9 +96,10 @@ impl Rule for PythonLargeResponseMemoryRule {
                 }
 
                 // Check for response.json() on potentially large responses
-                if callee.ends_with(".json") {
-                    if call_lower.contains("response") || call_lower.contains("resp") {
-                        findings.push(RuleFinding {
+                if callee.ends_with(".json")
+                    && (call_lower.contains("response") || call_lower.contains("resp"))
+                {
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Large JSON response loaded into memory".to_string(),
                             description: Some(
@@ -113,7 +114,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -121,7 +122,6 @@ impl Rule for PythonLargeResponseMemoryRule {
                             fix_preview: Some(JSON_STREAMING_FIX.to_string()),
                             tags: vec!["memory".to_string(), "json".to_string(), "streaming".to_string()],
                         });
-                    }
                 }
 
                 // Check for file.read() without size limit
@@ -147,7 +147,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -175,7 +175,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                         file_id: *file_id,
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
-                        column: Some(call.function_call.location.column as u32),
+                        column: Some(call.function_call.location.column),
                         end_line: None,
                         end_column: None,
                         byte_range: None,
@@ -206,7 +206,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                         file_id: *file_id,
                         file_path: py.path.clone(),
                         line: Some(call.function_call.location.line),
-                        column: Some(call.function_call.location.column as u32),
+                        column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -217,18 +217,20 @@ impl Rule for PythonLargeResponseMemoryRule {
                 }
 
                 // Check for pandas read without chunking
-                if callee == "pd.read_csv" || callee == "pandas.read_csv" {
-                    if !args.contains("chunksize=") && !args.contains("iterator=True") {
-                        // Generate actual fix: add chunksize parameter
-                        let patch = generate_pandas_chunksize_patch(
-                            *file_id,
-                            call.start_byte,
-                            call.end_byte,
-                            callee,
-                            args,
-                        );
+                if (callee == "pd.read_csv" || callee == "pandas.read_csv")
+                    && !args.contains("chunksize=")
+                    && !args.contains("iterator=True")
+                {
+                    // Generate actual fix: add chunksize parameter
+                    let patch = generate_pandas_chunksize_patch(
+                        *file_id,
+                        call.start_byte,
+                        call.end_byte,
+                        callee,
+                        args,
+                    );
 
-                        findings.push(RuleFinding {
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Large CSV file read entirely into memory".to_string(),
                             description: Some(
@@ -243,7 +245,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -251,21 +253,22 @@ impl Rule for PythonLargeResponseMemoryRule {
                             fix_preview: Some(PANDAS_FIX.to_string()),
                             tags: vec!["memory".to_string(), "pandas".to_string(), "csv".to_string()],
                         });
-                    }
                 }
 
-                if callee == "pd.read_json" || callee == "pandas.read_json" {
-                    if !args.contains("chunksize=") && !args.contains("lines=True") {
-                        // Generate actual fix: add chunksize parameter
-                        let patch = generate_pandas_chunksize_patch(
-                            *file_id,
-                            call.start_byte,
-                            call.end_byte,
-                            callee,
-                            args,
-                        );
+                if (callee == "pd.read_json" || callee == "pandas.read_json")
+                    && !args.contains("chunksize=")
+                    && !args.contains("lines=True")
+                {
+                    // Generate actual fix: add chunksize parameter
+                    let patch = generate_pandas_chunksize_patch(
+                        *file_id,
+                        call.start_byte,
+                        call.end_byte,
+                        callee,
+                        args,
+                    );
 
-                        findings.push(RuleFinding {
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "Large JSON file read entirely into memory".to_string(),
                             description: Some(
@@ -280,7 +283,7 @@ impl Rule for PythonLargeResponseMemoryRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -288,7 +291,6 @@ impl Rule for PythonLargeResponseMemoryRule {
                             fix_preview: Some(PANDAS_FIX.to_string()),
                             tags: vec!["memory".to_string(), "pandas".to_string(), "json".to_string()],
                         });
-                    }
                 }
             }
         }

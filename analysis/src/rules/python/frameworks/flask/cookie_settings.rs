@@ -232,7 +232,7 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                 .calls
                 .iter()
                 .any(|c| c.function_call.callee_expr == "Flask")
-                || py.flask.as_ref().map_or(false, |f| !f.apps.is_empty());
+                || py.flask.as_ref().is_some_and(|f| !f.apps.is_empty());
 
             if has_flask_app {
                 // Check if this looks like a production config
@@ -242,7 +242,7 @@ impl Rule for FlaskInsecureCookieSettingsRule {
                         .assignments
                         .iter()
                         .any(|a| a.target == "DEBUG" && a.value_repr.trim() == "False")
-                    || py.flask.as_ref().map_or(false, |f| {
+                    || py.flask.as_ref().is_some_and(|f| {
                         f.config_settings
                             .iter()
                             .any(|c| c.key == "DEBUG" && c.value_repr.trim() == "False")

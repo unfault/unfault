@@ -92,7 +92,7 @@ impl Rule for GinMissingValidationRule {
                     call.function_call
                         .callee_expr
                         .split('.')
-                        .last()
+                        .next_back()
                         .unwrap_or("Bind")
                 );
 
@@ -226,7 +226,7 @@ impl Rule for GinUntrustedInputRule {
                     call.function_call
                         .callee_expr
                         .split('.')
-                        .last()
+                        .next_back()
                         .unwrap_or("input")
                 );
 
@@ -261,12 +261,13 @@ impl Rule for GinUntrustedInputRule {
                     end_column: None,
                     byte_range: None,
                     patch: None, // Complex flow analysis
-                    fix_preview: Some(format!(
+                    fix_preview: Some(
                         "// Validate input before use:\n\
                          // 1. Check format/content\n\
                          // 2. Sanitize special characters\n\
                          // 3. Use safe APIs for SQL, filesystem, etc."
-                    )),
+                            .to_string(),
+                    ),
                     tags: vec![
                         "go".into(),
                         "gin".into(),

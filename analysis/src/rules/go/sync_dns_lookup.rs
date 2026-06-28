@@ -63,7 +63,7 @@ impl Rule for GoSyncDnsLookupRule {
             };
 
             // Check if file has HTTP handlers
-            let has_handlers = go.functions.iter().any(|f| Self::is_http_handler(f));
+            let has_handlers = go.functions.iter().any(Self::is_http_handler);
 
             for call in &go.calls {
                 let callee = &call.function_call.callee_expr;

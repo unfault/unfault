@@ -257,7 +257,7 @@ fn detect_clone_pattern(
 
     // Check if the cloned expression is a function parameter
     // Function parameters are truly loop-invariant (defined outside the loop)
-    let is_function_param = function_name.map_or(false, |fn_name| {
+    let is_function_param = function_name.is_some_and(|fn_name| {
         rust.functions
             .iter()
             .filter(|f| f.name == fn_name)
@@ -301,6 +301,7 @@ fn detect_clone_pattern(
 }
 
 /// Create a finding for the clone-to-consume pattern with a proper fix.
+#[allow(clippy::too_many_arguments)]
 fn create_clone_to_consume_finding(
     file_id: FileId,
     file_path: &str,

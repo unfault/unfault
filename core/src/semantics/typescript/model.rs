@@ -618,20 +618,16 @@ fn walk_nodes_with_context(
         "lexical_declaration" | "variable_declaration" => {
             if node.parent().map(|p| p.kind()) == Some("program") {
                 for i in 0..node.child_count() {
-                    if let Some(child) = node.child(i) {
-                        if child.kind() == "variable_declarator" {
-                            if let Some(name_node) = child.child_by_field_name("name") {
-                                let var_name = parsed.text_for_node(&name_node);
-                                if let Some(value_node) = child.child_by_field_name("value") {
-                                    if value_node.kind() == "arrow_function" {
-                                        if let Some(func) =
-                                            build_arrow_function(parsed, &value_node, &var_name)
-                                        {
-                                            sem.functions.push(func);
-                                        }
-                                    }
-                                }
-                            }
+                    if let Some(child) = node.child(i)
+                        && child.kind() == "variable_declarator"
+                        && let Some(name_node) = child.child_by_field_name("name")
+                    {
+                        let var_name = parsed.text_for_node(&name_node);
+                        if let Some(value_node) = child.child_by_field_name("value")
+                            && value_node.kind() == "arrow_function"
+                            && let Some(func) = build_arrow_function(parsed, &value_node, &var_name)
+                        {
+                            sem.functions.push(func);
                         }
                     }
                 }
@@ -732,45 +728,39 @@ fn build_import(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<TsImpor
 
     // Find imports
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            match child.kind() {
-                "import_clause" => {
-                    // Parse import clause for default and named imports
-                    for j in 0..child.child_count() {
-                        if let Some(import_child) = child.child(j) {
-                            match import_child.kind() {
-                                "identifier" => {
-                                    default_import = Some(parsed.text_for_node(&import_child));
-                                }
-                                "named_imports" => {
-                                    named_imports = extract_named_imports(parsed, &import_child);
-                                }
-                                "namespace_import" => {
-                                    // import * as name
-                                    // Try field "name" first, then look for identifier child
-                                    if let Some(name_node) =
-                                        import_child.child_by_field_name("name")
+        if let Some(child) = node.child(i)
+            && child.kind() == "import_clause"
+        {
+            // Parse import clause for default and named imports
+            for j in 0..child.child_count() {
+                if let Some(import_child) = child.child(j) {
+                    match import_child.kind() {
+                        "identifier" => {
+                            default_import = Some(parsed.text_for_node(&import_child));
+                        }
+                        "named_imports" => {
+                            named_imports = extract_named_imports(parsed, &import_child);
+                        }
+                        "namespace_import" => {
+                            // import * as name
+                            // Try field "name" first, then look for identifier child
+                            if let Some(name_node) = import_child.child_by_field_name("name") {
+                                namespace_import = Some(parsed.text_for_node(&name_node));
+                            } else {
+                                // Fallback: look for identifier child after "* as"
+                                for k in 0..import_child.child_count() {
+                                    if let Some(ns_child) = import_child.child(k)
+                                        && ns_child.kind() == "identifier"
                                     {
-                                        namespace_import = Some(parsed.text_for_node(&name_node));
-                                    } else {
-                                        // Fallback: look for identifier child after "* as"
-                                        for k in 0..import_child.child_count() {
-                                            if let Some(ns_child) = import_child.child(k) {
-                                                if ns_child.kind() == "identifier" {
-                                                    namespace_import =
-                                                        Some(parsed.text_for_node(&ns_child));
-                                                    break;
-                                                }
-                                            }
-                                        }
+                                        namespace_import = Some(parsed.text_for_node(&ns_child));
+                                        break;
                                     }
                                 }
-                                _ => {}
                             }
                         }
+                        _ => {}
                     }
                 }
-                _ => {}
             }
         }
     }
@@ -793,20 +783,20 @@ fn extract_named_imports(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<S
     let mut imports = Vec::new();
 
     for i in 0..node.named_child_count() {
-        if let Some(child) = node.named_child(i) {
-            if child.kind() == "import_specifier" {
-                // Get the name being imported
-                if let Some(name_node) = child.child_by_field_name("name") {
-                    imports.push(parsed.text_for_node(&name_node));
-                } else {
-                    // Fallback: get text of first identifier child
-                    for j in 0..child.child_count() {
-                        if let Some(id) = child.child(j) {
-                            if id.kind() == "identifier" {
-                                imports.push(parsed.text_for_node(&id));
-                                break;
-                            }
-                        }
+        if let Some(child) = node.named_child(i)
+            && child.kind() == "import_specifier"
+        {
+            // Get the name being imported
+            if let Some(name_node) = child.child_by_field_name("name") {
+                imports.push(parsed.text_for_node(&name_node));
+            } else {
+                // Fallback: get text of first identifier child
+                for j in 0..child.child_count() {
+                    if let Some(id) = child.child(j)
+                        && id.kind() == "identifier"
+                    {
+                        imports.push(parsed.text_for_node(&id));
+                        break;
                     }
                 }
             }
@@ -843,20 +833,20 @@ fn build_variable(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<TsVar
     let mut value_repr = String::new();
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "variable_declarator" {
-                // Get name
-                if let Some(name_node) = child.child_by_field_name("name") {
-                    name = parsed.text_for_node(&name_node);
-                }
-                // Get type annotation
-                if let Some(type_node) = child.child_by_field_name("type") {
-                    type_annotation = Some(parsed.text_for_node(&type_node));
-                }
-                // Get value
-                if let Some(value_node) = child.child_by_field_name("value") {
-                    value_repr = parsed.text_for_node(&value_node);
-                }
+        if let Some(child) = node.child(i)
+            && child.kind() == "variable_declarator"
+        {
+            // Get name
+            if let Some(name_node) = child.child_by_field_name("name") {
+                name = parsed.text_for_node(&name_node);
+            }
+            // Get type annotation
+            if let Some(type_node) = child.child_by_field_name("type") {
+                type_annotation = Some(parsed.text_for_node(&type_node));
+            }
+            // Get value
+            if let Some(value_node) = child.child_by_field_name("value") {
+                value_repr = parsed.text_for_node(&value_node);
             }
         }
     }
@@ -1025,10 +1015,10 @@ fn has_try_catch_in_body(node: &tree_sitter::Node) -> bool {
             return true;
         }
         for i in 0..node.child_count() {
-            if let Some(child) = node.child(i) {
-                if check_node(child) {
-                    return true;
-                }
+            if let Some(child) = node.child(i)
+                && check_node(child)
+            {
+                return true;
             }
         }
         false
@@ -1057,12 +1047,12 @@ fn build_class(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<TsClass>
     // Extract extends
     let extends = node.child_by_field_name("heritage").and_then(|h| {
         for i in 0..h.child_count() {
-            if let Some(child) = h.child(i) {
-                if child.kind() == "extends_clause" {
-                    return child
-                        .child_by_field_name("value")
-                        .map(|n| parsed.text_for_node(&n));
-                }
+            if let Some(child) = h.child(i)
+                && child.kind() == "extends_clause"
+            {
+                return child
+                    .child_by_field_name("value")
+                    .map(|n| parsed.text_for_node(&n));
             }
         }
         None
@@ -1072,12 +1062,12 @@ fn build_class(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<TsClass>
     let mut implements = Vec::new();
     if let Some(heritage) = node.child_by_field_name("heritage") {
         for i in 0..heritage.child_count() {
-            if let Some(child) = heritage.child(i) {
-                if child.kind() == "implements_clause" {
-                    for j in 0..child.named_child_count() {
-                        if let Some(type_node) = child.named_child(j) {
-                            implements.push(parsed.text_for_node(&type_node));
-                        }
+            if let Some(child) = heritage.child(i)
+                && child.kind() == "implements_clause"
+            {
+                for j in 0..child.named_child_count() {
+                    if let Some(type_node) = child.named_child(j) {
+                        implements.push(parsed.text_for_node(&type_node));
                     }
                 }
             }
@@ -1110,29 +1100,29 @@ fn extract_decorators(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<Stri
         if parent.kind() == "export_statement" {
             if let Some(grandparent) = parent.parent() {
                 for i in 0..grandparent.child_count() {
-                    if let Some(sibling) = grandparent.child(i) {
-                        if sibling.kind() == "decorator" {
-                            decorators.push(parsed.text_for_node(&sibling));
-                        }
+                    if let Some(sibling) = grandparent.child(i)
+                        && sibling.kind() == "decorator"
+                    {
+                        decorators.push(parsed.text_for_node(&sibling));
                     }
                 }
             }
         } else if parent.kind() == "class_body" {
             for i in 0..parent.child_count() {
-                if let Some(sibling) = parent.child(i) {
-                    if sibling.kind() == "decorator" {
-                        decorators.push(parsed.text_for_node(&sibling));
-                    }
+                if let Some(sibling) = parent.child(i)
+                    && sibling.kind() == "decorator"
+                {
+                    decorators.push(parsed.text_for_node(&sibling));
                 }
             }
         }
     }
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "decorator" {
-                decorators.push(parsed.text_for_node(&child));
-            }
+        if let Some(child) = node.child(i)
+            && child.kind() == "decorator"
+        {
+            decorators.push(parsed.text_for_node(&child));
         }
     }
 
@@ -1754,6 +1744,99 @@ fn detect_db_operation_from_call(
     })
 }
 
+/// Determines if a TypeScript file is server-side code.
+///
+/// This is used by rules that only apply to server-side TypeScript/JavaScript
+/// (e.g., structured logging requirements, HTTP timeout requirements).
+/// Client-side code (browser) has different constraints and built-in behaviors.
+///
+/// Server-side indicators:
+/// - Express.js framework detected
+/// - Node.js built-in module imports (http, https, fs, path, crypto, etc.)
+/// - Server framework imports (express, fastify, koa, hapi, nestjs, etc.)
+///
+/// Excluded contexts (not server-side for these rules):
+/// - VS Code extensions (vscode import)
+/// - Browser extension APIs
+/// - Electron renderer processes
+/// - Development tools
+pub fn is_server_side_code(ts: &TsFileSemantics) -> bool {
+    // First, check for contexts that should NOT be considered server-side,
+    // even though they run in Node.js. These are development tools where
+    // console.log is standard practice.
+    const EXCLUDED_TOOL_IMPORTS: &[&str] = &[
+        "vscode",                // VS Code extensions - console.log is standard
+        "electron",              // Electron apps (renderer process)
+        "@electron/remote",      // Electron remote
+        "webextension-polyfill", // Browser extensions
+        "jest",                  // Test frameworks - console.log is fine
+        "mocha",
+        "vitest",
+    ];
+
+    // Check if this is a VS Code extension or other excluded tool
+    for import in &ts.imports {
+        let module = import.module.as_str();
+        if EXCLUDED_TOOL_IMPORTS.contains(&module) {
+            return false;
+        }
+    }
+
+    // Check if Express.js framework is detected
+    if ts.express.is_some() {
+        return true;
+    }
+
+    // Server framework imports - these are strong indicators of server-side code
+    const SERVER_FRAMEWORKS: &[&str] = &[
+        "express",
+        "fastify",
+        "koa",
+        "hapi",
+        "@hapi/hapi",
+        "@nestjs/common",
+        "@nestjs/core",
+        "restify",
+        "polka",
+        "micro",
+    ];
+
+    // HTTP-related Node.js modules - strong indicators of server-side code
+    // Note: fs, path, os, crypto are NOT included because they're commonly used
+    // in CLI tools, VS Code extensions, build scripts, etc.
+    const HTTP_SERVER_MODULES: &[&str] = &[
+        "http",
+        "https",
+        "http2",
+        "net",
+        "tls",
+        "dgram",
+        "cluster",
+        "node:http",
+        "node:https",
+        "node:http2",
+        "node:net",
+        "node:tls",
+    ];
+
+    // Check imports for server-side indicators
+    for import in &ts.imports {
+        let module = import.module.as_str();
+
+        // Check server frameworks
+        if SERVER_FRAMEWORKS.contains(&module) {
+            return true;
+        }
+
+        // Check HTTP server modules
+        if HTTP_SERVER_MODULES.contains(&module) {
+            return true;
+        }
+    }
+
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1993,97 +2076,4 @@ async function problematic(prisma: any) {
         assert!(!sem.db_operations.is_empty());
         assert!(sem.db_operations[0].in_loop);
     }
-}
-
-/// Determines if a TypeScript file is server-side code.
-///
-/// This is used by rules that only apply to server-side TypeScript/JavaScript
-/// (e.g., structured logging requirements, HTTP timeout requirements).
-/// Client-side code (browser) has different constraints and built-in behaviors.
-///
-/// Server-side indicators:
-/// - Express.js framework detected
-/// - Node.js built-in module imports (http, https, fs, path, crypto, etc.)
-/// - Server framework imports (express, fastify, koa, hapi, nestjs, etc.)
-///
-/// Excluded contexts (not server-side for these rules):
-/// - VS Code extensions (vscode import)
-/// - Browser extension APIs
-/// - Electron renderer processes
-/// - Development tools
-pub fn is_server_side_code(ts: &TsFileSemantics) -> bool {
-    // First, check for contexts that should NOT be considered server-side,
-    // even though they run in Node.js. These are development tools where
-    // console.log is standard practice.
-    const EXCLUDED_TOOL_IMPORTS: &[&str] = &[
-        "vscode",                // VS Code extensions - console.log is standard
-        "electron",              // Electron apps (renderer process)
-        "@electron/remote",      // Electron remote
-        "webextension-polyfill", // Browser extensions
-        "jest",                  // Test frameworks - console.log is fine
-        "mocha",
-        "vitest",
-    ];
-
-    // Check if this is a VS Code extension or other excluded tool
-    for import in &ts.imports {
-        let module = import.module.as_str();
-        if EXCLUDED_TOOL_IMPORTS.contains(&module) {
-            return false;
-        }
-    }
-
-    // Check if Express.js framework is detected
-    if ts.express.is_some() {
-        return true;
-    }
-
-    // Server framework imports - these are strong indicators of server-side code
-    const SERVER_FRAMEWORKS: &[&str] = &[
-        "express",
-        "fastify",
-        "koa",
-        "hapi",
-        "@hapi/hapi",
-        "@nestjs/common",
-        "@nestjs/core",
-        "restify",
-        "polka",
-        "micro",
-    ];
-
-    // HTTP-related Node.js modules - strong indicators of server-side code
-    // Note: fs, path, os, crypto are NOT included because they're commonly used
-    // in CLI tools, VS Code extensions, build scripts, etc.
-    const HTTP_SERVER_MODULES: &[&str] = &[
-        "http",
-        "https",
-        "http2",
-        "net",
-        "tls",
-        "dgram",
-        "cluster",
-        "node:http",
-        "node:https",
-        "node:http2",
-        "node:net",
-        "node:tls",
-    ];
-
-    // Check imports for server-side indicators
-    for import in &ts.imports {
-        let module = import.module.as_str();
-
-        // Check server frameworks
-        if SERVER_FRAMEWORKS.contains(&module) {
-            return true;
-        }
-
-        // Check HTTP server modules
-        if HTTP_SERVER_MODULES.contains(&module) {
-            return true;
-        }
-    }
-
-    false
 }

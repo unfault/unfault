@@ -105,85 +105,84 @@ impl Rule for GoTransactionBoundaryRule {
             }
 
             // Report findings based on transaction patterns
-            if has_begin {
-                if let Some(loc) = begin_call_location {
-                    let line = loc.line + 1;
-                    let _column = loc.column + 1;
+            if has_begin && let Some(loc) = begin_call_location {
+                let line = loc.line + 1;
+                let _column = loc.column + 1;
 
-                    // Transaction without defer rollback
-                    if !has_defer_rollback {
-                        findings.push(RuleFinding {
-                            rule_id: self.id().to_string(),
-                            title: "Transaction without defer rollback".to_string(),
-                            description: Some(
-                                "Database transactions should have 'defer tx.Rollback()' \
+                // Transaction without defer rollback
+                if !has_defer_rollback {
+                    findings.push(RuleFinding {
+                        rule_id: self.id().to_string(),
+                        title: "Transaction without defer rollback".to_string(),
+                        description: Some(
+                            "Database transactions should have 'defer tx.Rollback()' \
                                  immediately after Begin to ensure cleanup on panic or \
                                  early return. Rollback after Commit is a no-op."
-                                    .to_string(),
-                            ),
-                            kind: FindingKind::StabilityRisk,
-                            severity: Severity::High,
-                            confidence: 0.85,
-                            dimension: Dimension::Reliability,
+                                .to_string(),
+                        ),
+                        kind: FindingKind::StabilityRisk,
+                        severity: Severity::High,
+                        confidence: 0.85,
+                        dimension: Dimension::Reliability,
+                        file_id: *file_id,
+                        file_path: go.path.clone(),
+                        line: Some(line),
+                        column: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
+                        patch: Some(FilePatch {
                             file_id: *file_id,
-                            file_path: go.path.clone(),
-                            line: Some(line),
-                            column: None,
-                            end_line: None,
-                            end_column: None,
-                            byte_range: None,
-                            patch: Some(FilePatch {
-                                file_id: *file_id,
-                                hunks: vec![PatchHunk {
-                                    range: PatchRange::InsertAfterLine { line },
-                                    replacement:
-                                        "\tdefer tx.Rollback() // Safe: no-op if Commit() succeeds"
-                                            .to_string(),
-                                }],
-                            }),
-                            fix_preview: Some("Add defer tx.Rollback()".to_string()),
-                            tags: vec!["go".into(), "database".into(), "transaction".into()],
-                        });
-                    }
+                            hunks: vec![PatchHunk {
+                                range: PatchRange::InsertAfterLine { line },
+                                replacement:
+                                    "\tdefer tx.Rollback() // Safe: no-op if Commit() succeeds"
+                                        .to_string(),
+                            }],
+                        }),
+                        fix_preview: Some("Add defer tx.Rollback()".to_string()),
+                        tags: vec!["go".into(), "database".into(), "transaction".into()],
+                    });
+                }
 
-                    // Transaction without commit (missing success path)
-                    if !has_commit && has_rollback {
-                        findings.push(RuleFinding {
-                            rule_id: self.id().to_string(),
-                            title: "Transaction never committed".to_string(),
-                            description: Some(
-                                "Transaction is started but never committed. Ensure \
+                // Transaction without commit (missing success path)
+                if !has_commit && has_rollback {
+                    findings.push(RuleFinding {
+                        rule_id: self.id().to_string(),
+                        title: "Transaction never committed".to_string(),
+                        description: Some(
+                            "Transaction is started but never committed. Ensure \
                                  tx.Commit() is called on the success path."
-                                    .to_string(),
-                            ),
-                            kind: FindingKind::StabilityRisk,
-                            severity: Severity::High,
-                            confidence: 0.80,
-                            dimension: Dimension::Correctness,
+                                .to_string(),
+                        ),
+                        kind: FindingKind::StabilityRisk,
+                        severity: Severity::High,
+                        confidence: 0.80,
+                        dimension: Dimension::Correctness,
+                        file_id: *file_id,
+                        file_path: go.path.clone(),
+                        line: Some(line),
+                        column: None,
+                        end_line: None,
+                        end_column: None,
+                        byte_range: None,
+                        patch: Some(FilePatch {
                             file_id: *file_id,
-                            file_path: go.path.clone(),
-                            line: Some(line),
-                            column: None,
-                            end_line: None,
-                            end_column: None,
-                            byte_range: None,
-                            patch: Some(FilePatch {
-                                file_id: *file_id,
-                                hunks: vec![PatchHunk {
-                                    range: PatchRange::InsertBeforeLine { line },
-                                    replacement:
-                                        "// Add tx.Commit() at the end of successful operations"
-                                            .to_string(),
-                                }],
-                            }),
-                            fix_preview: Some("Add tx.Commit()".to_string()),
-                            tags: vec!["go".into(), "database".into(), "transaction".into()],
-                        });
-                    }
+                            hunks: vec![PatchHunk {
+                                range: PatchRange::InsertBeforeLine { line },
+                                replacement:
+                                    "// Add tx.Commit() at the end of successful operations"
+                                        .to_string(),
+                            }],
+                        }),
+                        fix_preview: Some("Add tx.Commit()".to_string()),
+                        tags: vec!["go".into(), "database".into(), "transaction".into()],
+                    });
+                }
 
-                    // Check for HTTP calls within transaction context
-                    if has_http_call {
-                        findings.push(RuleFinding {
+                // Check for HTTP calls within transaction context
+                if has_http_call {
+                    findings.push(RuleFinding {
                             rule_id: self.id().to_string(),
                             title: "HTTP call within database transaction context".to_string(),
                             description: Some(
@@ -212,7 +211,6 @@ impl Rule for GoTransactionBoundaryRule {
                             fix_preview: Some("Move HTTP calls outside transaction".to_string()),
                             tags: vec!["go".into(), "database".into(), "transaction".into(), "performance".into()],
                         });
-                    }
                 }
             }
         }

@@ -48,7 +48,7 @@ pub fn extract_flow(graph: &CodeGraph, target: &str, max_depth: usize) -> FlowCo
         queue.push_back((start_idx, vec![node_to_flow_path(graph, node, 0)]));
 
         while let Some((current, path)) = queue.pop_front() {
-            if path.len() > max_depth as usize {
+            if path.len() > max_depth {
                 all_paths.push(path);
                 continue;
             }
@@ -193,10 +193,10 @@ pub fn get_centrality(graph: &CodeGraph, top_n: usize) -> GraphContext {
             })
             .count();
 
-        if in_degree > 0 {
-            if let Some(path) = node_file_path(graph, node) {
-                scores.insert(path, in_degree as f64);
-            }
+        if in_degree > 0
+            && let Some(path) = node_file_path(graph, node)
+        {
+            scores.insert(path, in_degree as f64);
         }
     }
 
@@ -345,9 +345,8 @@ fn find_nodes_by_name(graph: &CodeGraph, target: &str) -> Vec<petgraph::graph::N
         let node = &graph.graph[idx];
         let name = node.display_name().to_lowercase();
 
-        if name == lower_target {
-            results.push(idx);
-        } else if name.ends_with(&lower_target)
+        if name == lower_target
+            || name.ends_with(&lower_target)
             || name.contains(&format!("/{}", lower_target))
             || name.contains(&format!(".{}", lower_target))
         {

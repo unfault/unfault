@@ -57,11 +57,11 @@ impl Rule for TypescriptUnsafeEvalRule {
                 let is_unsafe = call.callee == "eval"
                     || call.callee == "Function"
                     || call.callee == "setTimeout"
-                        && call.args.first().map_or(false, |a| {
+                        && call.args.first().is_some_and(|a| {
                             a.value_repr.starts_with('"') || a.value_repr.starts_with('\'')
                         })
                     || call.callee == "setInterval"
-                        && call.args.first().map_or(false, |a| {
+                        && call.args.first().is_some_and(|a| {
                             a.value_repr.starts_with('"') || a.value_repr.starts_with('\'')
                         });
 

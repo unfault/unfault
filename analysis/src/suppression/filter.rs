@@ -44,18 +44,18 @@ fn is_finding_suppressed(finding: &RuleFinding, suppressions: &[Suppression]) ->
             }
             SuppressionScope::NextLine => {
                 // Next-line suppression: finding must be on the line after the comment
-                if let Some(finding_line) = finding.line {
-                    if finding_line == suppression.comment_line + 1 {
-                        return true;
-                    }
+                if let Some(finding_line) = finding.line
+                    && finding_line == suppression.comment_line + 1
+                {
+                    return true;
                 }
             }
             SuppressionScope::SameLine => {
                 // Same-line suppression: finding must be on the same line as the comment
-                if let Some(finding_line) = finding.line {
-                    if finding_line == suppression.comment_line {
-                        return true;
-                    }
+                if let Some(finding_line) = finding.line
+                    && finding_line == suppression.comment_line
+                {
+                    return true;
                 }
             }
         }

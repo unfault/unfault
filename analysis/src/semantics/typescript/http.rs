@@ -93,10 +93,10 @@ fn walk_for_http_calls(
     let effective_async = is_async || in_async;
 
     // Check for HTTP calls
-    if node.kind() == "call_expression" {
-        if let Some(call) = detect_http_call(parsed, &node, effective_function, effective_async) {
-            calls.push(call);
-        }
+    if node.kind() == "call_expression"
+        && let Some(call) = detect_http_call(parsed, &node, effective_function, effective_async)
+    {
+        calls.push(call);
     }
 
     // Recurse
@@ -283,14 +283,14 @@ fn is_likely_http_client_receiver(callee: &str) -> bool {
 /// rather than an HTTP client call.
 fn is_route_handler(parsed: &ParsedFile, node: &tree_sitter::Node) -> bool {
     // Route handlers typically have a string path as the first argument starting with '/'
-    if let Some(args_node) = node.child_by_field_name("arguments") {
-        if let Some(first_arg) = args_node.named_child(0) {
-            let arg_text = parsed.text_for_node(&first_arg);
-            let trimmed = arg_text.trim_matches(|c| c == '\'' || c == '"' || c == '`');
-            // If first argument is a route path, this is a route handler not an HTTP call
-            if trimmed.starts_with('/') {
-                return true;
-            }
+    if let Some(args_node) = node.child_by_field_name("arguments")
+        && let Some(first_arg) = args_node.named_child(0)
+    {
+        let arg_text = parsed.text_for_node(&first_arg);
+        let trimmed = arg_text.trim_matches(|c| c == '\'' || c == '"' || c == '`');
+        // If first argument is a route path, this is a route handler not an HTTP call
+        if trimmed.starts_with('/') {
+            return true;
         }
     }
     false
@@ -331,15 +331,13 @@ fn check_error_handling(node: &tree_sitter::Node) -> bool {
     }
 
     // Check for .catch() chaining
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "member_expression" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "call_expression" {
-                    // This is chained, could be .catch()
-                    return true;
-                }
-            }
-        }
+    if let Some(parent) = node.parent()
+        && parent.kind() == "member_expression"
+        && let Some(grandparent) = parent.parent()
+        && grandparent.kind() == "call_expression"
+    {
+        // This is chained, could be .catch()
+        return true;
     }
 
     false

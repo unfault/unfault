@@ -21,10 +21,11 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 /// Check if timezone is already imported from datetime
 fn has_timezone_import(imports: &[PyImport]) -> bool {
     imports.iter().any(|imp| {
-        // Check for `from datetime import timezone`
-        (imp.module == "datetime" && imp.names.iter().any(|n| n == "timezone"))
-            // Check for `import datetime` (can use datetime.timezone)
-            || imp.module == "datetime" && imp.names.is_empty()
+        if imp.module != "datetime" {
+            return false;
+        }
+        // `from datetime import timezone` OR `import datetime` (bare → can use datetime.timezone)
+        imp.names.iter().any(|n| n == "timezone") || imp.names.is_empty()
     })
 }
 
@@ -82,6 +83,7 @@ impl PythonNaiveDatetimeRule {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::enum_variant_names)] // semantic prefix is part of the call surface we match
 enum NaiveDatetimePattern {
     DatetimeNow,
     DatetimeUtcnow,
@@ -314,7 +316,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonNaiveDatetimeRule::default();
+        let rule = PythonNaiveDatetimeRule;
         assert_eq!(rule.id(), "python.naive_datetime");
     }
 

@@ -141,7 +141,7 @@ impl Rule for SqlAlchemyLazyLoadingRule {
             for query in &py.orm_queries {
                 if query.in_loop {
                     // Check if the query has eager loading
-                    let has_eager_loading = query.query_text.as_ref().map_or(false, |text| {
+                    let has_eager_loading = query.query_text.as_ref().is_some_and(|text| {
                         text.contains("joinedload")
                             || text.contains("selectinload")
                             || text.contains("subqueryload")

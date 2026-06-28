@@ -454,7 +454,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonNPlusOneQueriesRule::default();
+        let rule = PythonNPlusOneQueriesRule;
         assert_eq!(rule.id(), "python.n_plus_one_queries");
     }
 

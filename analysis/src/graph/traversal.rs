@@ -37,7 +37,7 @@ pub fn extract_flow(
         queue.push_back((start_idx, vec![node_to_flow_path(graph, node, 0)]));
 
         while let Some((current, path)) = queue.pop_front() {
-            if path.len() > max_depth as usize {
+            if path.len() > max_depth {
                 all_paths.push(path);
                 continue;
             }
@@ -170,10 +170,10 @@ pub fn get_centrality(graph: &CodeGraph, top_n: usize) -> GraphContext {
             })
             .count();
 
-        if in_degree > 0 {
-            if let Some(path) = node_file_path(graph, node) {
-                scores.insert(path, in_degree as f64);
-            }
+        if in_degree > 0
+            && let Some(path) = node_file_path(graph, node)
+        {
+            scores.insert(path, in_degree as f64);
         }
     }
 
@@ -550,14 +550,13 @@ fn get_callers_impl(
                         http_path,
                         ..
                     } = node
+                        && node_file_path(graph, node).as_deref() == Some(tf)
                     {
-                        if node_file_path(graph, node).as_deref() == Some(tf) {
-                            return Some(SiblingInfo {
-                                name: name.clone(),
-                                http_method: http_method.clone(),
-                                http_path: http_path.clone(),
-                            });
-                        }
+                        return Some(SiblingInfo {
+                            name: name.clone(),
+                            http_method: http_method.clone(),
+                            http_path: http_path.clone(),
+                        });
                     }
                     None
                 })
@@ -637,7 +636,7 @@ pub fn suggest_callers_candidates(
     let lower = target.to_lowercase();
     // Split on common separators to get meaningful tokens.
     let tokens: Vec<&str> = lower
-        .split(|c: char| c == '_' || c == '-' || c == '.')
+        .split(['_', '-', '.'])
         .filter(|t| t.len() >= 3)
         .collect();
 
@@ -731,24 +730,20 @@ pub fn suggest_callers_candidates(
             http_method,
             path,
         } = node
+            && let Some(&file_idx) = graph.file_nodes.get(file_id)
+            && let GraphNode::File {
+                path: ref file_path,
+                ..
+            } = graph.graph[file_idx]
+            && file_path == file
         {
-            if let Some(&file_idx) = graph.file_nodes.get(file_id) {
-                if let GraphNode::File {
-                    path: ref file_path,
-                    ..
-                } = graph.graph[file_idx]
-                {
-                    if file_path == file {
-                        suggestions.push(FunctionSuggestion {
-                            name: format!("{} {}", http_method, path),
-                            file: file_path.clone(),
-                            http_method: Some(http_method.clone()),
-                            http_path: Some(path.clone()),
-                            reason: "same_file_handler".into(),
-                        });
-                    }
-                }
-            }
+            suggestions.push(FunctionSuggestion {
+                name: format!("{} {}", http_method, path),
+                file: file_path.clone(),
+                http_method: Some(http_method.clone()),
+                http_path: Some(path.clone()),
+                reason: "same_file_handler".into(),
+            });
         }
     }
 
@@ -825,10 +820,10 @@ fn find_nodes_by_name_in_file(
     let lower_target = target.to_lowercase();
 
     // Fast path: exact file path lookup (no function involved).
-    if file_hint.is_none() {
-        if let Some(&idx) = graph.path_to_file.get(target) {
-            return vec![idx];
-        }
+    if file_hint.is_none()
+        && let Some(&idx) = graph.path_to_file.get(target)
+    {
+        return vec![idx];
     }
 
     let mut all: Vec<petgraph::graph::NodeIndex> = Vec::new();
@@ -1164,11 +1159,11 @@ pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
     let mut inside_paths: HashSet<String> = HashSet::new();
 
     for idx in graph.graph.node_indices() {
-        if let GraphNode::File { file_id, path, .. } = &graph.graph[idx] {
-            if path.contains(subtree) {
-                inside_file_ids.insert(*file_id);
-                inside_paths.insert(path.clone());
-            }
+        if let GraphNode::File { file_id, path, .. } = &graph.graph[idx]
+            && path.contains(subtree)
+        {
+            inside_file_ids.insert(*file_id);
+            inside_paths.insert(path.clone());
         }
     }
 
@@ -1212,21 +1207,20 @@ pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
             response_schema,
             ..
         } = &graph.graph[idx]
+            && inside_file_ids.contains(file_id)
         {
-            if inside_file_ids.contains(file_id) {
-                let file = node_file_path(graph, &graph.graph[idx]).unwrap_or_default();
-                routes.push(BriefRoute {
-                    method: method.clone(),
-                    path: path.clone(),
-                    handler: name.clone(),
-                    file,
-                    line: *line,
-                    decorators: decorators.clone(),
-                    is_writer: *is_writer,
-                    request_schema: request_schema.clone(),
-                    response_schema: response_schema.clone(),
-                });
-            }
+            let file = node_file_path(graph, &graph.graph[idx]).unwrap_or_default();
+            routes.push(BriefRoute {
+                method: method.clone(),
+                path: path.clone(),
+                handler: name.clone(),
+                file,
+                line: *line,
+                decorators: decorators.clone(),
+                is_writer: *is_writer,
+                request_schema: request_schema.clone(),
+                response_schema: response_schema.clone(),
+            });
         }
     }
     routes.sort_by(|a, b| a.file.cmp(&b.file).then(a.path.cmp(&b.path)));

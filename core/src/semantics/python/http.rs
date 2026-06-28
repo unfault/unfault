@@ -273,29 +273,29 @@ fn check_thread_offload(file: &ParsedFile, call_node: Node) -> bool {
         }
 
         // Check if parent is a call expression
-        if parent.kind() == "call" {
-            if let Some(func) = parent.child_by_field_name("function") {
-                let func_text = file.text_for_node(&func);
+        if parent.kind() == "call"
+            && let Some(func) = parent.child_by_field_name("function")
+        {
+            let func_text = file.text_for_node(&func);
 
-                // Check for asyncio.to_thread
-                if func_text == "asyncio.to_thread" {
-                    return true;
-                }
+            // Check for asyncio.to_thread
+            if func_text == "asyncio.to_thread" {
+                return true;
+            }
 
-                // Check for run_in_executor (could be loop.run_in_executor or asyncio.run_in_executor)
-                if func_text.ends_with("run_in_executor") {
-                    return true;
-                }
+            // Check for run_in_executor (could be loop.run_in_executor or asyncio.run_in_executor)
+            if func_text.ends_with("run_in_executor") {
+                return true;
+            }
 
-                // Check for sync_to_async (Django channels)
-                if func_text.ends_with("sync_to_async") || func_text == "database_sync_to_async" {
-                    return true;
-                }
+            // Check for sync_to_async (Django channels)
+            if func_text.ends_with("sync_to_async") || func_text == "database_sync_to_async" {
+                return true;
+            }
 
-                // Check for anyio.to_thread.run_sync
-                if func_text.contains("to_thread") && func_text.contains("run_sync") {
-                    return true;
-                }
+            // Check for anyio.to_thread.run_sync
+            if func_text.contains("to_thread") && func_text.contains("run_sync") {
+                return true;
             }
         }
 

@@ -19,6 +19,12 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 #[derive(Debug)]
 pub struct FastApiHealthCheckRule;
 
+impl Default for FastApiHealthCheckRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FastApiHealthCheckRule {
     pub fn new() -> Self {
         Self

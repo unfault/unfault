@@ -458,7 +458,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = TypescriptRegexCompileRule::default();
+        let rule = TypescriptRegexCompileRule;
         assert_eq!(rule.id(), "typescript.regex_compile");
     }
 

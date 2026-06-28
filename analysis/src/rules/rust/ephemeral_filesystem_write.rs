@@ -69,10 +69,10 @@ impl Rule for RustEphemeralFilesystemWriteRule {
             // Look for file write operations with ephemeral paths
             for call in &rust.calls {
                 // Skip test code — ephemeral writes in tests are expected.
-                if let Some(ref fn_name) = call.function_name {
-                    if test_fn_names.contains(fn_name.as_str()) {
-                        continue;
-                    }
+                if let Some(ref fn_name) = call.function_name
+                    && test_fn_names.contains(fn_name.as_str())
+                {
+                    continue;
                 }
 
                 // Only match the direct write call, not chained method calls whose

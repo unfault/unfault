@@ -16,6 +16,12 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 #[derive(Debug)]
 pub struct PythonHttpBlockingInAsyncRule;
 
+impl Default for PythonHttpBlockingInAsyncRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PythonHttpBlockingInAsyncRule {
     pub fn new() -> Self {
         Self

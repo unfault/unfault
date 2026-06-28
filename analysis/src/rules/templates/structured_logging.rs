@@ -274,7 +274,7 @@ pub enum LogLevel {
 
 impl LogLevel {
     /// Parse log level from common patterns
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_call(s: &str) -> Option<Self> {
         let s = s.to_lowercase();
         if s.contains("trace") || s.contains("verbose") {
             Some(Self::Trace)
@@ -336,9 +336,9 @@ mod tests {
 
     #[test]
     fn log_level_parsing() {
-        assert_eq!(LogLevel::from_str("logger.info"), Some(LogLevel::Info));
-        assert_eq!(LogLevel::from_str("log.Error"), Some(LogLevel::Error));
-        assert_eq!(LogLevel::from_str("DEBUG:"), Some(LogLevel::Debug));
+        assert_eq!(LogLevel::parse_call("logger.info"), Some(LogLevel::Info));
+        assert_eq!(LogLevel::parse_call("log.Error"), Some(LogLevel::Error));
+        assert_eq!(LogLevel::parse_call("DEBUG:"), Some(LogLevel::Debug));
     }
 
     #[test]

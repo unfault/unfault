@@ -1140,16 +1140,13 @@ fn has_exception_type_child(except_node: &tree_sitter::Node) -> bool {
 }
 
 /// Find the byte position of the "except" keyword in an except_clause node.
-fn find_except_keyword_position(except_node: &tree_sitter::Node, source: &str) -> (usize, usize) {
+fn find_except_keyword_position(except_node: &tree_sitter::Node, _source: &str) -> (usize, usize) {
+    // The `except` keyword always starts at the beginning of an except clause node.
+    // We previously branched on whether the node text started with "except" but
+    // both arms returned the same span, so the check was dead.
     let start = except_node.start_byte();
-    let text = &source[except_node.byte_range()];
-
-    let except_keyword = "except";
-    if text.starts_with(except_keyword) {
-        (start, start + except_keyword.len())
-    } else {
-        (start, start + except_keyword.len())
-    }
+    let except_keyword_len = "except".len();
+    (start, start + except_keyword_len)
 }
 
 fn find_module_docstring_end_line(parsed: &ParsedFile) -> Option<u32> {
@@ -1675,16 +1672,16 @@ fn extract_function_params(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec
                         } else {
                             // Ultimate fallback: try to get the first identifier child
                             for j in 0..param_node.named_child_count() {
-                                if let Some(child) = param_node.named_child(j) {
-                                    if child.kind() == "identifier" {
-                                        let name = parsed.text_for_node(&child);
-                                        params.push(PyParam {
-                                            name,
-                                            default: None,
-                                            type_annotation: None,
-                                        });
-                                        break;
-                                    }
+                                if let Some(child) = param_node.named_child(j)
+                                    && child.kind() == "identifier"
+                                {
+                                    let name = parsed.text_for_node(&child);
+                                    params.push(PyParam {
+                                        name,
+                                        default: None,
+                                        type_annotation: None,
+                                    });
+                                    break;
                                 }
                             }
                         }
@@ -1837,10 +1834,10 @@ pub fn summarize_decorators(parsed: &ParsedFile) -> Vec<Decorator> {
                         end_byte,
                         location,
                     });
-                } else if child.kind() == "function_definition" {
-                    if let Some(name_node) = child.child_by_field_name("name") {
-                        fn_name = Some(file.text_for_node(&name_node));
-                    }
+                } else if child.kind() == "function_definition"
+                    && let Some(name_node) = child.child_by_field_name("name")
+                {
+                    fn_name = Some(file.text_for_node(&name_node));
                 }
             }
         }

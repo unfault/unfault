@@ -235,17 +235,16 @@ impl Rule for RustUnboundedMemoryRule {
                         pattern, line, suggestion
                     );
 
-                    let fix_preview = format!(
-                        "// Before (unbounded):\n\
+                    let fix_preview = "// Before (unbounded):\n\
                         let data: Vec<_> = reader.lines().collect();\n\n\
                         // After (bounded):\n\
                         const MAX_LINES: usize = 10_000;\n\
                         let data: Vec<_> = reader.lines().take(MAX_LINES).collect();\n\n\
                         // Or process iteratively:\n\
-                        for line in reader.lines() {{\n\
+                        for line in reader.lines() {\n\
                             process(line?);\n\
-                        }}"
-                    );
+                        }"
+                    .to_string();
 
                     let patch = FilePatch {
                         file_id: *file_id,
@@ -341,6 +340,7 @@ mod tests {
     use crate::semantics::rust::build_rust_semantics;
     use crate::types::context::{Language, SourceFile};
 
+    #[allow(dead_code)] // kept for future expansion of the test suite
     fn parse_and_build_semantics(source: &str) -> (FileId, Arc<SourceSemantics>) {
         let sf = SourceFile {
             path: "memory_code.rs".to_string(),

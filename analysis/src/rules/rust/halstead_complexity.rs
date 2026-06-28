@@ -175,18 +175,18 @@ impl Rule for RustHalsteadComplexityRule {
 
                 let metrics = estimate_halstead_from_function(func, rust);
 
-                if let Some(severity) = metrics.severity() {
-                    if metrics.total_operators >= MIN_OPERATORS {
-                        findings.push(create_finding(
-                            self.id(),
-                            *file_id,
-                            &rust.path,
-                            &func.name,
-                            func.location.range.start_line + 1,
-                            &metrics,
-                            severity,
-                        ));
-                    }
+                if let Some(severity) = metrics.severity()
+                    && metrics.total_operators >= MIN_OPERATORS
+                {
+                    findings.push(create_finding(
+                        self.id(),
+                        *file_id,
+                        &rust.path,
+                        &func.name,
+                        func.location.range.start_line + 1,
+                        &metrics,
+                        severity,
+                    ));
                 }
             }
 
@@ -205,19 +205,19 @@ impl Rule for RustHalsteadComplexityRule {
 
                     let metrics = estimate_halstead_from_impl_method(method, rust);
 
-                    if let Some(severity) = metrics.severity() {
-                        if metrics.total_operators >= MIN_OPERATORS {
-                            let full_name = format!("{}::{}", impl_block.self_type, method.name);
-                            findings.push(create_finding(
-                                self.id(),
-                                *file_id,
-                                &rust.path,
-                                &full_name,
-                                method.location.range.start_line + 1,
-                                &metrics,
-                                severity,
-                            ));
-                        }
+                    if let Some(severity) = metrics.severity()
+                        && metrics.total_operators >= MIN_OPERATORS
+                    {
+                        let full_name = format!("{}::{}", impl_block.self_type, method.name);
+                        findings.push(create_finding(
+                            self.id(),
+                            *file_id,
+                            &rust.path,
+                            &full_name,
+                            method.location.range.start_line + 1,
+                            &metrics,
+                            severity,
+                        ));
                     }
                 }
             }
@@ -295,7 +295,10 @@ fn estimate_halstead_from_impl_method(
     let total_operands = total_operands + param_operands;
     // Check if any param is self
     let has_self = method.params.iter().any(|p| p.is_self);
-    let distinct_operands = distinct_operands + param_operands + if has_self { 0 } else { 0 };
+    // `has_self` is computed for future use but currently contributes 0 in both
+    // branches; keep the binding alive without affecting the operand count.
+    let _ = has_self;
+    let distinct_operands = distinct_operands + param_operands;
 
     HalsteadMetrics::compute(
         distinct_operators.max(1),
@@ -642,7 +645,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = RustHalsteadComplexityRule::default();
+        let rule = RustHalsteadComplexityRule;
         assert_eq!(rule.id(), "rust.halstead_complexity");
     }
 

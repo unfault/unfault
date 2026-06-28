@@ -64,12 +64,13 @@ pub fn current_commit_sha(workspace_path: &Path) -> String {
         let packed_mtime = mtime_secs(&workspace_path.join(".git").join("packed-refs"));
         let git_mtime = head_mtime.max(packed_mtime);
 
-        if cache_mtime >= git_mtime && git_mtime > 0 {
-            if let Ok(sha) = fs::read_to_string(&cache_file) {
-                let sha = sha.trim().to_string();
-                if !sha.is_empty() {
-                    return sha;
-                }
+        if cache_mtime >= git_mtime
+            && git_mtime > 0
+            && let Ok(sha) = fs::read_to_string(&cache_file)
+        {
+            let sha = sha.trim().to_string();
+            if !sha.is_empty() {
+                return sha;
             }
         }
     }
@@ -223,7 +224,7 @@ pub fn clear(workspace_path: &Path) -> std::io::Result<()> {
     }
     for entry in fs::read_dir(&dir)? {
         let entry = entry?;
-        if entry.path().extension().map_or(false, |e| e == "msgpack") {
+        if entry.path().extension().is_some_and(|e| e == "msgpack") {
             fs::remove_file(entry.path())?;
         }
     }

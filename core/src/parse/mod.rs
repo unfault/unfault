@@ -9,7 +9,6 @@ use crate::types::context::{Language, SourceFile};
 use ast::{FileId, ParsedFile};
 
 /// Generic entry point: parse a `SourceFile` into a `ParsedFile`.
-
 pub fn parse_source_file(file_id: FileId, sf: &SourceFile) -> Result<ParsedFile, ParseError> {
     match sf.language {
         Language::Python => {

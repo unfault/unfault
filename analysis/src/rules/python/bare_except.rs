@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonBareExceptRule::default();
+        let rule = PythonBareExceptRule;
         assert_eq!(rule.id(), "python.bare_except");
     }
 

@@ -443,7 +443,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonMissingCorrelationIdRule::default();
+        let rule = PythonMissingCorrelationIdRule;
         assert_eq!(rule.id(), "python.missing_correlation_id");
     }
 

@@ -69,10 +69,10 @@ impl Rule for TypescriptMissingCircuitBreakerRule {
             // Find external HTTP calls that should have circuit breakers
             for http_call in &ts.http_calls {
                 // Skip internal/localhost calls
-                if let Some(ref url) = http_call.url {
-                    if url.contains("localhost") || url.contains("127.0.0.1") {
-                        continue;
-                    }
+                if let Some(ref url) = http_call.url
+                    && (url.contains("localhost") || url.contains("127.0.0.1"))
+                {
+                    continue;
                 }
 
                 let line = http_call.location.range.start_line + 1;

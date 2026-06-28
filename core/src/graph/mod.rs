@@ -62,7 +62,7 @@ impl std::fmt::Display for SloProvider {
 }
 
 /// Category of external modules for better organization
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum ModuleCategory {
     /// HTTP client libraries (requests, httpx, axios, etc.)
     HttpClient,
@@ -82,13 +82,8 @@ pub enum ModuleCategory {
     /// Standard library
     StandardLib,
     /// Other external library
+    #[default]
     Other,
-}
-
-impl Default for ModuleCategory {
-    fn default() -> Self {
-        Self::Other
-    }
 }
 
 /// Semantic role of a decorator attached to a function.
@@ -850,11 +845,11 @@ impl CodeGraph {
         }
 
         // Special case for __init__.py - map directory to the init file
-        if path.ends_with("__init__.py") {
-            if let Some(dir_path) = path.strip_suffix("/__init__.py") {
-                let module_path = dir_path.replace('/', ".");
-                module_to_file.entry(module_path).or_insert(node_idx);
-            }
+        if path.ends_with("__init__.py")
+            && let Some(dir_path) = path.strip_suffix("/__init__.py")
+        {
+            let module_path = dir_path.replace('/', ".");
+            module_to_file.entry(module_path).or_insert(node_idx);
         }
     }
 
@@ -964,10 +959,10 @@ impl CodeGraph {
     ) -> NodeIndex {
         // Check if we already have a RemoteService node with this name
         for idx in self.graph.node_indices() {
-            if let GraphNode::RemoteService { name: n, .. } = &self.graph[idx] {
-                if n == name {
-                    return idx;
-                }
+            if let GraphNode::RemoteService { name: n, .. } = &self.graph[idx]
+                && n == name
+            {
+                return idx;
             }
         }
         self.graph.add_node(GraphNode::RemoteService {
@@ -1272,18 +1267,17 @@ fn resolve_call_through_imports(
                 let matches_alias = import.module_alias.as_deref() == Some(module_alias)
                     || import.local_module_name() == Some(module_alias);
 
-                if matches_alias {
-                    if let Some(source_file_idx) = find_import_source_file_with_context(
+                if matches_alias
+                    && let Some(source_file_idx) = find_import_source_file_with_context(
                         cg,
                         &import.module_path,
                         importing_file_path,
-                    ) {
-                        if let GraphNode::File { file_id, .. } = &cg.graph[source_file_idx] {
-                            let callee_key = (*file_id, func_name.to_string());
-                            if let Some(&func_node) = cg.function_nodes.get(&callee_key) {
-                                return Some(func_node);
-                            }
-                        }
+                    )
+                    && let GraphNode::File { file_id, .. } = &cg.graph[source_file_idx]
+                {
+                    let callee_key = (*file_id, func_name.to_string());
+                    if let Some(&func_node) = cg.function_nodes.get(&callee_key) {
+                        return Some(func_node);
                     }
                 }
             }
@@ -1300,12 +1294,11 @@ fn resolve_call_through_imports(
                         cg,
                         &submodule_path,
                         importing_file_path,
-                    ) {
-                        if let GraphNode::File { file_id, .. } = &cg.graph[source_file_idx] {
-                            let callee_key = (*file_id, func_name.to_string());
-                            if let Some(&func_node) = cg.function_nodes.get(&callee_key) {
-                                return Some(func_node);
-                            }
+                    ) && let GraphNode::File { file_id, .. } = &cg.graph[source_file_idx]
+                    {
+                        let callee_key = (*file_id, func_name.to_string());
+                        if let Some(&func_node) = cg.function_nodes.get(&callee_key) {
+                            return Some(func_node);
                         }
                     }
                 }
@@ -1825,14 +1818,12 @@ fn add_function_nodes(
         if !func_decorators
             .iter()
             .any(|d| matches!(d, DecoratorSemantic::Tracing { .. }))
+            && let SourceSemantics::Python(py) = sem.as_ref()
+            && let Some(tracing_detail) = find_body_span_signal(&func.name, py)
         {
-            if let SourceSemantics::Python(py) = sem.as_ref() {
-                if let Some(tracing_detail) = find_body_span_signal(&func.name, py) {
-                    func_decorators.push(DecoratorSemantic::Tracing {
-                        detail: tracing_detail,
-                    });
-                }
-            }
+            func_decorators.push(DecoratorSemantic::Tracing {
+                detail: tracing_detail,
+            });
         }
 
         // CommonLocation.line/column are already 1-based (converted in From<&AstLocation>).
@@ -2793,10 +2784,10 @@ import sqlalchemy
         assert!(stats.uses_library_edge_count >= 3);
 
         // Check categories
-        if let Some(&idx) = cg.external_modules.get("requests") {
-            if let GraphNode::ExternalModule { category, .. } = &cg.graph[idx] {
-                assert_eq!(*category, ModuleCategory::HttpClient);
-            }
+        if let Some(&idx) = cg.external_modules.get("requests")
+            && let GraphNode::ExternalModule { category, .. } = &cg.graph[idx]
+        {
+            assert_eq!(*category, ModuleCategory::HttpClient);
         }
     }
 
@@ -2897,7 +2888,7 @@ async def get_item(item_id):
 
         let last_segments: Vec<String> = handler
             .iter()
-            .map(|c| c.split('.').last().unwrap_or(c).to_string())
+            .map(|c| c.split('.').next_back().unwrap_or(c).to_string())
             .collect();
 
         for expected in &["fetch_item", "enrich_data", "build_response"] {
@@ -3614,10 +3605,10 @@ def main():
         let app_file_idx = cg.file_nodes.get(&app_id).expect("app file should exist");
         let mut found_import_edge = false;
         for edge in cg.graph.edges(*app_file_idx) {
-            if let GraphEdgeKind::ImportsFrom { items } = edge.weight() {
-                if items.contains(&"add".to_string()) {
-                    found_import_edge = true;
-                }
+            if let GraphEdgeKind::ImportsFrom { items } = edge.weight()
+                && items.contains(&"add".to_string())
+            {
+                found_import_edge = true;
             }
         }
         assert!(
@@ -3719,11 +3710,9 @@ def main():
 
         let mut found_calls_edge = false;
         for edge in cg.graph.edges(*main_func_idx) {
-            if matches!(edge.weight(), GraphEdgeKind::Calls) {
-                if edge.target() == *add_func_idx {
-                    found_calls_edge = true;
-                    break;
-                }
+            if matches!(edge.weight(), GraphEdgeKind::Calls) && edge.target() == *add_func_idx {
+                found_calls_edge = true;
+                break;
             }
         }
         assert!(found_calls_edge, "Expected Calls edge from main() to add()");

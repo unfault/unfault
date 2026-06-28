@@ -10,6 +10,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.35] — 2026-06-28
+
+### Fixed
+
+- **Graph cache now actually loads on warm runs**, dropping per-invocation
+  graph build time from ~150ms to ~25ms on small repos (and from tens of
+  seconds to ~1s on large repos). Every `unfault graph` subcommand —
+  including `coverage`, `impact`, `callers`, `critical`, `library`, `deps`,
+  `stats`, `path`, `handlers`, `routes`, `brief`, `function-impact` — now
+  benefits when invoked with different arguments on an unchanged workspace.
+
+  The on-disk `graph.msgpack` cache was being written successfully but
+  every read failed with `"invalid type: integer N, expected a sequence"`.
+  Root cause: the graph was serialised with `rmp_serde::encode::write`,
+  which uses positional/array encoding. `GraphNode` is a
+  `#[serde(tag = "kind")]` enum with many fields marked
+  `#[serde(skip_serializing_if = …)]` — these cannot round-trip through
+  positional encoding because absent fields confuse the decoder.
+
+  Fix: switched to struct-map encoding (`Serializer::with_struct_map`),
+  the same approach used by the query cache. Added a 1-byte
+  `GRAPH_CACHE_VERSION` prefix so any old broken cache is rejected cleanly
+  instead of producing a confusing deserialize error.
+
+- Bumped: `unfault-core` 0.5.35, `unfault-analysis` 0.4.35, `unfault` 1.0.35.
+
 ## [1.0.34] — 2026-06-28
 
 ### Fixed

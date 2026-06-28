@@ -602,10 +602,9 @@ fn infer_remote_service_name(span: &TraceSpanV1) -> String {
         .labels
         .get("/http/url")
         .or_else(|| span.labels.get("http.url"))
+        && let Some(host) = extract_host_from_url(url)
     {
-        if let Some(host) = extract_host_from_url(url) {
-            return host_to_service_name(&host);
-        }
+        return host_to_service_name(&host);
     }
 
     String::new()
@@ -764,7 +763,7 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(year: u64) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    (year.is_multiple_of(4) && !year.is_multiple_of(100)) || year.is_multiple_of(400)
 }
 
 /// Parse our own RFC3339 "YYYY-MM-DDTHH:MM:SSZ" → Unix epoch seconds.
@@ -793,8 +792,8 @@ fn parse_rfc3339_epoch_secs(s: &str) -> Option<u64> {
     } else {
         [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
     };
-    for mi_idx in 0..(mo as usize - 1) {
-        days += month_days[mi_idx];
+    for &d_in_month in &month_days[..(mo as usize - 1)] {
+        days += d_in_month;
     }
     days += d - 1;
 

@@ -348,7 +348,7 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             findings
                 .iter()
@@ -374,7 +374,7 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()
@@ -403,7 +403,7 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()
@@ -429,7 +429,7 @@ async fn fetch(url: &str) -> Result<(), reqwest::Error> {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()
@@ -464,7 +464,7 @@ async fn get_recipe(id: String) {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()
@@ -501,7 +501,7 @@ async fn get_recipe(id: String) {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()
@@ -541,7 +541,7 @@ async fn get_recipe(id: String) {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()

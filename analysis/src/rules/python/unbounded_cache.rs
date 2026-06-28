@@ -493,7 +493,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonUnboundedCacheRule::default();
+        let rule = PythonUnboundedCacheRule;
         assert_eq!(rule.id(), "python.unbounded_cache");
     }
 

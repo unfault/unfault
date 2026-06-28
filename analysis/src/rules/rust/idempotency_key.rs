@@ -241,7 +241,7 @@ async fn create_recipe(headers: HeaderMap) {
 "#,
         );
 
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             findings
                 .iter()

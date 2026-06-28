@@ -140,6 +140,7 @@ impl Rule for TypescriptGlobalMutableStateRule {
 /// - If no initializer: add suppression comment (cannot change to const without initializer)
 /// - If initialized to `null`: add suppression comment (typically reassigned later)
 /// - Otherwise: add suppression comment for review
+#[allow(clippy::too_many_arguments)]
 fn generate_smart_fix(
     var_name: &str,
     kind_str: &str,
@@ -300,7 +301,7 @@ fn is_numeric_literal(s: &str) -> bool {
 
     // Octal: 0o or 0O
     if s.starts_with("0o") || s.starts_with("0O") {
-        return s[2..].chars().all(|c| c >= '0' && c <= '7');
+        return s[2..].chars().all(|c| ('0'..='7').contains(&c));
     }
 
     // BigInt literals

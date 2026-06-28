@@ -80,6 +80,7 @@ struct SyncDnsLookup {
 
 /// DNS lookup function types
 #[derive(Debug, Clone, Copy)]
+#[allow(clippy::enum_variant_names)] // variants mirror Python's `socket.get*` API names
 enum DnsLookupType {
     /// socket.gethostbyname()
     GetHostByName,
@@ -504,7 +505,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonSyncDnsLookupRule::default();
+        let rule = PythonSyncDnsLookupRule;
         assert_eq!(rule.id(), "python.sync_dns_lookup");
     }
 

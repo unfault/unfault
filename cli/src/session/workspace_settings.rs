@@ -192,50 +192,50 @@ pub fn load_settings(project_dir: &Path) -> Option<LoadedSettings> {
 
     // 1. pyproject.toml
     let pyproject_path = project_dir.join("pyproject.toml");
-    if pyproject_path.exists() {
-        if let Some(settings) = parse_pyproject_toml(&pyproject_path) {
-            return Some(LoadedSettings {
-                settings,
-                source: SettingsSource::PyprojectToml,
-                path: pyproject_path.to_string_lossy().to_string(),
-            });
-        }
+    if pyproject_path.exists()
+        && let Some(settings) = parse_pyproject_toml(&pyproject_path)
+    {
+        return Some(LoadedSettings {
+            settings,
+            source: SettingsSource::PyprojectToml,
+            path: pyproject_path.to_string_lossy().to_string(),
+        });
     }
 
     // 2. Cargo.toml
     let cargo_path = project_dir.join("Cargo.toml");
-    if cargo_path.exists() {
-        if let Some(settings) = parse_cargo_toml(&cargo_path) {
-            return Some(LoadedSettings {
-                settings,
-                source: SettingsSource::CargoToml,
-                path: cargo_path.to_string_lossy().to_string(),
-            });
-        }
+    if cargo_path.exists()
+        && let Some(settings) = parse_cargo_toml(&cargo_path)
+    {
+        return Some(LoadedSettings {
+            settings,
+            source: SettingsSource::CargoToml,
+            path: cargo_path.to_string_lossy().to_string(),
+        });
     }
 
     // 3. package.json
     let package_json_path = project_dir.join("package.json");
-    if package_json_path.exists() {
-        if let Some(settings) = parse_package_json(&package_json_path) {
-            return Some(LoadedSettings {
-                settings,
-                source: SettingsSource::PackageJson,
-                path: package_json_path.to_string_lossy().to_string(),
-            });
-        }
+    if package_json_path.exists()
+        && let Some(settings) = parse_package_json(&package_json_path)
+    {
+        return Some(LoadedSettings {
+            settings,
+            source: SettingsSource::PackageJson,
+            path: package_json_path.to_string_lossy().to_string(),
+        });
     }
 
     // 4. .unfault.toml (standalone fallback)
     let unfault_toml_path = project_dir.join(".unfault.toml");
-    if unfault_toml_path.exists() {
-        if let Some(settings) = parse_unfault_toml(&unfault_toml_path) {
-            return Some(LoadedSettings {
-                settings,
-                source: SettingsSource::UnfaultToml,
-                path: unfault_toml_path.to_string_lossy().to_string(),
-            });
-        }
+    if unfault_toml_path.exists()
+        && let Some(settings) = parse_unfault_toml(&unfault_toml_path)
+    {
+        return Some(LoadedSettings {
+            settings,
+            source: SettingsSource::UnfaultToml,
+            path: unfault_toml_path.to_string_lossy().to_string(),
+        });
     }
 
     None

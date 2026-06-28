@@ -101,14 +101,13 @@ impl Rule for GoSqlInjectionRule {
 
                     let patch = generate_parameterized_query_patch(call, *file_id);
 
-                    let fix_preview = format!(
-                        "// Before (VULNERABLE):\n\
+                    let fix_preview = "// Before (VULNERABLE):\n\
                          // db.Query(\"SELECT * FROM users WHERE id = \" + userID)\n\
                          // db.Query(fmt.Sprintf(\"SELECT * FROM users WHERE id = %s\", userID))\n\
                          //\n\
                          // After (SAFE):\n\
                          // db.Query(\"SELECT * FROM users WHERE id = $1\", userID)"
-                    );
+                        .to_string();
 
                     findings.push(RuleFinding {
                         rule_id: self.id().to_string(),

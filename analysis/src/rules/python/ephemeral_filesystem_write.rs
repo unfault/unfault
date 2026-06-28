@@ -120,10 +120,10 @@ impl Rule for PythonEphemeralFilesystemWriteRule {
                     detect_filesystem_write(&call.function_call.callee_expr, &call.args_repr)
                 {
                     // Skip writes to known persistent paths
-                    if let Some(ref path) = path_hint {
-                        if is_persistent_path(path) {
-                            continue;
-                        }
+                    if let Some(ref path) = path_hint
+                        && is_persistent_path(path)
+                    {
+                        continue;
                     }
 
                     // Use third_party_import since we're adding "import boto3"
@@ -239,12 +239,12 @@ fn extract_path_from_args(args: &str) -> Option<String> {
 
     // Look for single or double quoted strings
     for quote in &['\'', '"'] {
-        if let Some(start) = args_trimmed.find(*quote) {
-            if let Some(end) = args_trimmed[start + 1..].find(*quote) {
-                let path = &args_trimmed[start + 1..start + 1 + end];
-                if !path.is_empty() {
-                    return Some(path.to_string());
-                }
+        if let Some(start) = args_trimmed.find(*quote)
+            && let Some(end) = args_trimmed[start + 1..].find(*quote)
+        {
+            let path = &args_trimmed[start + 1..start + 1 + end];
+            if !path.is_empty() {
+                return Some(path.to_string());
             }
         }
     }
@@ -485,7 +485,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonEphemeralFilesystemWriteRule::default();
+        let rule = PythonEphemeralFilesystemWriteRule;
         assert_eq!(rule.id(), "python.ephemeral_filesystem_write");
     }
 

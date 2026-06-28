@@ -89,7 +89,7 @@ impl Rule for PythonGrpcNoDeadlineRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -148,7 +148,7 @@ impl Rule for PythonGrpcNoDeadlineRule {
                             file_id: *file_id,
                             file_path: py.path.clone(),
                             line: Some(call.function_call.location.line),
-                            column: Some(call.function_call.location.column as u32),
+                            column: Some(call.function_call.location.column),
                             end_line: None,
                             end_column: None,
                             byte_range: None,
@@ -164,10 +164,11 @@ impl Rule for PythonGrpcNoDeadlineRule {
                 }
 
                 // Check for aio (async) gRPC calls
-                if callee.contains("grpc.aio.") {
-                    if callee.contains("insecure_channel") || callee.contains("secure_channel") {
-                        if !args.contains("options=") {
-                            findings.push(RuleFinding {
+                if callee.contains("grpc.aio.")
+                    && (callee.contains("insecure_channel") || callee.contains("secure_channel"))
+                    && !args.contains("options=")
+                {
+                    findings.push(RuleFinding {
                                 rule_id: self.id().to_string(),
                                 title: "Async gRPC channel without default timeout options".to_string(),
                                 description: Some(
@@ -182,7 +183,7 @@ impl Rule for PythonGrpcNoDeadlineRule {
                                 file_id: *file_id,
                                 file_path: py.path.clone(),
                                 line: Some(call.function_call.location.line),
-                                column: Some(call.function_call.location.column as u32),
+                                column: Some(call.function_call.location.column),
                     end_line: None,
                     end_column: None,
             byte_range: None,
@@ -190,8 +191,6 @@ impl Rule for PythonGrpcNoDeadlineRule {
                                 fix_preview: Some(generate_channel_fix(callee)),
                                 tags: vec!["grpc".to_string(), "timeout".to_string(), "async".to_string()],
                             });
-                        }
-                    }
                 }
             }
         }

@@ -126,14 +126,13 @@ impl Rule for RustUnsafeBlockUnauditedRule {
                     unsafe_block.function_name.as_deref().unwrap_or("<unknown>")
                 );
 
-                let fix_preview = format!(
-                    "// SAFETY: TODO: Document why this unsafe block is sound\n\
+                let fix_preview = "// SAFETY: TODO: Document why this unsafe block is sound\n\
                      // - What invariants must hold?\n\
                      // - Why are they guaranteed here?\n\
-                     unsafe {{\n    \
+                     unsafe {\n    \
                          // ... existing code ...\n\
-                     }}"
-                );
+                     }"
+                .to_string();
 
                 let patch = FilePatch {
                     file_id: *file_id,

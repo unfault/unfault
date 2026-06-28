@@ -271,10 +271,11 @@ impl Rule for RustHardcodedSecretsRule {
                             end_column: None,
                             byte_range: None,
                             patch: None,
-                            fix_preview: Some(format!(
+                            fix_preview: Some(
                                 "// Use environment variable instead:\n\
                                  std::env::var(\"SECRET_KEY\")?"
-                            )),
+                                    .to_string(),
+                            ),
                             tags: vec![
                                 "rust".into(),
                                 "security".into(),

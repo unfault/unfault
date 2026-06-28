@@ -92,20 +92,19 @@ impl Rule for GoDeferInLoopRule {
 
                 let patch = generate_defer_fix_patch(defer_stmt, *file_id);
 
-                let fix_preview = format!(
-                    "// Before: defer inside loop\n\
-                     // for ... {{\n\
+                let fix_preview = "// Before: defer inside loop\n\
+                     // for ... {\n\
                      //     f := open()\n\
                      //     defer f.Close()  // Won't close until function returns!\n\
-                     // }}\n\
+                     // }\n\
                      //\n\
                      // After: explicit close in loop\n\
-                     // for ... {{\n\
+                     // for ... {\n\
                      //     f := open()\n\
                      //     // ... use f ...\n\
                      //     f.Close()  // Closes each iteration\n\
-                     // }}"
-                );
+                     // }"
+                    .to_string();
 
                 findings.push(RuleFinding {
                     rule_id: self.id().to_string(),

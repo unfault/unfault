@@ -240,18 +240,18 @@ impl Rule for PythonHalsteadComplexityRule {
                 // walk the actual AST nodes
                 let metrics = estimate_halstead_from_function(func, py);
 
-                if let Some(severity) = metrics.severity() {
-                    if metrics.total_operators >= MIN_OPERATORS {
-                        findings.push(create_finding(
-                            self.id(),
-                            *file_id,
-                            &py.path,
-                            &func.name,
-                            func.location.range.start_line + 1,
-                            &metrics,
-                            severity,
-                        ));
-                    }
+                if let Some(severity) = metrics.severity()
+                    && metrics.total_operators >= MIN_OPERATORS
+                {
+                    findings.push(create_finding(
+                        self.id(),
+                        *file_id,
+                        &py.path,
+                        &func.name,
+                        func.location.range.start_line + 1,
+                        &metrics,
+                        severity,
+                    ));
                 }
             }
         }
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonHalsteadComplexityRule::default();
+        let rule = PythonHalsteadComplexityRule;
         assert_eq!(rule.id(), "python.halstead_complexity");
     }
 

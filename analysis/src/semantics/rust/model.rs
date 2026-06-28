@@ -751,13 +751,10 @@ fn walk_nodes_with_context(
         _ => ctx.clone(),
     };
 
-    match node.kind() {
-        "call_expression" => {
-            if let Some(call) = build_callsite(parsed, &node, &new_ctx, sem) {
-                sem.calls.push(call);
-            }
-        }
-        _ => {}
+    if node.kind() == "call_expression"
+        && let Some(call) = build_callsite(parsed, &node, &new_ctx, sem)
+    {
+        sem.calls.push(call);
     }
 
     for i in 0..node.child_count() {

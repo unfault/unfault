@@ -141,9 +141,9 @@ impl Rule for RustSpawnNoErrorHandlingRule {
                         file_id: *file_id,
                         hunks: vec![PatchHunk {
                             range: PatchRange::InsertBeforeLine { line },
-                            replacement: format!(
+                            replacement:
                                 "let _handle = // TODO: await this handle for error handling"
-                            ),
+                                    .to_string(),
                         }],
                     };
 

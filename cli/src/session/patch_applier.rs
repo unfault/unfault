@@ -262,7 +262,7 @@ impl PatchApplier {
 
         // Sort patches by byte_start in descending order
         // This allows us to apply patches from end to start, preserving offsets
-        patches.sort_by(|a, b| b.byte_start.cmp(&a.byte_start));
+        patches.sort_by_key(|p| std::cmp::Reverse(p.byte_start));
 
         // Apply patches
         let mut modified_content = content.clone();

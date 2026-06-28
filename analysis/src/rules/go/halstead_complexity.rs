@@ -205,18 +205,18 @@ impl Rule for GoHalsteadComplexityRule {
 
                 let metrics = estimate_halstead_from_function(func, go);
 
-                if let Some(severity) = metrics.severity() {
-                    if metrics.total_operators >= MIN_OPERATORS {
-                        findings.push(create_finding(
-                            self.id(),
-                            *file_id,
-                            &go.path,
-                            &func.name,
-                            func.location.range.start_line + 1,
-                            &metrics,
-                            severity,
-                        ));
-                    }
+                if let Some(severity) = metrics.severity()
+                    && metrics.total_operators >= MIN_OPERATORS
+                {
+                    findings.push(create_finding(
+                        self.id(),
+                        *file_id,
+                        &go.path,
+                        &func.name,
+                        func.location.range.start_line + 1,
+                        &metrics,
+                        severity,
+                    ));
                 }
             }
 
@@ -234,19 +234,19 @@ impl Rule for GoHalsteadComplexityRule {
 
                 let metrics = estimate_halstead_from_method(method, go);
 
-                if let Some(severity) = metrics.severity() {
-                    if metrics.total_operators >= MIN_OPERATORS {
-                        let full_name = format!("{}.{}", method.receiver_type, method.name);
-                        findings.push(create_finding(
-                            self.id(),
-                            *file_id,
-                            &go.path,
-                            &full_name,
-                            method.location.range.start_line + 1,
-                            &metrics,
-                            severity,
-                        ));
-                    }
+                if let Some(severity) = metrics.severity()
+                    && metrics.total_operators >= MIN_OPERATORS
+                {
+                    let full_name = format!("{}.{}", method.receiver_type, method.name);
+                    findings.push(create_finding(
+                        self.id(),
+                        *file_id,
+                        &go.path,
+                        &full_name,
+                        method.location.range.start_line + 1,
+                        &metrics,
+                        severity,
+                    ));
                 }
             }
         }
@@ -697,7 +697,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = GoHalsteadComplexityRule::default();
+        let rule = GoHalsteadComplexityRule;
         assert_eq!(rule.id(), "go.halstead_complexity");
     }
 

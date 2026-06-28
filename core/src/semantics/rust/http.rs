@@ -118,11 +118,11 @@ fn walk_http_calls(
     ctx: &HttpCallContext,
     has_await: bool,
 ) {
-    if node.kind() == "call_expression" {
-        if let Some(call) = extract_http_call(file, &node, ctx, has_await) {
-            out.push(call);
-            return;
-        }
+    if node.kind() == "call_expression"
+        && let Some(call) = extract_http_call(file, &node, ctx, has_await)
+    {
+        out.push(call);
+        return;
     }
 
     if node.kind() == "function_item" {
@@ -382,13 +382,12 @@ fn is_http_method(s: &str) -> bool {
 /// Extract method name from blocking call like `reqwest::blocking::get(...)`
 fn extract_method_from_blocking_call(path: &str) -> String {
     if let Some(method) = path
-        .rsplitn(2, "::")
-        .nth(1)
+        .rsplit_once("::")
+        .map(|x| x.0)
         .and_then(|s| s.split('(').next())
+        && is_http_method(method)
     {
-        if is_http_method(method) {
-            return method.to_string();
-        }
+        return method.to_string();
     }
     path.to_string()
 }
@@ -418,26 +417,26 @@ fn detect_timeout(args_text: &str) -> (bool, Option<f64>) {
 
 fn detect_timeout_in_chain(file: &ParsedFile, node: &tree_sitter::Node) -> (bool, Option<f64>) {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "field_expression" {
-                let field_node = child.child_by_field_name("field");
-                if let Some(field) = field_node {
-                    let method_name = file.text_for_node(&field);
-                    if method_name == "timeout" {
-                        let args_node = node.child_by_field_name("arguments");
-                        if let Some(args) = args_node {
-                            let args_text = file.text_for_node(&args);
-                            return detect_timeout(&args_text);
-                        }
+        if let Some(child) = node.child(i)
+            && child.kind() == "field_expression"
+        {
+            let field_node = child.child_by_field_name("field");
+            if let Some(field) = field_node {
+                let method_name = file.text_for_node(&field);
+                if method_name == "timeout" {
+                    let args_node = node.child_by_field_name("arguments");
+                    if let Some(args) = args_node {
+                        let args_text = file.text_for_node(&args);
+                        return detect_timeout(&args_text);
                     }
-                    let value_node = child.child_by_field_name("value");
-                    if let Some(value) = value_node {
-                        if value.kind() == "call_expression" {
-                            let result = detect_timeout_in_chain(file, &value);
-                            if result.0 {
-                                return result;
-                            }
-                        }
+                }
+                let value_node = child.child_by_field_name("value");
+                if let Some(value) = value_node
+                    && value.kind() == "call_expression"
+                {
+                    let result = detect_timeout_in_chain(file, &value);
+                    if result.0 {
+                        return result;
                     }
                 }
             }
@@ -451,7 +450,7 @@ fn extract_timeout_value(args_text: &str, pattern: &str) -> Option<f64> {
         let after = &args_text[start + pattern.len()..];
         let after_stripped = after.trim_start_matches('(').trim_start();
 
-        if let Some(end) = after_stripped.find(|c| c == ')' || c == ',') {
+        if let Some(end) = after_stripped.find([')', ',']) {
             let value_str = &after_stripped[..end];
             if let Ok(value) = value_str.trim().parse::<f64>() {
                 if pattern.contains("millis") {

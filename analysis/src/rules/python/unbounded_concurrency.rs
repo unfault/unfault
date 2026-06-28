@@ -194,12 +194,11 @@ fn create_finding(
 
     let patch = generate_semaphore_patch(unbounded, file_id, import_insertion_line);
 
-    let fix_preview = format!(
-        "# Add semaphore to limit concurrency:\n\
+    let fix_preview = "# Add semaphore to limit concurrency:\n\
          # semaphore = asyncio.Semaphore(10)  # Limit to 10 concurrent tasks\n\
          # async with semaphore:\n\
          #     await task"
-    );
+        .to_string();
 
     RuleFinding {
         rule_id: rule_id.to_string(),
@@ -344,7 +343,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonUnboundedConcurrencyRule::default();
+        let rule = PythonUnboundedConcurrencyRule;
         assert_eq!(rule.id(), "python.unbounded_concurrency");
     }
 

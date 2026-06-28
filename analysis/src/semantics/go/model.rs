@@ -441,11 +441,11 @@ fn walk_nodes_with_context(
         "package_clause" => {
             // In tree-sitter-go, package name is a package_identifier child, not a field
             for i in 0..node.child_count() {
-                if let Some(child) = node.child(i) {
-                    if child.kind() == "package_identifier" {
-                        sem.package_name = parsed.text_for_node(&child);
-                        break;
-                    }
+                if let Some(child) = node.child(i)
+                    && child.kind() == "package_identifier"
+                {
+                    sem.package_name = parsed.text_for_node(&child);
+                    break;
                 }
             }
         }
@@ -568,10 +568,10 @@ fn collect_imports(parsed: &ParsedFile, node: &tree_sitter::Node, sem: &mut GoFi
                 }
                 "import_spec_list" => {
                     for j in 0..child.child_count() {
-                        if let Some(spec) = child.child(j) {
-                            if spec.kind() == "import_spec" {
-                                process_import_spec(parsed, spec, sem);
-                            }
+                        if let Some(spec) = child.child(j)
+                            && spec.kind() == "import_spec"
+                        {
+                            process_import_spec(parsed, spec, sem);
                         }
                     }
                 }
@@ -668,39 +668,39 @@ fn extract_params(parsed: &ParsedFile, params_node: &tree_sitter::Node) -> Vec<G
     let mut params = Vec::new();
 
     for i in 0..params_node.child_count() {
-        if let Some(child) = params_node.child(i) {
-            if child.kind() == "parameter_declaration" {
-                // Get the type (last type_identifier or qualified_type in the declaration)
-                let mut param_type = String::new();
-                let mut names = Vec::new();
+        if let Some(child) = params_node.child(i)
+            && child.kind() == "parameter_declaration"
+        {
+            // Get the type (last type_identifier or qualified_type in the declaration)
+            let mut param_type = String::new();
+            let mut names = Vec::new();
 
-                for j in 0..child.child_count() {
-                    if let Some(param_child) = child.child(j) {
-                        match param_child.kind() {
-                            "identifier" => {
-                                names.push(parsed.text_for_node(&param_child));
-                            }
-                            "type_identifier" | "qualified_type" | "pointer_type"
-                            | "slice_type" | "array_type" | "map_type" | "channel_type"
-                            | "function_type" | "interface_type" | "struct_type" => {
-                                param_type = parsed.text_for_node(&param_child);
-                            }
-                            _ => {}
+            for j in 0..child.child_count() {
+                if let Some(param_child) = child.child(j) {
+                    match param_child.kind() {
+                        "identifier" => {
+                            names.push(parsed.text_for_node(&param_child));
                         }
+                        "type_identifier" | "qualified_type" | "pointer_type" | "slice_type"
+                        | "array_type" | "map_type" | "channel_type" | "function_type"
+                        | "interface_type" | "struct_type" => {
+                            param_type = parsed.text_for_node(&param_child);
+                        }
+                        _ => {}
                     }
                 }
+            }
 
-                // If no names, use empty string
-                if names.is_empty() {
-                    names.push(String::new());
-                }
+            // If no names, use empty string
+            if names.is_empty() {
+                names.push(String::new());
+            }
 
-                for name in names {
-                    params.push(GoParam {
-                        name,
-                        param_type: param_type.clone(),
-                    });
-                }
+            for name in names {
+                params.push(GoParam {
+                    name,
+                    param_type: param_type.clone(),
+                });
             }
         }
     }
@@ -716,27 +716,27 @@ fn extract_return_types(parsed: &ParsedFile, result_node: &tree_sitter::Node) ->
         "parameter_list" => {
             // Multiple return values: (int, error)
             for i in 0..result_node.child_count() {
-                if let Some(child) = result_node.child(i) {
-                    if child.kind() == "parameter_declaration" {
-                        // Extract type from each parameter declaration
-                        for j in 0..child.child_count() {
-                            if let Some(type_node) = child.child(j) {
-                                if matches!(
-                                    type_node.kind(),
-                                    "type_identifier"
-                                        | "qualified_type"
-                                        | "pointer_type"
-                                        | "slice_type"
-                                        | "array_type"
-                                        | "map_type"
-                                        | "channel_type"
-                                        | "function_type"
-                                        | "interface_type"
-                                        | "struct_type"
-                                ) {
-                                    types.push(parsed.text_for_node(&type_node));
-                                }
-                            }
+                if let Some(child) = result_node.child(i)
+                    && child.kind() == "parameter_declaration"
+                {
+                    // Extract type from each parameter declaration
+                    for j in 0..child.child_count() {
+                        if let Some(type_node) = child.child(j)
+                            && matches!(
+                                type_node.kind(),
+                                "type_identifier"
+                                    | "qualified_type"
+                                    | "pointer_type"
+                                    | "slice_type"
+                                    | "array_type"
+                                    | "map_type"
+                                    | "channel_type"
+                                    | "function_type"
+                                    | "interface_type"
+                                    | "struct_type"
+                            )
+                        {
+                            types.push(parsed.text_for_node(&type_node));
                         }
                     }
                 }
@@ -760,12 +760,11 @@ fn collect_type_declarations(
     sem: &mut GoFileSemantics,
 ) {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "type_spec" {
-                if let Some(type_decl) = build_type_decl(parsed, &child) {
-                    sem.types.push(type_decl);
-                }
-            }
+        if let Some(child) = node.child(i)
+            && child.kind() == "type_spec"
+            && let Some(type_decl) = build_type_decl(parsed, &child)
+        {
+            sem.types.push(type_decl);
         }
     }
 }
@@ -868,12 +867,11 @@ fn extract_interface_methods(
     let mut methods = Vec::new();
 
     for i in 0..interface_node.child_count() {
-        if let Some(child) = interface_node.child(i) {
-            if child.kind() == "method_spec" {
-                if let Some(name_node) = child.child_by_field_name("name") {
-                    methods.push(parsed.text_for_node(&name_node));
-                }
-            }
+        if let Some(child) = interface_node.child(i)
+            && child.kind() == "method_spec"
+            && let Some(name_node) = child.child_by_field_name("name")
+        {
+            methods.push(parsed.text_for_node(&name_node));
         }
     }
 
@@ -888,48 +886,48 @@ fn collect_declarations(
     is_const: bool,
 ) {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "var_spec" || child.kind() == "const_spec" {
-                // Extract name(s) and value(s)
-                let mut names = Vec::new();
-                let mut decl_type = None;
-                let mut value = None;
+        if let Some(child) = node.child(i)
+            && (child.kind() == "var_spec" || child.kind() == "const_spec")
+        {
+            // Extract name(s) and value(s)
+            let mut names = Vec::new();
+            let mut decl_type = None;
+            let mut value = None;
 
-                for j in 0..child.child_count() {
-                    if let Some(spec_child) = child.child(j) {
-                        match spec_child.kind() {
-                            "identifier" => {
-                                names.push(parsed.text_for_node(&spec_child));
-                            }
-                            "type_identifier" | "qualified_type" | "pointer_type"
-                            | "slice_type" | "array_type" | "map_type" | "channel_type"
-                            | "function_type" | "interface_type" | "struct_type" => {
-                                decl_type = Some(parsed.text_for_node(&spec_child));
-                            }
-                            "expression_list" => {
-                                value = Some(parsed.text_for_node(&spec_child));
-                            }
-                            _ if spec_child.is_named() && value.is_none() => {
-                                // Catch other expression types
-                                let text = parsed.text_for_node(&spec_child);
-                                if !text.is_empty() && spec_child.kind() != "comment" {
-                                    value = Some(text);
-                                }
-                            }
-                            _ => {}
+            for j in 0..child.child_count() {
+                if let Some(spec_child) = child.child(j) {
+                    match spec_child.kind() {
+                        "identifier" => {
+                            names.push(parsed.text_for_node(&spec_child));
                         }
+                        "type_identifier" | "qualified_type" | "pointer_type" | "slice_type"
+                        | "array_type" | "map_type" | "channel_type" | "function_type"
+                        | "interface_type" | "struct_type" => {
+                            decl_type = Some(parsed.text_for_node(&spec_child));
+                        }
+                        "expression_list" => {
+                            value = Some(parsed.text_for_node(&spec_child));
+                        }
+                        _ if spec_child.is_named() && value.is_none() => {
+                            // Catch other expression types
+                            let text = parsed.text_for_node(&spec_child);
+                            if !text.is_empty() && spec_child.kind() != "comment" {
+                                value = Some(text);
+                            }
+                        }
+                        _ => {}
                     }
                 }
+            }
 
-                for name in names {
-                    sem.declarations.push(GoDeclaration {
-                        name,
-                        is_const,
-                        value_repr: value.clone(),
-                        decl_type: decl_type.clone(),
-                        location: parsed.location_for_node(&child),
-                    });
-                }
+            for name in names {
+                sem.declarations.push(GoDeclaration {
+                    name,
+                    is_const,
+                    value_repr: value.clone(),
+                    decl_type: decl_type.clone(),
+                    location: parsed.location_for_node(&child),
+                });
             }
         }
     }
@@ -1146,24 +1144,23 @@ fn collect_unchecked_errors(
 
     // Check for expression statements that are just call expressions
     // These are potential unchecked error returns
-    if node.kind() == "expression_statement" {
-        if let Some(child) = node.child(0) {
-            if child.kind() == "call_expression" {
-                let call_text = parsed.text_for_node(&child);
-                // Heuristic: if the call looks like it returns an error (common patterns)
-                if is_likely_error_returning_call(&call_text) {
-                    let range = child.range();
-                    sem.unchecked_errors.push(UncheckedError {
-                        line: range.start_point.row as u32 + 1,
-                        column: range.start_point.column as u32 + 1,
-                        call_text,
-                        function_name: current_fn.clone(),
-                        start_byte: child.start_byte(),
-                        end_byte: child.end_byte(),
-                        location: parsed.location_for_node(&child),
-                    });
-                }
-            }
+    if node.kind() == "expression_statement"
+        && let Some(child) = node.child(0)
+        && child.kind() == "call_expression"
+    {
+        let call_text = parsed.text_for_node(&child);
+        // Heuristic: if the call looks like it returns an error (common patterns)
+        if is_likely_error_returning_call(&call_text) {
+            let range = child.range();
+            sem.unchecked_errors.push(UncheckedError {
+                line: range.start_point.row as u32 + 1,
+                column: range.start_point.column as u32 + 1,
+                call_text,
+                function_name: current_fn.clone(),
+                start_byte: child.start_byte(),
+                end_byte: child.end_byte(),
+                location: parsed.location_for_node(&child),
+            });
         }
     }
 

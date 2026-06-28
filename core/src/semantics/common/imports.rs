@@ -8,9 +8,10 @@ use serde::{Deserialize, Serialize};
 use super::CommonLocation;
 
 /// Import style classification
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ImportStyle {
     /// Full module import (import foo, import "foo")
+    #[default]
     Module,
     /// Named imports from module (from foo import bar, import { bar } from "foo")
     Named,
@@ -24,14 +25,8 @@ pub enum ImportStyle {
     ReExport,
 }
 
-impl Default for ImportStyle {
-    fn default() -> Self {
-        Self::Module
-    }
-}
-
 /// Import source type
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum ImportSource {
     /// Standard library module
     StandardLib,
@@ -40,13 +35,8 @@ pub enum ImportSource {
     /// Local/relative import from same project
     Local,
     /// Unknown source
+    #[default]
     Unknown,
-}
-
-impl Default for ImportSource {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 /// An imported item (for named imports)
@@ -127,7 +117,7 @@ impl Import {
     pub fn local_module_name(&self) -> Option<&str> {
         self.module_alias.as_deref().or_else(|| {
             // For simple module imports, the module name is the last segment
-            self.module_path.split(&['.', '/']).last()
+            self.module_path.split(&['.', '/']).next_back()
         })
     }
 

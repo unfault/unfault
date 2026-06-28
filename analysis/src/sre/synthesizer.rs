@@ -172,10 +172,10 @@ fn destruction_path(file_path: &str, blast: &BlastRadius) -> Vec<String> {
     }
 
     // Ensure the nearest entrypoint is the final node if reachable.
-    if let Some(ep) = blast.entrypoint_files.first() {
-        if path.last().map(|s: &String| s.as_str()) != Some(ep.as_str()) {
-            path.push(ep.clone());
-        }
+    if let Some(ep) = blast.entrypoint_files.first()
+        && path.last().map(|s: &String| s.as_str()) != Some(ep.as_str())
+    {
+        path.push(ep.clone());
     }
 
     path

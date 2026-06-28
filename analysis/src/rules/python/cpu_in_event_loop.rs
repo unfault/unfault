@@ -390,7 +390,7 @@ async def {func}():
         callee = cpu_call
             .callee
             .split('.')
-            .last()
+            .next_back()
             .unwrap_or(&cpu_call.callee)
     );
 
@@ -508,7 +508,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonCpuInEventLoopRule::default();
+        let rule = PythonCpuInEventLoopRule;
         assert_eq!(rule.id(), "python.cpu_in_event_loop");
     }
 

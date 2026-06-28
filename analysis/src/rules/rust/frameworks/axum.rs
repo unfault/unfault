@@ -596,7 +596,7 @@ fn create_router(state: AppState) {
 "#,
         );
 
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             !findings
                 .iter()

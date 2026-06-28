@@ -213,7 +213,7 @@ fn suggest_constant_name(regex_info: &RegexCompileInFunction) -> String {
     let base = regex_info
         .function_name
         .split('.')
-        .last()
+        .next_back()
         .unwrap_or(&regex_info.function_name);
 
     // Convert to camelCase pattern name
@@ -330,7 +330,7 @@ func {}(...) {{
         regex_info
             .function_name
             .split('.')
-            .last()
+            .next_back()
             .unwrap_or(&regex_info.function_name),
         compile_fn,
         pattern_arg,
@@ -340,7 +340,7 @@ func {}(...) {{
         regex_info
             .function_name
             .split('.')
-            .last()
+            .next_back()
             .unwrap_or(&regex_info.function_name),
         suggested_name,
     );
@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = GoRegexCompileRule::default();
+        let rule = GoRegexCompileRule;
         assert_eq!(rule.id(), "go.regex_compile");
     }
 

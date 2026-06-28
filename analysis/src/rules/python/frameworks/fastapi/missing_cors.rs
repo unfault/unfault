@@ -68,6 +68,12 @@ fn find_import_insertion_line(imports: &[PyImport], module_docstring_end_line: O
 #[derive(Debug)]
 pub struct FastApiMissingCorsRule;
 
+impl Default for FastApiMissingCorsRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FastApiMissingCorsRule {
     pub fn new() -> Self {
         Self

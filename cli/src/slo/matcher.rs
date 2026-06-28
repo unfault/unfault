@@ -32,12 +32,11 @@ pub fn find_matching_routes(slo: &SloDefinition, graph: &CodeGraph) -> Vec<NodeI
         .into_iter()
         .filter(|(_, route_path, route_method)| {
             // Check HTTP method match if SLO specifies one
-            if let Some(ref slo_method) = slo.http_method {
-                if let Some(rm) = route_method {
-                    if !slo_method.eq_ignore_ascii_case(rm) {
-                        return false;
-                    }
-                }
+            if let Some(ref slo_method) = slo.http_method
+                && let Some(rm) = route_method
+                && !slo_method.eq_ignore_ascii_case(rm)
+            {
+                return false;
             }
             path_matches(pattern, route_path)
         })
@@ -119,8 +118,7 @@ fn path_matches(pattern: &str, route_path: &str) -> bool {
         if remainder.is_empty() {
             return true;
         }
-        if remainder.starts_with('/') {
-            let after_slash = &remainder[1..];
+        if let Some(after_slash) = remainder.strip_prefix('/') {
             return !after_slash.contains('/');
         }
         return false;

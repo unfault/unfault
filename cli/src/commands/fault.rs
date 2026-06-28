@@ -77,7 +77,7 @@ pub enum FaultTemplate {
 }
 
 impl FaultTemplate {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse(s: &str) -> Option<Self> {
         match s.to_lowercase().replace('_', "-").as_str() {
             "latency-normal" => Some(Self::LatencyNormal),
             "latency-pareto" => Some(Self::LatencyPareto),
@@ -411,7 +411,7 @@ pub async fn execute(args: FaultArgs) -> Result<i32> {
 
     // ── Non-interactive path: --template was supplied ─────────────────────────
     if let Some(template_name) = &args.template {
-        let template = match FaultTemplate::from_str(template_name) {
+        let template = match FaultTemplate::parse(template_name) {
             Some(t) => t,
             None => {
                 eprintln!(
@@ -723,14 +723,14 @@ fn resolve_egress_targets(
         &unfault_core::semantics::SourceSemantics,
     > = semantics
         .iter()
-        .filter_map(|s| {
+        .map(|s| {
             let fid = match s {
                 SourceSemantics::Python(py) => py.file_id,
                 SourceSemantics::Go(go) => go.file_id,
                 SourceSemantics::Rust(rs) => rs.file_id,
                 SourceSemantics::Typescript(ts) => ts.file_id,
             };
-            Some((fid, s))
+            (fid, s)
         })
         .collect();
 

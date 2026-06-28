@@ -521,7 +521,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonCodeDuplicationRule::default();
+        let rule = PythonCodeDuplicationRule;
         assert_eq!(rule.id(), "python.code_duplication");
     }
 

@@ -154,63 +154,64 @@ impl Rule for GoConcurrentMapAccessRule {
 
             // Also check for global map variables accessed in goroutines
             for decl in &go.declarations {
-                if let Some(ref dtype) = decl.decl_type {
-                    if dtype.starts_with("map[") && !decl.is_const {
-                        // Global map - higher risk
-                        if !go.goroutines.is_empty() && !uses_sync_map && !uses_mutex {
-                            let line = decl.location.range.start_line + 1;
+                if let Some(ref dtype) = decl.decl_type
+                    && dtype.starts_with("map[")
+                    && !decl.is_const
+                {
+                    // Global map - higher risk
+                    if !go.goroutines.is_empty() && !uses_sync_map && !uses_mutex {
+                        let line = decl.location.range.start_line + 1;
 
-                            let title = "Global map may be accessed concurrently".to_string();
+                        let title = "Global map may be accessed concurrently".to_string();
 
-                            let description = format!(
-                                "Package-level map '{}' at line {} may be accessed from goroutines \
+                        let description = format!(
+                            "Package-level map '{}' at line {} may be accessed from goroutines \
                                  without synchronization. This is a common source of \"concurrent map writes\" \
                                  panics in production.\n\n\
                                  Consider:\n\
                                  1. Replace with sync.Map\n\
                                  2. Add a sync.RWMutex to protect access\n\
                                  3. Initialize map in init() with proper synchronization",
-                                decl.name, line
-                            );
+                            decl.name, line
+                        );
 
-                            // Generate patch to suggest sync.Map
-                            let patch = FilePatch {
-                                file_id: *file_id,
-                                hunks: vec![PatchHunk {
-                                    range: PatchRange::InsertBeforeLine { line },
-                                    replacement: format!(
-                                        "// Replace with: var {} sync.Map // for thread safety",
-                                        decl.name
-                                    ),
-                                }],
-                            };
+                        // Generate patch to suggest sync.Map
+                        let patch = FilePatch {
+                            file_id: *file_id,
+                            hunks: vec![PatchHunk {
+                                range: PatchRange::InsertBeforeLine { line },
+                                replacement: format!(
+                                    "// Replace with: var {} sync.Map // for thread safety",
+                                    decl.name
+                                ),
+                            }],
+                        };
 
-                            findings.push(RuleFinding {
-                                rule_id: self.id().to_string(),
-                                title,
-                                description: Some(description),
-                                kind: FindingKind::StabilityRisk,
-                                severity: Severity::Critical,
-                                confidence: 0.85,
-                                dimension: Dimension::Correctness,
-                                file_id: *file_id,
-                                file_path: go.path.clone(),
-                                line: Some(line),
-                                column: None,
-                                end_line: None,
-                                end_column: None,
-                                byte_range: None,
-                                patch: Some(patch),
-                                fix_preview: Some("Replace with sync.Map".to_string()),
-                                tags: vec![
-                                    "go".into(),
-                                    "concurrency".into(),
-                                    "race-condition".into(),
-                                    "map".into(),
-                                    "global".into(),
-                                ],
-                            });
-                        }
+                        findings.push(RuleFinding {
+                            rule_id: self.id().to_string(),
+                            title,
+                            description: Some(description),
+                            kind: FindingKind::StabilityRisk,
+                            severity: Severity::Critical,
+                            confidence: 0.85,
+                            dimension: Dimension::Correctness,
+                            file_id: *file_id,
+                            file_path: go.path.clone(),
+                            line: Some(line),
+                            column: None,
+                            end_line: None,
+                            end_column: None,
+                            byte_range: None,
+                            patch: Some(patch),
+                            fix_preview: Some("Replace with sync.Map".to_string()),
+                            tags: vec![
+                                "go".into(),
+                                "concurrency".into(),
+                                "race-condition".into(),
+                                "map".into(),
+                                "global".into(),
+                            ],
+                        });
                     }
                 }
             }

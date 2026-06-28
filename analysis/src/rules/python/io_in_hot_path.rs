@@ -216,7 +216,7 @@ fn detect_io_operation(callee: &str) -> Option<IoOperationType> {
     }
 
     // Process execution
-    if callee.contains("subprocess.")
+    if (callee.contains("subprocess.")
         || callee.contains("os.system")
         || callee.contains("os.popen")
         || callee.contains("os.spawn")
@@ -224,30 +224,27 @@ fn detect_io_operation(callee: &str) -> Option<IoOperationType> {
         || callee.contains(".run(")
         || callee.contains(".call(")
         || callee.contains(".check_output(")
-        || callee.contains(".check_call(")
-    {
-        if callee.contains("subprocess")
+        || callee.contains(".check_call("))
+        && (callee.contains("subprocess")
             || callee.contains("os.system")
             || callee.contains("os.popen")
             || callee.contains("os.spawn")
-            || callee.contains("Popen")
-        {
-            return Some(IoOperationType::ProcessExecution);
-        }
+            || callee.contains("Popen"))
+    {
+        return Some(IoOperationType::ProcessExecution);
     }
 
     // Socket operations
-    if callee.contains("socket.")
+    if (callee.contains("socket.")
         || callee.contains(".connect(")
         || callee.contains(".send(")
         || callee.contains(".recv(")
         || callee.contains(".sendall(")
         || callee.contains(".accept(")
-        || callee.contains(".listen(")
+        || callee.contains(".listen("))
+        && callee.contains("socket")
     {
-        if callee.contains("socket") {
-            return Some(IoOperationType::Socket);
-        }
+        return Some(IoOperationType::Socket);
     }
 
     None
@@ -307,7 +304,11 @@ for item in items:
 # Option 3: Concurrent execution
 import asyncio
 results = await asyncio.gather(*[async_{callee}(item) for item in items])"#,
-        callee = io_call.callee.split('.').last().unwrap_or(&io_call.callee)
+        callee = io_call
+            .callee
+            .split('.')
+            .next_back()
+            .unwrap_or(&io_call.callee)
     );
 
     RuleFinding {
@@ -338,18 +339,21 @@ results = await asyncio.gather(*[async_{callee}(item) for item in items])"#,
 }
 
 fn generate_batch_suggestion_patch(io_call: &IoInHotPath, file_id: FileId) -> FilePatch {
-    let func_name = io_call.callee.split('.').last().unwrap_or(&io_call.callee);
+    let func_name = io_call
+        .callee
+        .split('.')
+        .next_back()
+        .unwrap_or(&io_call.callee);
 
     // Generate specific fix based on I/O type
     let replacement = match io_call.io_type {
         IoOperationType::FileSystem => {
-            format!(
-                "# Fix: Move file I/O outside the loop or batch operations:\n\
+            "# Fix: Move file I/O outside the loop or batch operations:\n\
                  # # Option 1: Read all files before loop\n\
-                 # all_data = {{f: open(f).read() for f in files}}\n\
+                 # all_data = {f: open(f).read() for f in files}\n\
                  # for item in items:\n\
                  #     data = all_data[item]\n"
-            )
+                .to_string()
         }
         IoOperationType::Network => {
             format!(
@@ -360,14 +364,11 @@ fn generate_batch_suggestion_patch(io_call: &IoInHotPath, file_id: FileId) -> Fi
                 func_name
             )
         }
-        IoOperationType::Database => {
-            format!(
-                "# Fix: Use batch query instead of N individual queries:\n\
+        IoOperationType::Database => "# Fix: Use batch query instead of N individual queries:\n\
                  # # Instead of: for id in ids: db.query(id)\n\
                  # # Use: results = db.query_batch(ids)  # Single query\n\
                  # # Or: results = Model.objects.filter(id__in=ids)\n"
-            )
-        }
+            .to_string(),
         IoOperationType::ProcessExecution => {
             format!(
                 "# Fix: Batch subprocess calls or use parallel execution:\n\
@@ -377,13 +378,10 @@ fn generate_batch_suggestion_patch(io_call: &IoInHotPath, file_id: FileId) -> Fi
                 func_name
             )
         }
-        IoOperationType::Socket => {
-            format!(
-                "# Fix: Use connection pooling or async sockets:\n\
+        IoOperationType::Socket => "# Fix: Use connection pooling or async sockets:\n\
                  # # Reuse connections instead of creating new ones in loop\n\
                  # # Or use asyncio for concurrent socket operations\n"
-            )
-        }
+            .to_string(),
         IoOperationType::Generic => {
             format!(
                 "# Fix: Move '{}' outside the loop or batch the operations\n",
@@ -443,7 +441,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonIoInHotPathRule::default();
+        let rule = PythonIoInHotPathRule;
         assert_eq!(rule.id(), "python.io_in_hot_path");
     }
 

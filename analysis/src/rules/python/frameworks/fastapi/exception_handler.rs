@@ -20,6 +20,12 @@ use crate::types::patch::{FilePatch, PatchHunk, PatchRange};
 #[derive(Debug)]
 pub struct FastApiExceptionHandlerRule;
 
+impl Default for FastApiExceptionHandlerRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FastApiExceptionHandlerRule {
     pub fn new() -> Self {
         Self

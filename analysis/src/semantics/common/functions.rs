@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use super::CommonLocation;
 
 /// Function/method visibility
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum Visibility {
     /// Public (exported, pub)
     Public,
@@ -19,19 +19,15 @@ pub enum Visibility {
     /// Package-private (Go unexported, Java default)
     Package,
     /// Unknown/not applicable
+    #[default]
     Unknown,
 }
 
-impl Default for Visibility {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
 /// Function kind classification
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum FunctionKind {
     /// Regular function
+    #[default]
     Function,
     /// Instance method
     Method,
@@ -49,12 +45,6 @@ pub enum FunctionKind {
     Generator,
     /// Coroutine/async generator
     AsyncGenerator,
-}
-
-impl Default for FunctionKind {
-    fn default() -> Self {
-        Self::Function
-    }
 }
 
 /// A language-agnostic function parameter

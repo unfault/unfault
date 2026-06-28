@@ -481,7 +481,7 @@ impl UnfaultLsp {
             }
 
             // Create diagnostic
-            let diagnostic = self.finding_to_diagnostic(&finding, text);
+            let diagnostic = self.finding_to_diagnostic(finding, text);
             diagnostics.push(diagnostic);
 
             // Cache for code actions
@@ -634,20 +634,20 @@ impl UnfaultLsp {
             }
 
             // Create quick fix action if patch is available
-            if let Some(patch) = &finding.patch {
-                if let Some(edit) = self.parse_unified_diff(uri, patch, source_text) {
-                    let action = CodeAction {
-                        title: format!("Fix: {}", finding.title),
-                        kind: Some(CodeActionKind::QUICKFIX),
-                        diagnostics: Some(vec![self.finding_to_diagnostic(finding, source_text)]),
-                        edit: Some(edit),
-                        command: None,
-                        is_preferred: Some(true),
-                        disabled: None,
-                        data: None,
-                    };
-                    actions.push(action);
-                }
+            if let Some(patch) = &finding.patch
+                && let Some(edit) = self.parse_unified_diff(uri, patch, source_text)
+            {
+                let action = CodeAction {
+                    title: format!("Fix: {}", finding.title),
+                    kind: Some(CodeActionKind::QUICKFIX),
+                    diagnostics: Some(vec![self.finding_to_diagnostic(finding, source_text)]),
+                    edit: Some(edit),
+                    command: None,
+                    is_preferred: Some(true),
+                    disabled: None,
+                    data: None,
+                };
+                actions.push(action);
             }
 
             // Also check patch_json (newer format with structured hunks)
@@ -706,37 +706,37 @@ impl UnfaultLsp {
             let line = lines[i];
 
             // Parse hunk header: @@ -start,count +start,count @@
-            if line.starts_with("@@") {
-                if let Some(hunk) = parse_hunk_header(line) {
-                    let (_old_start, new_content) = parse_hunk_content(&lines[i + 1..]);
+            if line.starts_with("@@")
+                && let Some(hunk) = parse_hunk_header(line)
+            {
+                let (_old_start, new_content) = parse_hunk_content(&lines[i + 1..]);
 
-                    // Create edit for this hunk
-                    // old_start is 1-indexed, convert to 0-indexed
-                    let start_line = hunk.old_start.saturating_sub(1);
-                    let end_line = start_line + hunk.old_count;
+                // Create edit for this hunk
+                // old_start is 1-indexed, convert to 0-indexed
+                let start_line = hunk.old_start.saturating_sub(1);
+                let end_line = start_line + hunk.old_count;
 
-                    // Find the character positions
-                    let source_lines: Vec<&str> = source_text.lines().collect();
-                    let end_char = source_lines
-                        .get(end_line as usize)
-                        .map(|l| l.len() as u32)
-                        .unwrap_or(0);
+                // Find the character positions
+                let source_lines: Vec<&str> = source_text.lines().collect();
+                let end_char = source_lines
+                    .get(end_line as usize)
+                    .map(|l| l.len() as u32)
+                    .unwrap_or(0);
 
-                    let edit = TextEdit {
-                        range: Range {
-                            start: Position {
-                                line: start_line,
-                                character: 0,
-                            },
-                            end: Position {
-                                line: end_line,
-                                character: end_char,
-                            },
+                let edit = TextEdit {
+                    range: Range {
+                        start: Position {
+                            line: start_line,
+                            character: 0,
                         },
-                        new_text: new_content,
-                    };
-                    text_edits.push(edit);
-                }
+                        end: Position {
+                            line: end_line,
+                            character: end_char,
+                        },
+                    },
+                    new_text: new_content,
+                };
+                text_edits.push(edit);
             }
             i += 1;
         }
@@ -815,7 +815,7 @@ impl UnfaultLsp {
                         // Insert after the specified line
                         // LSP lines are 0-indexed, so line N (1-indexed) becomes line N-1 (0-indexed)
                         // We want to insert at the START of the next line (line N 0-indexed)
-                        let target_line = *line as u32;
+                        let target_line = *line;
                         let edit = TextEdit {
                             range: Range {
                                 start: Position {
@@ -834,7 +834,7 @@ impl UnfaultLsp {
                 }
                 PatchRange::InsertBeforeLine { line } => {
                     // line is 1-based; insert before line N means insert at start of line N-1 (0-indexed)
-                    let target_line = line.saturating_sub(1) as u32;
+                    let target_line = line.saturating_sub(1);
                     let edit = TextEdit {
                         range: Range {
                             start: Position {
@@ -956,14 +956,13 @@ impl UnfaultLsp {
         // Check cache first
         {
             let cache = self.centrality_cache.read().await;
-            if let Some(centralities) = cache.as_ref() {
-                if let Some(centrality) = centralities
+            if let Some(centralities) = cache.as_ref()
+                && let Some(centrality) = centralities
                     .iter()
                     .find(|c| c.path.ends_with(file_path) || file_path.ends_with(&c.path))
-                {
-                    let total_files = centralities.len() as i32;
-                    return Some(self.centrality_to_notification(centrality, total_files));
-                }
+            {
+                let total_files = centralities.len() as i32;
+                return Some(self.centrality_to_notification(centrality, total_files));
             }
         }
 
@@ -1485,10 +1484,10 @@ fn find_project_root(file_path: &Path, ide_workspace_root: Option<&PathBuf>) -> 
         }
 
         // Stop if we've reached the IDE workspace root
-        if let Some(stop) = stop_at {
-            if current == stop {
-                break;
-            }
+        if let Some(stop) = stop_at
+            && current == stop
+        {
+            break;
         }
 
         // Move up to the parent directory
@@ -1550,13 +1549,15 @@ fn parse_hunk_content(lines: &[&str]) -> (u32, String) {
             break;
         }
 
-        if line.starts_with('+') && !line.starts_with("+++") {
-            new_content.push(&line[1..]);
+        if let Some(rest) = line.strip_prefix('+') {
+            if !line.starts_with("+++") {
+                new_content.push(rest);
+            }
         } else if line.starts_with('-') && !line.starts_with("---") {
             // Skip removed lines
-        } else if line.starts_with(' ') {
+        } else if let Some(rest) = line.strip_prefix(' ') {
             // Context line - include in new content
-            new_content.push(&line[1..]);
+            new_content.push(rest);
         }
     }
 
@@ -1569,34 +1570,34 @@ impl LanguageServer for UnfaultLsp {
         self.log_debug("LSP initialize called");
 
         // Store workspace root
-        if let Some(root_uri) = params.root_uri {
-            if let Ok(path) = root_uri.to_file_path() {
-                self.log_debug(&format!("Workspace root: {:?}", path));
+        if let Some(root_uri) = params.root_uri
+            && let Ok(path) = root_uri.to_file_path()
+        {
+            self.log_debug(&format!("Workspace root: {:?}", path));
 
-                // Compute workspace ID
-                let git_remote = get_git_remote(&path);
-                let workspace_label = path
-                    .file_name()
-                    .and_then(|n| n.to_str())
-                    .map(|s| s.to_string());
+            // Compute workspace ID
+            let git_remote = get_git_remote(&path);
+            let workspace_label = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string());
 
-                let workspace_id_result =
-                    compute_workspace_id(git_remote.as_deref(), None, workspace_label.as_deref());
+            let workspace_id_result =
+                compute_workspace_id(git_remote.as_deref(), None, workspace_label.as_deref());
 
-                let workspace_id = workspace_id_result
-                    .map(|r| r.id)
-                    .unwrap_or_else(|| format!("wks_{}", uuid::Uuid::new_v4().simple()));
+            let workspace_id = workspace_id_result
+                .map(|r| r.id)
+                .unwrap_or_else(|| format!("wks_{}", uuid::Uuid::new_v4().simple()));
 
-                self.log_debug(&format!("Workspace ID: {}", workspace_id));
+            self.log_debug(&format!("Workspace ID: {}", workspace_id));
 
-                {
-                    let mut root = self.workspace_root.write().await;
-                    *root = Some(path);
-                }
-                {
-                    let mut id = self.workspace_id.write().await;
-                    *id = Some(workspace_id);
-                }
+            {
+                let mut root = self.workspace_root.write().await;
+                *root = Some(path);
+            }
+            {
+                let mut id = self.workspace_id.write().await;
+                *id = Some(workspace_id);
             }
         }
 
@@ -1659,10 +1660,7 @@ impl LanguageServer for UnfaultLsp {
         };
 
         // Get absolute file path from URI
-        let abs_path = match params.text_document.uri.to_file_path() {
-            Ok(abs) => Some(abs),
-            Err(_) => None,
-        };
+        let abs_path = params.text_document.uri.to_file_path().ok();
 
         // Determine the project root for this file (may differ from IDE workspace in monorepos)
         // and compute the relative path using the SAME root that build_ir_cached will use.
@@ -1707,43 +1705,43 @@ impl LanguageServer for UnfaultLsp {
 
         // Send local dependencies notification IMMEDIATELY if we have the graph
         // This provides instant feedback even on first open, before any API session exists
-        if let Some(ref ir) = local_ir {
-            if !relative_path.is_empty() {
+        if let Some(ref ir) = local_ir
+            && !relative_path.is_empty()
+        {
+            self.log_debug(&format!(
+                "Looking for file in graph: '{}' (graph has {} files)",
+                relative_path,
+                ir.graph.stats().file_count
+            ));
+            if let Some(dependencies) = self.compute_local_dependencies(ir, &relative_path) {
                 self.log_debug(&format!(
-                    "Looking for file in graph: '{}' (graph has {} files)",
-                    relative_path,
-                    ir.graph.stats().file_count
+                    "Sending local dependencies notification: {} direct, {} total for {}",
+                    dependencies.direct_dependents.len(),
+                    dependencies.total_count,
+                    relative_path
                 ));
-                if let Some(dependencies) = self.compute_local_dependencies(ir, &relative_path) {
-                    self.log_debug(&format!(
-                        "Sending local dependencies notification: {} direct, {} total for {}",
-                        dependencies.direct_dependents.len(),
-                        dependencies.total_count,
-                        relative_path
-                    ));
-                    let _ = self
-                        .client
-                        .send_notification::<FileDependenciesNotificationType>(dependencies)
-                        .await;
-                } else {
-                    self.log_debug(&format!(
-                        "No file found in graph for path: '{}'",
-                        relative_path
-                    ));
-                }
+                let _ = self
+                    .client
+                    .send_notification::<FileDependenciesNotificationType>(dependencies)
+                    .await;
+            } else {
+                self.log_debug(&format!(
+                    "No file found in graph for path: '{}'",
+                    relative_path
+                ));
+            }
 
-                // Extract functions from IR semantics and populate function_cache
-                // This enables function hover/impact analysis
-                let functions = self.extract_functions_from_ir(ir, &relative_path);
-                if !functions.is_empty() {
-                    self.log_debug(&format!(
-                        "Caching {} functions for hover from {}",
-                        functions.len(),
-                        relative_path
-                    ));
-                    self.function_cache
-                        .insert(params.text_document.uri.clone(), functions);
-                }
+            // Extract functions from IR semantics and populate function_cache
+            // This enables function hover/impact analysis
+            let functions = self.extract_functions_from_ir(ir, &relative_path);
+            if !functions.is_empty() {
+                self.log_debug(&format!(
+                    "Caching {} functions for hover from {}",
+                    functions.len(),
+                    relative_path
+                ));
+                self.function_cache
+                    .insert(params.text_document.uri.clone(), functions);
             }
         }
 
@@ -1758,13 +1756,13 @@ impl LanguageServer for UnfaultLsp {
         .await;
 
         // Send file centrality notification (from API cache or fetch)
-        if !relative_path.is_empty() {
-            if let Some(centrality) = self.get_file_centrality(&relative_path).await {
-                let _ = self
-                    .client
-                    .send_notification::<FileCentralityNotificationType>(centrality)
-                    .await;
-            }
+        if !relative_path.is_empty()
+            && let Some(centrality) = self.get_file_centrality(&relative_path).await
+        {
+            let _ = self
+                .client
+                .send_notification::<FileCentralityNotificationType>(centrality)
+                .await;
         }
     }
 
@@ -1885,11 +1883,11 @@ impl LanguageServer for UnfaultLsp {
             if let Ok(rel) = file_path.strip_prefix(ws_root) {
                 rel.to_string_lossy().to_string()
             } else {
-                self.log_debug(&format!("Failed to strip workspace root, using full path"));
+                self.log_debug("Failed to strip workspace root, using full path");
                 file_path.to_string_lossy().to_string()
             }
         } else {
-            self.log_debug(&format!("No workspace root available, using full path"));
+            self.log_debug("No workspace root available, using full path");
             file_path.to_string_lossy().to_string()
         };
 

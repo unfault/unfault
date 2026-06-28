@@ -147,60 +147,59 @@ fn extract_go_call_dependency(
     let callee = &call.function_call.callee_expr;
 
     // Database connections
-    if callee.contains("sql.Open") || callee.contains("gorm.Open") || callee.contains("sqlx.Open") {
-        if let Some(extracted) = extract_url_from_call(&call.args_repr) {
-            let protocol = DependencyProtocol::from_uri(&extracted.raw_value);
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.function_call.location.line,
-                column: call.function_call.location.column,
-                block_name: None, // Call sites don't track enclosing function
-                block_type: BlockType::Unknown,
-            };
+    if (callee.contains("sql.Open") || callee.contains("gorm.Open") || callee.contains("sqlx.Open"))
+        && let Some(extracted) = extract_url_from_call(&call.args_repr)
+    {
+        let protocol = DependencyProtocol::from_uri(&extracted.raw_value);
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.function_call.location.line,
+            column: call.function_call.location.column,
+            block_name: None, // Call sites don't track enclosing function
+            block_type: BlockType::Unknown,
+        };
 
-            let mut dep = RuntimeDependency::new(protocol, extracted.raw_value, source);
-            dep = dep.with_metadata("library", extract_go_library(callee));
-            return Some(dep);
-        }
+        let mut dep = RuntimeDependency::new(protocol, extracted.raw_value, source);
+        dep = dep.with_metadata("library", extract_go_library(callee));
+        return Some(dep);
     }
 
     // Redis connections
-    if callee.contains("redis.NewClient") || callee.contains("redis.NewClusterClient") {
-        if let Some(extracted) = extract_url_from_call(&call.args_repr) {
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.function_call.location.line,
-                column: call.function_call.location.column,
-                block_name: None,
-                block_type: BlockType::Unknown,
-            };
+    if (callee.contains("redis.NewClient") || callee.contains("redis.NewClusterClient"))
+        && let Some(extracted) = extract_url_from_call(&call.args_repr)
+    {
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.function_call.location.line,
+            column: call.function_call.location.column,
+            block_name: None,
+            block_type: BlockType::Unknown,
+        };
 
-            let mut dep =
-                RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
-            dep = dep.with_metadata("library", "go-redis");
-            return Some(dep);
-        }
+        let mut dep =
+            RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
+        dep = dep.with_metadata("library", "go-redis");
+        return Some(dep);
     }
 
     // gRPC connections
-    if callee.contains("grpc.Dial") || callee.contains("grpc.DialContext") {
-        if let Some(extracted) = extract_url_from_call(&call.args_repr) {
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.function_call.location.line,
-                column: call.function_call.location.column,
-                block_name: None,
-                block_type: BlockType::Unknown,
-            };
+    if (callee.contains("grpc.Dial") || callee.contains("grpc.DialContext"))
+        && let Some(extracted) = extract_url_from_call(&call.args_repr)
+    {
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.function_call.location.line,
+            column: call.function_call.location.column,
+            block_name: None,
+            block_type: BlockType::Unknown,
+        };
 
-            let mut dep =
-                RuntimeDependency::new(DependencyProtocol::Grpc, extracted.raw_value, source);
-            dep = dep.with_metadata("library", "grpc-go");
-            return Some(dep);
-        }
+        let mut dep = RuntimeDependency::new(DependencyProtocol::Grpc, extracted.raw_value, source);
+        dep = dep.with_metadata("library", "grpc-go");
+        return Some(dep);
     }
 
     None
@@ -233,7 +232,7 @@ fn extract_rust_call_dependency(
 
     // Reqwest HTTP client - reqwest::get("url") or client.get("url")
     let is_reqwest = callee.contains("reqwest")
-        || (call.method_name.as_ref().map_or(false, |m| {
+        || (call.method_name.as_ref().is_some_and(|m| {
             matches!(
                 m.as_str(),
                 "get" | "post" | "put" | "delete" | "patch" | "head"
@@ -269,60 +268,59 @@ fn extract_rust_call_dependency(
         || callee.contains("SqlitePool")
         || callee.contains("sqlx");
 
-    if is_sqlx {
-        if let Some(extracted) = extract_url_from_call(callee) {
-            let protocol = DependencyProtocol::from_uri(&extracted.raw_value);
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.function_call.location.line,
-                column: call.function_call.location.column,
-                block_name: call.function_name.clone(),
-                block_type: determine_block_type(&call.function_name),
-            };
+    if is_sqlx && let Some(extracted) = extract_url_from_call(callee) {
+        let protocol = DependencyProtocol::from_uri(&extracted.raw_value);
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.function_call.location.line,
+            column: call.function_call.location.column,
+            block_name: call.function_name.clone(),
+            block_type: determine_block_type(&call.function_name),
+        };
 
-            let mut dep = RuntimeDependency::new(protocol, extracted.raw_value, source);
-            dep = dep.with_metadata("library", "sqlx");
-            return Some(dep);
-        }
+        let mut dep = RuntimeDependency::new(protocol, extracted.raw_value, source);
+        dep = dep.with_metadata("library", "sqlx");
+        return Some(dep);
     }
 
     // Redis crate - redis::Client::open("url")
-    if callee.contains("redis") && callee.contains("Client") {
-        if let Some(extracted) = extract_url_from_call(callee) {
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.function_call.location.line,
-                column: call.function_call.location.column,
-                block_name: call.function_name.clone(),
-                block_type: determine_block_type(&call.function_name),
-            };
+    if callee.contains("redis")
+        && callee.contains("Client")
+        && let Some(extracted) = extract_url_from_call(callee)
+    {
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.function_call.location.line,
+            column: call.function_call.location.column,
+            block_name: call.function_name.clone(),
+            block_type: determine_block_type(&call.function_name),
+        };
 
-            let mut dep =
-                RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
-            dep = dep.with_metadata("library", "redis");
-            return Some(dep);
-        }
+        let mut dep =
+            RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
+        dep = dep.with_metadata("library", "redis");
+        return Some(dep);
     }
 
     // Tonic gRPC client connections
-    if callee.contains("tonic") && callee.contains("connect") {
-        if let Some(extracted) = extract_url_from_call(callee) {
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.function_call.location.line,
-                column: call.function_call.location.column,
-                block_name: call.function_name.clone(),
-                block_type: determine_block_type(&call.function_name),
-            };
+    if callee.contains("tonic")
+        && callee.contains("connect")
+        && let Some(extracted) = extract_url_from_call(callee)
+    {
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.function_call.location.line,
+            column: call.function_call.location.column,
+            block_name: call.function_name.clone(),
+            block_type: determine_block_type(&call.function_name),
+        };
 
-            let mut dep =
-                RuntimeDependency::new(DependencyProtocol::Grpc, extracted.raw_value, source);
-            dep = dep.with_metadata("library", "tonic");
-            return Some(dep);
-        }
+        let mut dep = RuntimeDependency::new(DependencyProtocol::Grpc, extracted.raw_value, source);
+        dep = dep.with_metadata("library", "tonic");
+        return Some(dep);
     }
 
     None
@@ -383,71 +381,72 @@ fn extract_typescript_call_dependency(
     }
 
     // Database connections - pg, mysql, mongodb, etc.
-    if callee.contains("createPool") || callee.contains("createConnection") {
-        if let Some(extracted) = extract_url_from_call(&call.args_repr) {
-            let protocol = DependencyProtocol::from_uri(&extracted.raw_value);
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.location.range.start_line + 1,
-                column: call.location.range.start_col + 1,
-                block_name: None,
-                block_type: BlockType::Unknown,
-            };
+    if (callee.contains("createPool") || callee.contains("createConnection"))
+        && let Some(extracted) = extract_url_from_call(&call.args_repr)
+    {
+        let protocol = DependencyProtocol::from_uri(&extracted.raw_value);
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.location.range.start_line + 1,
+            column: call.location.range.start_col + 1,
+            block_name: None,
+            block_type: BlockType::Unknown,
+        };
 
-            let library = if callee.contains("mysql") {
-                "mysql2"
-            } else if callee.contains("pg") {
-                "pg"
-            } else {
-                "unknown-db"
-            };
+        let library = if callee.contains("mysql") {
+            "mysql2"
+        } else if callee.contains("pg") {
+            "pg"
+        } else {
+            "unknown-db"
+        };
 
-            let mut dep = RuntimeDependency::new(protocol, extracted.raw_value, source);
-            dep = dep.with_metadata("library", library);
-            return Some(dep);
-        }
+        let mut dep = RuntimeDependency::new(protocol, extracted.raw_value, source);
+        dep = dep.with_metadata("library", library);
+        return Some(dep);
     }
 
     // MongoDB
-    if callee.contains("MongoClient") && callee.contains("connect") {
-        if let Some(extracted) = extract_url_from_call(&call.args_repr) {
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.location.range.start_line + 1,
-                column: call.location.range.start_col + 1,
-                block_name: None,
-                block_type: BlockType::Unknown,
-            };
+    if callee.contains("MongoClient")
+        && callee.contains("connect")
+        && let Some(extracted) = extract_url_from_call(&call.args_repr)
+    {
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.location.range.start_line + 1,
+            column: call.location.range.start_col + 1,
+            block_name: None,
+            block_type: BlockType::Unknown,
+        };
 
-            let mut dep = RuntimeDependency::new(
-                DependencyProtocol::Other("mongodb".to_string()),
-                extracted.raw_value,
-                source,
-            );
-            dep = dep.with_metadata("library", "mongodb");
-            return Some(dep);
-        }
+        let mut dep = RuntimeDependency::new(
+            DependencyProtocol::Other("mongodb".to_string()),
+            extracted.raw_value,
+            source,
+        );
+        dep = dep.with_metadata("library", "mongodb");
+        return Some(dep);
     }
 
     // Redis (ioredis, redis)
-    if callee.contains("Redis") || callee.contains("createClient") {
-        if let Some(extracted) = extract_url_from_call(&call.args_repr) {
-            let source = DependencySource {
-                file_path: file_path.to_string(),
-                file_id,
-                line: call.location.range.start_line + 1,
-                column: call.location.range.start_col + 1,
-                block_name: None,
-                block_type: BlockType::Unknown,
-            };
+    if (callee.contains("Redis") || callee.contains("createClient"))
+        && let Some(extracted) = extract_url_from_call(&call.args_repr)
+    {
+        let source = DependencySource {
+            file_path: file_path.to_string(),
+            file_id,
+            line: call.location.range.start_line + 1,
+            column: call.location.range.start_col + 1,
+            block_name: None,
+            block_type: BlockType::Unknown,
+        };
 
-            let mut dep =
-                RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
-            dep = dep.with_metadata("library", "ioredis");
-            return Some(dep);
-        }
+        let mut dep =
+            RuntimeDependency::new(DependencyProtocol::Redis, extracted.raw_value, source);
+        dep = dep.with_metadata("library", "ioredis");
+        return Some(dep);
     }
 
     None

@@ -89,10 +89,10 @@ impl LlmConfig {
 
     /// Get the API key from environment or config.
     pub fn get_api_key(&self) -> Option<String> {
-        if let Some(ref env_var) = self.api_key_env {
-            if let Ok(key) = std::env::var(env_var) {
-                return Some(key);
-            }
+        if let Some(ref env_var) = self.api_key_env
+            && let Ok(key) = std::env::var(env_var)
+        {
+            return Some(key);
         }
         self.api_key.clone()
     }
@@ -173,10 +173,10 @@ impl EmbeddingConfig {
 
     /// Get the API key from environment or config.
     pub fn get_api_key(&self) -> Option<String> {
-        if let Some(ref env_var) = self.api_key_env {
-            if let Ok(key) = std::env::var(env_var) {
-                return Some(key);
-            }
+        if let Some(ref env_var) = self.api_key_env
+            && let Ok(key) = std::env::var(env_var)
+        {
+            return Some(key);
         }
         self.api_key.clone()
     }

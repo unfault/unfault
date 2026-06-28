@@ -409,7 +409,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonRegexCompileRule::default();
+        let rule = PythonRegexCompileRule;
         assert_eq!(rule.id(), "python.regex_compile");
     }
 

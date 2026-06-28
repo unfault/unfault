@@ -7,6 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::parse::ast::{AstLocation, ParsedFile};
 
+/// Lightweight tuple summarising an ORM query call discovered during the
+/// first traversal pass. Fields: `(line, call_text, orm_kind, model_name,
+/// start_byte, end_byte)`.
+type OrmQuerySummary = (u32, String, OrmKind, Option<String>, usize, usize);
+
 /// Represents an ORM query call site
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OrmQueryCall {
@@ -122,7 +127,7 @@ pub struct NPlusOnePattern {
 }
 
 /// Context for tracking loop information during traversal
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 struct LoopContext {
     /// Whether we're inside a loop
     in_loop: bool,
@@ -134,24 +139,13 @@ struct LoopContext {
     outer_query: Option<OuterQueryInfo>,
 }
 
-impl Default for LoopContext {
-    fn default() -> Self {
-        Self {
-            in_loop: false,
-            in_comprehension: false,
-            loop_variable: None,
-            outer_query: None,
-        }
-    }
-}
-
 /// Summarize ORM usage in a parsed Python file
 pub fn summarize_orm_queries(parsed: &ParsedFile) -> Vec<OrmQueryCall> {
     let mut queries = Vec::new();
     let root = parsed.tree.root_node();
 
     // First pass: collect all ORM queries with their locations
-    let mut all_queries: Vec<(u32, String, OrmKind, Option<String>, usize, usize)> = Vec::new();
+    let mut all_queries: Vec<OrmQuerySummary> = Vec::new();
     collect_all_orm_queries(root, parsed, &mut all_queries);
 
     // Track loop context during traversal
@@ -165,38 +159,37 @@ pub fn summarize_orm_queries(parsed: &ParsedFile) -> Vec<OrmQueryCall> {
 fn collect_all_orm_queries(
     node: tree_sitter::Node,
     parsed: &ParsedFile,
-    queries: &mut Vec<(u32, String, OrmKind, Option<String>, usize, usize)>,
+    queries: &mut Vec<OrmQuerySummary>,
 ) {
     if node.kind() == "assignment" {
         // Check if this is an ORM query assignment
-        if let Some(right) = node.child_by_field_name("right") {
-            if right.kind() == "call" {
-                if let Some(func_node) = right.child_by_field_name("function") {
-                    let callee = parsed.text_for_node(&func_node);
-                    let args_text = right
-                        .child_by_field_name("arguments")
-                        .map(|n| parsed.text_for_node(&n))
-                        .unwrap_or_default();
+        if let Some(right) = node.child_by_field_name("right")
+            && right.kind() == "call"
+            && let Some(func_node) = right.child_by_field_name("function")
+        {
+            let callee = parsed.text_for_node(&func_node);
+            let args_text = right
+                .child_by_field_name("arguments")
+                .map(|n| parsed.text_for_node(&n))
+                .unwrap_or_default();
 
-                    if let Some((orm_kind, _)) = detect_orm_pattern(&callee, &args_text) {
-                        // Get the variable name
-                        if let Some(left) = node.child_by_field_name("left") {
-                            let var_name = parsed.text_for_node(&left);
-                            let location = parsed.location_for_node(&right);
-                            let model_name = extract_model_name(&callee);
-                            let query_text = parsed.text_for_node(&right);
-                            queries.push((
-                                location.range.start_line + 1,
-                                var_name,
-                                orm_kind,
-                                model_name,
-                                right.start_byte(),
-                                right.end_byte(),
-                            ));
-                            // Also store the query text
-                            let _ = query_text;
-                        }
-                    }
+            if let Some((orm_kind, _)) = detect_orm_pattern(&callee, &args_text) {
+                // Get the variable name
+                if let Some(left) = node.child_by_field_name("left") {
+                    let var_name = parsed.text_for_node(&left);
+                    let location = parsed.location_for_node(&right);
+                    let model_name = extract_model_name(&callee);
+                    let query_text = parsed.text_for_node(&right);
+                    queries.push((
+                        location.range.start_line + 1,
+                        var_name,
+                        orm_kind,
+                        model_name,
+                        right.start_byte(),
+                        right.end_byte(),
+                    ));
+                    // Also store the query text
+                    let _ = query_text;
                 }
             }
         }
@@ -259,7 +252,7 @@ fn walk_for_orm_queries(
     parsed: &ParsedFile,
     queries: &mut Vec<OrmQueryCall>,
     ctx: LoopContext,
-    all_queries: &[(u32, String, OrmKind, Option<String>, usize, usize)],
+    all_queries: &[OrmQuerySummary],
 ) {
     // Update context based on current node
     let mut new_ctx = ctx.clone();
@@ -297,28 +290,28 @@ fn walk_for_orm_queries(
             }
 
             // Also check if the iterable is a direct ORM call
-            if right.kind() == "call" {
-                if let Some(func_node) = right.child_by_field_name("function") {
-                    let callee = parsed.text_for_node(&func_node);
-                    let args_text = right
-                        .child_by_field_name("arguments")
-                        .map(|n| parsed.text_for_node(&n))
-                        .unwrap_or_default();
+            if right.kind() == "call"
+                && let Some(func_node) = right.child_by_field_name("function")
+            {
+                let callee = parsed.text_for_node(&func_node);
+                let args_text = right
+                    .child_by_field_name("arguments")
+                    .map(|n| parsed.text_for_node(&n))
+                    .unwrap_or_default();
 
-                    if let Some((orm_kind, _)) = detect_orm_pattern(&callee, &args_text) {
-                        let location = parsed.location_for_node(&right);
-                        let query_text = parsed.text_for_node(&right);
-                        new_ctx.outer_query = Some(OuterQueryInfo {
-                            line: location.range.start_line + 1,
-                            column: location.range.start_col + 1,
-                            start_byte: right.start_byte(),
-                            end_byte: right.end_byte(),
-                            query_text,
-                            variable_name: String::new(),
-                            model_name: extract_model_name(&callee),
-                            orm_kind,
-                        });
-                    }
+                if let Some((orm_kind, _)) = detect_orm_pattern(&callee, &args_text) {
+                    let location = parsed.location_for_node(&right);
+                    let query_text = parsed.text_for_node(&right);
+                    new_ctx.outer_query = Some(OuterQueryInfo {
+                        line: location.range.start_line + 1,
+                        column: location.range.start_col + 1,
+                        start_byte: right.start_byte(),
+                        end_byte: right.end_byte(),
+                        query_text,
+                        variable_name: String::new(),
+                        model_name: extract_model_name(&callee),
+                        orm_kind,
+                    });
                 }
             }
         }
@@ -341,31 +334,30 @@ fn walk_for_orm_queries(
         // Comprehensions have a "for_in_clause" child
         let child_count = node.child_count();
         for i in 0..child_count {
-            if let Some(child) = node.child(i) {
-                if child.kind() == "for_in_clause" {
-                    if let Some(left) = child.child_by_field_name("left") {
-                        new_ctx.loop_variable = Some(parsed.text_for_node(&left));
-                    }
-                    if let Some(right) = child.child_by_field_name("right") {
-                        let iterable_text = parsed.text_for_node(&right);
+            if let Some(child) = node.child(i)
+                && child.kind() == "for_in_clause"
+            {
+                if let Some(left) = child.child_by_field_name("left") {
+                    new_ctx.loop_variable = Some(parsed.text_for_node(&left));
+                }
+                if let Some(right) = child.child_by_field_name("right") {
+                    let iterable_text = parsed.text_for_node(&right);
 
-                        // Check if the iterable is a variable that was assigned an ORM query
-                        for (line, var_name, orm_kind, model_name, start_byte, end_byte) in
-                            all_queries
-                        {
-                            if iterable_text == *var_name {
-                                new_ctx.outer_query = Some(OuterQueryInfo {
-                                    line: *line,
-                                    column: 1,
-                                    start_byte: *start_byte,
-                                    end_byte: *end_byte,
-                                    query_text: iterable_text.clone(),
-                                    variable_name: var_name.clone(),
-                                    model_name: model_name.clone(),
-                                    orm_kind: *orm_kind,
-                                });
-                                break;
-                            }
+                    // Check if the iterable is a variable that was assigned an ORM query
+                    for (line, var_name, orm_kind, model_name, start_byte, end_byte) in all_queries
+                    {
+                        if iterable_text == *var_name {
+                            new_ctx.outer_query = Some(OuterQueryInfo {
+                                line: *line,
+                                column: 1,
+                                start_byte: *start_byte,
+                                end_byte: *end_byte,
+                                query_text: iterable_text.clone(),
+                                variable_name: var_name.clone(),
+                                model_name: model_name.clone(),
+                                orm_kind: *orm_kind,
+                            });
+                            break;
                         }
                     }
                 }
@@ -374,21 +366,21 @@ fn walk_for_orm_queries(
     }
 
     // Check for ORM query patterns
-    if node.kind() == "call" {
-        if let Some(mut query) = analyze_orm_call(node, parsed, &new_ctx) {
-            query.loop_variable = new_ctx.loop_variable.clone();
-            query.outer_query = new_ctx.outer_query.clone().map(Box::new);
-            queries.push(query);
-        }
+    if node.kind() == "call"
+        && let Some(mut query) = analyze_orm_call(node, parsed, &new_ctx)
+    {
+        query.loop_variable = new_ctx.loop_variable.clone();
+        query.outer_query = new_ctx.outer_query.clone().map(Box::new);
+        queries.push(query);
     }
 
     // Check for attribute access (potential lazy loading)
-    if node.kind() == "attribute" {
-        if let Some(mut query) = analyze_attribute_access(node, parsed, &new_ctx) {
-            query.loop_variable = new_ctx.loop_variable.clone();
-            query.outer_query = new_ctx.outer_query.clone().map(Box::new);
-            queries.push(query);
-        }
+    if node.kind() == "attribute"
+        && let Some(mut query) = analyze_attribute_access(node, parsed, &new_ctx)
+    {
+        query.loop_variable = new_ctx.loop_variable.clone();
+        query.outer_query = new_ctx.outer_query.clone().map(Box::new);
+        queries.push(query);
     }
 
     // Recurse into children

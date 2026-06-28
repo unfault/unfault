@@ -591,38 +591,32 @@ fn generate_smart_fix_preview(unwrap: &UnwrapCall) -> String {
                 before, lock_method, lock_method
             )
         }
-        UnwrapPattern::IsSomeUnwrap => {
-            format!(
-                "// Before (anti-pattern):\n\
-                 if value.is_some() {{\n    \
+        UnwrapPattern::IsSomeUnwrap => "// Before (anti-pattern):\n\
+                 if value.is_some() {\n    \
                      let x = value.unwrap();\n\
                      // use x\n\
-                 }}\n\n\
+                 }\n\n\
                  // After (idiomatic):\n\
-                 if let Some(x) = value {{\n    \
+                 if let Some(x) = value {\n    \
                      // use x directly\n\
-                 }}\n\n\
-                 // This eliminates the redundant check and is more concise.",
-            )
-        }
-        UnwrapPattern::IsOkUnwrap => {
-            format!(
-                "// Before (anti-pattern):\n\
-                 if result.is_ok() {{\n    \
+                 }\n\n\
+                 // This eliminates the redundant check and is more concise."
+            .to_string(),
+        UnwrapPattern::IsOkUnwrap => "// Before (anti-pattern):\n\
+                 if result.is_ok() {\n    \
                      let x = result.unwrap();\n\
                      // use x\n\
-                 }}\n\n\
+                 }\n\n\
                  // After (idiomatic):\n\
-                 if let Ok(x) = result {{\n    \
+                 if let Ok(x) = result {\n    \
                      // use x directly\n\
-                 }}\n\n\
+                 }\n\n\
                  // Or use match for handling both cases:\n\
-                 match result {{\n    \
-                     Ok(x) => {{ /* success */ }},\n    \
-                     Err(e) => {{ /* handle error */ }},\n\
-                 }}",
-            )
-        }
+                 match result {\n    \
+                     Ok(x) => { /* success */ },\n    \
+                     Err(e) => { /* handle error */ },\n\
+                 }"
+        .to_string(),
         _ => {
             // Fallback to generic preview
             match unwrap.on_type {
@@ -804,7 +798,7 @@ fn create_recipe() -> String {
 }
 "#,
         );
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             findings.iter().all(|f| f.rule_id != "rust.unsafe_unwrap"),
             "unwrap_or_else should not be treated as unsafe unwrap()"
@@ -911,7 +905,10 @@ fn process(a: Option<i32>, b: Option<i32>) -> i32 {
             .filter(|f| f.rule_id == "rust.unsafe_unwrap")
             .collect();
         // Should detect both unwraps
-        assert!(unwrap_findings.len() >= 1, "Should detect multiple unwraps");
+        assert!(
+            !unwrap_findings.is_empty(),
+            "Should detect multiple unwraps"
+        );
     }
 
     // =========================================================================

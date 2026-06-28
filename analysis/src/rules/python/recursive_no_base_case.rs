@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonRecursiveNoBaseCaseRule::default();
+        let rule = PythonRecursiveNoBaseCaseRule;
         assert_eq!(rule.id(), "python.recursive_no_base_case");
     }
 
@@ -435,7 +435,7 @@ def is_odd(n):
         let findings = rule.evaluate(&semantics, None).await;
 
         // Should detect both recursive functions
-        assert!(findings.len() >= 1, "Should detect recursive functions");
+        assert!(!findings.is_empty(), "Should detect recursive functions");
     }
 
     #[tokio::test]

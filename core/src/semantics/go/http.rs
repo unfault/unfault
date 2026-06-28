@@ -97,16 +97,16 @@ fn collect_http_calls(file: &ParsedFile, root: Node, out: &mut Vec<HttpCallSite>
         enclosing_fn_name: &mut Option<String>,
     ) {
         // Track function boundaries
-        if matches!(node.kind(), "function_declaration" | "method_declaration") {
-            if let Some(name_node) = node.child_by_field_name("name") {
-                *enclosing_fn_name = Some(file.text_for_node(&name_node));
-            }
+        if matches!(node.kind(), "function_declaration" | "method_declaration")
+            && let Some(name_node) = node.child_by_field_name("name")
+        {
+            *enclosing_fn_name = Some(file.text_for_node(&name_node));
         }
 
-        if node.kind() == "call_expression" {
-            if let Some(site) = extract_http_call(file, node, enclosing_fn_name.clone()) {
-                out.push(site);
-            }
+        if node.kind() == "call_expression"
+            && let Some(site) = extract_http_call(file, node, enclosing_fn_name.clone())
+        {
+            out.push(site);
         }
 
         let mut child = node.child(0);

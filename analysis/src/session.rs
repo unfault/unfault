@@ -277,7 +277,6 @@ impl InternalSessionState {
         let mut context_results: Vec<ContextResult> = self
             .contexts
             .iter()
-            .cloned()
             .map(|ctx| ContextResult {
                 context_id: ctx.id.clone(),
                 label: ctx.label.clone(),
@@ -294,13 +293,13 @@ impl InternalSessionState {
             let mut finding = Finding::from(rf);
 
             // If there is a patch, generate a unified diff.
-            if let Some(ref patch) = patch {
-                if let Some(parsed) = self.parsed_files.read_sync(&file_id, |_, p| p.clone()) {
-                    let before = &parsed.source;
-                    let after = apply_file_patch(before, patch);
-                    let diff = make_unified_diff(&parsed.path, before, &after);
-                    finding.diff = Some(diff);
-                }
+            if let Some(ref patch) = patch
+                && let Some(parsed) = self.parsed_files.read_sync(&file_id, |_, p| p.clone())
+            {
+                let before = &parsed.source;
+                let after = apply_file_patch(before, patch);
+                let diff = make_unified_diff(&parsed.path, before, &after);
+                finding.diff = Some(diff);
             }
 
             if let Some(&ctx_index) = self.file_to_context.get(&file_id) {
@@ -663,8 +662,8 @@ mod tests {
         if !session_result.contexts[0].findings.is_empty() {
             let finding = &session_result.contexts[0].findings[0];
             // The HTTP timeout rule produces patches, so diff should be computed
-            if finding.diff.is_some() {
-                assert!(finding.diff.as_ref().unwrap().contains("timeout"));
+            if let Some(diff) = &finding.diff {
+                assert!(diff.contains("timeout"));
             }
         }
     }

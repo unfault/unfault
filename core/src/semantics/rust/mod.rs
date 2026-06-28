@@ -165,13 +165,13 @@ fn walk_nodes(
         "function_item" => {
             // Only add to sem.functions if NOT inside an impl block
             // (methods in impl blocks are handled separately in build_impl)
-            if !ctx.in_impl {
-                if let Some(func) = build_function(parsed, &node, &new_ctx) {
-                    if func.is_async {
-                        sem.async_info.async_fn_count += 1;
-                    }
-                    sem.functions.push(func);
+            if !ctx.in_impl
+                && let Some(func) = build_function(parsed, &node, &new_ctx)
+            {
+                if func.is_async {
+                    sem.async_info.async_fn_count += 1;
                 }
+                sem.functions.push(func);
             }
         }
         "struct_item" => {
@@ -216,10 +216,10 @@ fn walk_nodes(
         "field_expression" => {
             // Only collect field accesses that are not part of a method call
             // (method calls are handled in call_expression)
-            if !is_method_call_receiver(parsed, &node) {
-                if let Some(field_access) = build_field_access(parsed, &node, &new_ctx) {
-                    sem.field_accesses.push(field_access);
-                }
+            if !is_method_call_receiver(parsed, &node)
+                && let Some(field_access) = build_field_access(parsed, &node, &new_ctx)
+            {
+                sem.field_accesses.push(field_access);
             }
         }
         "let_declaration" => {
@@ -405,11 +405,11 @@ fn update_context(
 /// Check if a function has a #[test] attribute.
 fn has_test_attribute(parsed: &ParsedFile, func_node: &tree_sitter::Node) -> bool {
     // Look at previous sibling for attribute
-    if let Some(prev) = func_node.prev_sibling() {
-        if prev.kind() == "attribute_item" {
-            let text = parsed.text_for_node(&prev);
-            return text.contains("#[test]") || text.contains("#[tokio::test]");
-        }
+    if let Some(prev) = func_node.prev_sibling()
+        && prev.kind() == "attribute_item"
+    {
+        let text = parsed.text_for_node(&prev);
+        return text.contains("#[test]") || text.contains("#[tokio::test]");
     }
     false
 }
@@ -473,15 +473,14 @@ fn build_use(parsed: &ParsedFile, node: &tree_sitter::Node) -> Option<model::Rus
 /// Extract the path from a use declaration.
 fn extract_use_path(parsed: &ParsedFile, node: &tree_sitter::Node) -> String {
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "use_list"
+        if let Some(child) = node.child(i)
+            && (child.kind() == "use_list"
                 || child.kind() == "scoped_identifier"
                 || child.kind() == "identifier"
-                || child.kind() == "scoped_use_list"
-            {
-                let text = parsed.text_for_node(&child);
-                return text.trim().to_string();
-            }
+                || child.kind() == "scoped_use_list")
+        {
+            let text = parsed.text_for_node(&child);
+            return text.trim().to_string();
         }
     }
     let text = parsed.text_for_node(node);
@@ -496,19 +495,18 @@ fn extract_use_items(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<Strin
     let mut items = Vec::new();
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "use_list" || child.kind() == "scoped_use_list" {
-                for j in 0..child.child_count() {
-                    if let Some(item) = child.child(j) {
-                        if item.kind() == "identifier"
-                            || item.kind() == "use_as_clause"
-                            || item.kind() == "use_prelude_clause"
-                        {
-                            let text = parsed.text_for_node(&item);
-                            if !text.is_empty() {
-                                items.push(text.trim().to_string());
-                            }
-                        }
+        if let Some(child) = node.child(i)
+            && (child.kind() == "use_list" || child.kind() == "scoped_use_list")
+        {
+            for j in 0..child.child_count() {
+                if let Some(item) = child.child(j)
+                    && (item.kind() == "identifier"
+                        || item.kind() == "use_as_clause"
+                        || item.kind() == "use_prelude_clause")
+                {
+                    let text = parsed.text_for_node(&item);
+                    if !text.is_empty() {
+                        items.push(text.trim().to_string());
                     }
                 }
             }
@@ -665,33 +663,33 @@ fn extract_params(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<model::R
 
     if let Some(params_node) = node.child_by_field_name("parameters") {
         for i in 0..params_node.child_count() {
-            if let Some(child) = params_node.child(i) {
-                if child.kind() == "parameter" || child.kind() == "self_parameter" {
-                    let text = parsed.text_for_node(&child);
-                    let is_self = text.contains("self");
-                    let is_mut = text.contains("mut ");
-                    let is_ref = text.contains('&');
+            if let Some(child) = params_node.child(i)
+                && (child.kind() == "parameter" || child.kind() == "self_parameter")
+            {
+                let text = parsed.text_for_node(&child);
+                let is_self = text.contains("self");
+                let is_mut = text.contains("mut ");
+                let is_ref = text.contains('&');
 
-                    // Extract name and type
-                    let (name, param_type) = if is_self {
-                        ("self".to_string(), text.clone())
+                // Extract name and type
+                let (name, param_type) = if is_self {
+                    ("self".to_string(), text.clone())
+                } else {
+                    let parts: Vec<&str> = text.splitn(2, ':').collect();
+                    if parts.len() == 2 {
+                        (parts[0].trim().to_string(), parts[1].trim().to_string())
                     } else {
-                        let parts: Vec<&str> = text.splitn(2, ':').collect();
-                        if parts.len() == 2 {
-                            (parts[0].trim().to_string(), parts[1].trim().to_string())
-                        } else {
-                            (text.clone(), String::new())
-                        }
-                    };
+                        (text.clone(), String::new())
+                    }
+                };
 
-                    params.push(model::RustParam {
-                        name,
-                        param_type,
-                        is_self,
-                        is_mut,
-                        is_ref,
-                    });
-                }
+                params.push(model::RustParam {
+                    name,
+                    param_type,
+                    is_self,
+                    is_mut,
+                    is_ref,
+                });
             }
         }
     }
@@ -733,32 +731,31 @@ fn extract_struct_fields(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<m
     let mut fields = Vec::new();
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "field_declaration_list" {
-                for j in 0..child.child_count() {
-                    if let Some(field) = child.child(j) {
-                        if field.kind() == "field_declaration" {
-                            if let Some(name_node) = field.child_by_field_name("name") {
-                                let name = parsed.text_for_node(&name_node);
-                                let field_text = parsed.text_for_node(&field);
-                                let visibility = extract_visibility(&field_text);
+        if let Some(child) = node.child(i)
+            && child.kind() == "field_declaration_list"
+        {
+            for j in 0..child.child_count() {
+                if let Some(field) = child.child(j)
+                    && field.kind() == "field_declaration"
+                    && let Some(name_node) = field.child_by_field_name("name")
+                {
+                    let name = parsed.text_for_node(&name_node);
+                    let field_text = parsed.text_for_node(&field);
+                    let visibility = extract_visibility(&field_text);
 
-                                let field_type = field
-                                    .child_by_field_name("type")
-                                    .map(|n| parsed.text_for_node(&n))
-                                    .unwrap_or_default();
+                    let field_type = field
+                        .child_by_field_name("type")
+                        .map(|n| parsed.text_for_node(&n))
+                        .unwrap_or_default();
 
-                                let field_attrs = extract_attributes_for_node(parsed, &field);
+                    let field_attrs = extract_attributes_for_node(parsed, &field);
 
-                                fields.push(model::RustField {
-                                    name,
-                                    field_type,
-                                    visibility,
-                                    attributes: field_attrs,
-                                });
-                            }
-                        }
-                    }
+                    fields.push(model::RustField {
+                        name,
+                        field_type,
+                        visibility,
+                        attributes: field_attrs,
+                    });
                 }
             }
         }
@@ -825,57 +822,54 @@ fn extract_enum_variants(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<m
     let mut variants = Vec::new();
 
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "enum_variant_list" {
-                for j in 0..child.child_count() {
-                    if let Some(variant) = child.child(j) {
-                        if variant.kind() == "enum_variant" {
-                            if let Some(name_node) = variant.child_by_field_name("name") {
-                                let name = parsed.text_for_node(&name_node);
-                                let _variant_text = parsed.text_for_node(&variant);
+        if let Some(child) = node.child(i)
+            && child.kind() == "enum_variant_list"
+        {
+            for j in 0..child.child_count() {
+                if let Some(variant) = child.child(j)
+                    && variant.kind() == "enum_variant"
+                    && let Some(name_node) = variant.child_by_field_name("name")
+                {
+                    let name = parsed.text_for_node(&name_node);
+                    let _variant_text = parsed.text_for_node(&variant);
 
-                                let mut tuple_fields = Vec::new();
-                                let mut struct_fields = Vec::new();
-                                let mut discriminant = None;
+                    let mut tuple_fields = Vec::new();
+                    let mut struct_fields = Vec::new();
+                    let mut discriminant = None;
 
-                                for k in 0..variant.child_count() {
-                                    if let Some(field) = variant.child(k) {
-                                        if field.kind() == "tuple_field"
-                                            || field.kind() == "positional_field"
-                                        {
-                                            let field_type = parsed.text_for_node(&field);
-                                            tuple_fields.push(field_type);
-                                        } else if field.kind() == "struct_field"
-                                            || field.kind() == "named_field"
-                                        {
-                                            if let Some(name) = field.child_by_field_name("name") {
-                                                let field_name = parsed.text_for_node(&name);
-                                                let field_type = field
-                                                    .child_by_field_name("type")
-                                                    .map(|n| parsed.text_for_node(&n))
-                                                    .unwrap_or_default();
-                                                struct_fields.push(model::RustField {
-                                                    name: field_name,
-                                                    field_type,
-                                                    visibility: model::Visibility::Private,
-                                                    attributes: Vec::new(),
-                                                });
-                                            }
-                                        } else if field.kind() == "discriminant_value" {
-                                            discriminant = Some(parsed.text_for_node(&field));
-                                        }
-                                    }
+                    for k in 0..variant.child_count() {
+                        if let Some(field) = variant.child(k) {
+                            if field.kind() == "tuple_field" || field.kind() == "positional_field" {
+                                let field_type = parsed.text_for_node(&field);
+                                tuple_fields.push(field_type);
+                            } else if field.kind() == "struct_field"
+                                || field.kind() == "named_field"
+                            {
+                                if let Some(name) = field.child_by_field_name("name") {
+                                    let field_name = parsed.text_for_node(&name);
+                                    let field_type = field
+                                        .child_by_field_name("type")
+                                        .map(|n| parsed.text_for_node(&n))
+                                        .unwrap_or_default();
+                                    struct_fields.push(model::RustField {
+                                        name: field_name,
+                                        field_type,
+                                        visibility: model::Visibility::Private,
+                                        attributes: Vec::new(),
+                                    });
                                 }
-
-                                variants.push(model::EnumVariant {
-                                    name,
-                                    tuple_fields,
-                                    struct_fields,
-                                    discriminant,
-                                });
+                            } else if field.kind() == "discriminant_value" {
+                                discriminant = Some(parsed.text_for_node(&field));
                             }
                         }
                     }
+
+                    variants.push(model::EnumVariant {
+                        name,
+                        tuple_fields,
+                        struct_fields,
+                        discriminant,
+                    });
                 }
             }
         }
@@ -930,12 +924,11 @@ fn build_impl(
     let mut methods = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
         for i in 0..body.child_count() {
-            if let Some(child) = body.child(i) {
-                if child.kind() == "function_item" {
-                    if let Some(func) = build_function(parsed, &child, ctx) {
-                        methods.push(func);
-                    }
-                }
+            if let Some(child) = body.child(i)
+                && child.kind() == "function_item"
+                && let Some(func) = build_function(parsed, &child, ctx)
+            {
+                methods.push(func);
             }
         }
     }
@@ -1088,12 +1081,12 @@ fn build_call_site(
 /// We don't want to collect field accesses that are part of method calls
 /// (e.g., `obj.method()` - we only want `obj.field`).
 fn is_method_call_receiver(_parsed: &ParsedFile, node: &tree_sitter::Node) -> bool {
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "call_expression" {
-            // This field_expression is the "function" of a call_expression
-            if let Some(func_node) = parent.child_by_field_name("function") {
-                return func_node.id() == node.id();
-            }
+    if let Some(parent) = node.parent()
+        && parent.kind() == "call_expression"
+    {
+        // This field_expression is the "function" of a call_expression
+        if let Some(func_node) = parent.child_by_field_name("function") {
+            return func_node.id() == node.id();
         }
     }
     false
@@ -1420,10 +1413,10 @@ fn walk_for_async(
     // Look for select! macro
     if node.kind() == "macro_invocation" {
         let text = parsed.text_for_node(&node);
-        if text.contains("select!") || text.contains("tokio::select!") {
-            if let Some(select) = analyze_select_usage(parsed, &node, &text, &new_ctx) {
-                sem.async_info.select_usages.push(select);
-            }
+        if (text.contains("select!") || text.contains("tokio::select!"))
+            && let Some(select) = analyze_select_usage(parsed, &node, &text, &new_ctx)
+        {
+            sem.async_info.select_usages.push(select);
         }
     }
 
@@ -1503,19 +1496,19 @@ fn analyze_join_handle_error_handling(
         };
         let pattern_text = parsed.text_for_node(&pattern);
 
-        if let Some(value_node) = parent.child_by_field_name("value") {
-            if value_node.id() == spawn_node.id() {
-                let handle_var = if pattern_text.starts_with("let ") {
-                    match pattern_text[4..].trim().split_whitespace().next() {
-                        Some(v) => v,
-                        None => return false,
-                    }
-                } else {
-                    &pattern_text
-                };
+        if let Some(value_node) = parent.child_by_field_name("value")
+            && value_node.id() == spawn_node.id()
+        {
+            let handle_var = if let Some(rest) = pattern_text.strip_prefix("let ") {
+                match rest.split_whitespace().next() {
+                    Some(v) => v,
+                    None => return false,
+                }
+            } else {
+                &pattern_text
+            };
 
-                return check_handle_usage(parsed, &parent, handle_var);
-            }
+            return check_handle_usage(parsed, &parent, handle_var);
         }
     } else if parent.kind() == "assignment_expression" {
         let left = match parent.child_by_field_name("left") {
@@ -1546,36 +1539,36 @@ fn check_handle_usage(
         }
         max_nodes -= 1;
 
-        if node.kind() == "call_expression" {
-            if let Some(func_node) = node.child_by_field_name("function") {
-                let func_text = parsed.text_for_node(&func_node);
+        if node.kind() == "call_expression"
+            && let Some(func_node) = node.child_by_field_name("function")
+        {
+            let func_text = parsed.text_for_node(&func_node);
 
-                if func_text.contains(&format!("{}.await", handle_var))
-                    || func_text.contains(&format!("{}.join().await", handle_var))
-                {
-                    return true;
-                }
+            if func_text.contains(&format!("{}.await", handle_var))
+                || func_text.contains(&format!("{}.join().await", handle_var))
+            {
+                return true;
+            }
 
-                if func_text.contains(&format!("{}.abort()", handle_var)) {
-                    return true;
-                }
+            if func_text.contains(&format!("{}.abort()", handle_var)) {
+                return true;
+            }
 
-                if func_text.contains("tokio::spawn")
-                    && func_text.contains(&format!("await {}", handle_var))
-                {
-                    return true;
-                }
+            if func_text.contains("tokio::spawn")
+                && func_text.contains(&format!("await {}", handle_var))
+            {
+                return true;
             }
         }
 
-        if node.kind() == "expression_statement" {
-            if let Some(child) = node.child(0) {
-                let text = parsed.text_for_node(&child);
-                if text.contains(&format!("{}.await", handle_var))
-                    || text.contains(&format!("{}.join()", handle_var))
-                {
-                    return true;
-                }
+        if node.kind() == "expression_statement"
+            && let Some(child) = node.child(0)
+        {
+            let text = parsed.text_for_node(&child);
+            if text.contains(&format!("{}.await", handle_var))
+                || text.contains(&format!("{}.join()", handle_var))
+            {
+                return true;
             }
         }
 
@@ -1636,63 +1629,62 @@ fn walk_for_error_handling(
             let text = parsed.text_for_node(&node);
 
             // Check for unwrap calls - using actual method name, not string matching
-            if method_name == "unwrap"
+            if (method_name == "unwrap"
                 || method_name == "unwrap_or"
                 || method_name == "unwrap_or_default"
-                || method_name == "unwrap_or_else"
-            {
-                if let Some(unwrap) =
+                || method_name == "unwrap_or_else")
+                && let Some(unwrap) =
                     build_unwrap_call(parsed, &node, &text, &method_name, &new_ctx)
-                {
-                    sem.unwrap_calls.push(unwrap);
-                }
+            {
+                sem.unwrap_calls.push(unwrap);
             }
 
             // Check for expect calls - using actual method name, not string matching
-            if method_name == "expect" {
-                if let Some(expect) = build_expect_call(parsed, &node, &text, &new_ctx) {
-                    sem.expect_calls.push(expect);
-                }
+            if method_name == "expect"
+                && let Some(expect) = build_expect_call(parsed, &node, &text, &new_ctx)
+            {
+                sem.expect_calls.push(expect);
             }
         }
     }
 
     // Look for ignored results (expression statements that might return Result)
-    if node.kind() == "expression_statement" {
-        if let Some(child) = node.child(0) {
-            let text = parsed.text_for_node(&child);
-            // Heuristic: if calling a function that likely returns Result/Option
-            if is_likely_fallible_call(&text) && !text.contains('?') {
-                sem.result_ignores.push(model::ResultIgnore {
-                    ignore_style: model::ResultIgnoreStyle::Statement,
-                    expr_text: text,
-                    in_test: new_ctx.in_test,
-                    function_name: new_ctx.current_function.clone(),
-                    location: parsed.location_for_node(&child),
-                    start_byte: child.start_byte(),
-                    end_byte: child.end_byte(),
-                });
-            }
+    if node.kind() == "expression_statement"
+        && let Some(child) = node.child(0)
+    {
+        let text = parsed.text_for_node(&child);
+        // Heuristic: if calling a function that likely returns Result/Option
+        if is_likely_fallible_call(&text) && !text.contains('?') {
+            sem.result_ignores.push(model::ResultIgnore {
+                ignore_style: model::ResultIgnoreStyle::Statement,
+                expr_text: text,
+                in_test: new_ctx.in_test,
+                function_name: new_ctx.current_function.clone(),
+                location: parsed.location_for_node(&child),
+                start_byte: child.start_byte(),
+                end_byte: child.end_byte(),
+            });
         }
     }
 
     // Look for let _ = ... patterns
     if node.kind() == "let_declaration" {
         let text = parsed.text_for_node(&node);
-        if text.starts_with("let _") && !text.starts_with("let __") {
-            if let Some(value_node) = node.child_by_field_name("value") {
-                let value_text = parsed.text_for_node(&value_node);
-                if is_likely_fallible_call(&value_text) {
-                    sem.result_ignores.push(model::ResultIgnore {
-                        ignore_style: model::ResultIgnoreStyle::LetUnderscore,
-                        expr_text: value_text,
-                        in_test: new_ctx.in_test,
-                        function_name: new_ctx.current_function.clone(),
-                        location: parsed.location_for_node(&node),
-                        start_byte: node.start_byte(),
-                        end_byte: node.end_byte(),
-                    });
-                }
+        if text.starts_with("let _")
+            && !text.starts_with("let __")
+            && let Some(value_node) = node.child_by_field_name("value")
+        {
+            let value_text = parsed.text_for_node(&value_node);
+            if is_likely_fallible_call(&value_text) {
+                sem.result_ignores.push(model::ResultIgnore {
+                    ignore_style: model::ResultIgnoreStyle::LetUnderscore,
+                    expr_text: value_text,
+                    in_test: new_ctx.in_test,
+                    function_name: new_ctx.current_function.clone(),
+                    location: parsed.location_for_node(&node),
+                    start_byte: node.start_byte(),
+                    end_byte: node.end_byte(),
+                });
             }
         }
     }
@@ -1749,12 +1741,11 @@ fn build_unwrap_call(
 fn extract_receiver_expr(parsed: &ParsedFile, node: &tree_sitter::Node) -> String {
     // The node is a call_expression. Its "function" child is a field_expression.
     // The field_expression's "value" child is the receiver.
-    if let Some(func_node) = node.child_by_field_name("function") {
-        if func_node.kind() == "field_expression" {
-            if let Some(receiver) = func_node.child_by_field_name("value") {
-                return parsed.text_for_node(&receiver);
-            }
-        }
+    if let Some(func_node) = node.child_by_field_name("function")
+        && func_node.kind() == "field_expression"
+        && let Some(receiver) = func_node.child_by_field_name("value")
+    {
+        return parsed.text_for_node(&receiver);
     }
     // Fallback: extract from text
     let text = parsed.text_for_node(node);
@@ -1772,10 +1763,10 @@ fn detect_unwrap_pattern(
     _full_text: &str,
 ) -> model::UnwrapPattern {
     // Pattern: env::var("...").unwrap()
-    if receiver_expr.contains("env::var(") || receiver_expr.contains("std::env::var(") {
-        if let Some(var_name) = extract_string_literal(receiver_expr) {
-            return model::UnwrapPattern::EnvVar { var_name };
-        }
+    if (receiver_expr.contains("env::var(") || receiver_expr.contains("std::env::var("))
+        && let Some(var_name) = extract_string_literal(receiver_expr)
+    {
+        return model::UnwrapPattern::EnvVar { var_name };
     }
 
     // Pattern: .parse().unwrap() or .parse::<T>().unwrap()
@@ -1790,10 +1781,11 @@ fn detect_unwrap_pattern(
     }
 
     // Pattern: .get(idx).unwrap() on collections
-    if receiver_expr.ends_with(')') && receiver_expr.contains(".get(") {
-        if let Some(index_expr) = extract_method_arg(receiver_expr, "get") {
-            return model::UnwrapPattern::CollectionGet { index_expr };
-        }
+    if receiver_expr.ends_with(')')
+        && receiver_expr.contains(".get(")
+        && let Some(index_expr) = extract_method_arg(receiver_expr, "get")
+    {
+        return model::UnwrapPattern::CollectionGet { index_expr };
     }
 
     // Pattern: .first().unwrap() / .last().unwrap()
@@ -1827,15 +1819,15 @@ fn detect_unwrap_pattern(
     }
 
     // Pattern: .find("x").unwrap() - check for starts_with/contains guard
-    if receiver_expr.contains(".find(") {
-        if let Some(needle) = extract_method_arg(receiver_expr, "find") {
-            // Check if we're inside an if with a starts_with/contains guard
-            if let Some(guard_info) = find_guard_condition(parsed, node, &needle) {
-                return guard_info;
-            }
-            // No guard found - still might suggest if let pattern
-            return model::UnwrapPattern::ContainsFind { needle };
+    if receiver_expr.contains(".find(")
+        && let Some(needle) = extract_method_arg(receiver_expr, "find")
+    {
+        // Check if we're inside an if with a starts_with/contains guard
+        if let Some(guard_info) = find_guard_condition(parsed, node, &needle) {
+            return guard_info;
         }
+        // No guard found - still might suggest if let pattern
+        return model::UnwrapPattern::ContainsFind { needle };
     }
 
     model::UnwrapPattern::Generic
@@ -1864,30 +1856,30 @@ fn find_guard_condition(
                 let cond_text = parsed.text_for_node(&condition);
 
                 // Check for starts_with guard with same needle
-                if cond_text.contains(".starts_with(") {
-                    if let Some(sw_needle) = extract_method_arg(&cond_text, "starts_with") {
-                        // Check if the needles match (allowing for quotes)
-                        let clean_needle = needle.trim_matches('"').trim_matches('\'');
-                        let clean_sw_needle = sw_needle.trim_matches('"').trim_matches('\'');
-                        if clean_needle == clean_sw_needle || sw_needle.contains(clean_needle) {
-                            return Some(model::UnwrapPattern::StartsWithFind {
-                                needle: needle.to_string(),
-                                guard_start_byte: Some(parent.start_byte()),
-                            });
-                        }
+                if cond_text.contains(".starts_with(")
+                    && let Some(sw_needle) = extract_method_arg(&cond_text, "starts_with")
+                {
+                    // Check if the needles match (allowing for quotes)
+                    let clean_needle = needle.trim_matches('"').trim_matches('\'');
+                    let clean_sw_needle = sw_needle.trim_matches('"').trim_matches('\'');
+                    if clean_needle == clean_sw_needle || sw_needle.contains(clean_needle) {
+                        return Some(model::UnwrapPattern::StartsWithFind {
+                            needle: needle.to_string(),
+                            guard_start_byte: Some(parent.start_byte()),
+                        });
                     }
                 }
 
                 // Check for contains guard with same needle
-                if cond_text.contains(".contains(") {
-                    if let Some(c_needle) = extract_method_arg(&cond_text, "contains") {
-                        let clean_needle = needle.trim_matches('"').trim_matches('\'');
-                        let clean_c_needle = c_needle.trim_matches('"').trim_matches('\'');
-                        if clean_needle == clean_c_needle || c_needle.contains(clean_needle) {
-                            return Some(model::UnwrapPattern::ContainsFind {
-                                needle: needle.to_string(),
-                            });
-                        }
+                if cond_text.contains(".contains(")
+                    && let Some(c_needle) = extract_method_arg(&cond_text, "contains")
+                {
+                    let clean_needle = needle.trim_matches('"').trim_matches('\'');
+                    let clean_c_needle = c_needle.trim_matches('"').trim_matches('\'');
+                    if clean_needle == clean_c_needle || c_needle.contains(clean_needle) {
+                        return Some(model::UnwrapPattern::ContainsFind {
+                            needle: needle.to_string(),
+                        });
                     }
                 }
 
@@ -2404,7 +2396,7 @@ mod tests {
         let sem = parse_and_build_semantics(src);
 
         // Should have unwrap calls
-        assert!(sem.unwrap_calls.len() >= 1, "Should detect unwrap calls");
+        assert!(!sem.unwrap_calls.is_empty(), "Should detect unwrap calls");
 
         // The unwrap in production_code should NOT be marked as in_test
         let prod_unwraps: Vec<_> = sem

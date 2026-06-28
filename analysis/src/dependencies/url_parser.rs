@@ -167,26 +167,26 @@ fn looks_like_url(s: &str) -> bool {
     // Check for host:port pattern (e.g., "localhost:6379")
     if s.contains(':') && !s.contains(' ') && !s.starts_with(':') {
         let parts: Vec<&str> = s.rsplitn(2, ':').collect();
-        if parts.len() == 2 {
-            if let Ok(port) = parts[0].parse::<u16>() {
-                // Common ports for network services
-                // Common ports for network services
-                // Note: 5432 (PostgreSQL), 3306 (MySQL) are covered by ranges
-                if matches!(
-                    port,
-                    80 | 443
-                        | 3000..=3999  // includes MySQL 3306
-                        | 5000..=5999  // includes PostgreSQL 5432
-                        | 6379         // Redis
-                        | 8000..=8999  // common dev servers
-                        | 27017        // MongoDB
-                        | 9092         // Kafka
-                        | 11211        // Memcached
-                        | 9200         // Elasticsearch
-                        | 50051        // gRPC
-                ) {
-                    return true;
-                }
+        if parts.len() == 2
+            && let Ok(port) = parts[0].parse::<u16>()
+        {
+            // Common ports for network services
+            // Common ports for network services
+            // Note: 5432 (PostgreSQL), 3306 (MySQL) are covered by ranges
+            if matches!(
+                port,
+                80 | 443
+                    | 3000..=3999  // includes MySQL 3306
+                    | 5000..=5999  // includes PostgreSQL 5432
+                    | 6379         // Redis
+                    | 8000..=8999  // common dev servers
+                    | 27017        // MongoDB
+                    | 9092         // Kafka
+                    | 11211        // Memcached
+                    | 9200         // Elasticsearch
+                    | 50051        // gRPC
+            ) {
+                return true;
             }
         }
     }

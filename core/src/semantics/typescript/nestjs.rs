@@ -184,26 +184,25 @@ fn extract_decorators(parsed: &ParsedFile, node: &tree_sitter::Node) -> Vec<Stri
 
     // Check direct children of the node
     for i in 0..node.child_count() {
-        if let Some(child) = node.child(i) {
-            if child.kind() == "decorator" {
-                decorators.push(parsed.text_for_node(&child));
-            }
+        if let Some(child) = node.child(i)
+            && child.kind() == "decorator"
+        {
+            decorators.push(parsed.text_for_node(&child));
         }
     }
 
     // Also check parent siblings (decorators that come before the class in export_statement)
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "export_statement" {
-            if let Some(grandparent) = parent.parent() {
-                for i in 0..grandparent.child_count() {
-                    if let Some(child) = grandparent.child(i) {
-                        if child.id() == parent.id() {
-                            break;
-                        }
-                        if child.kind() == "decorator" {
-                            decorators.push(parsed.text_for_node(&child));
-                        }
-                    }
+    if let Some(parent) = node.parent()
+        && parent.kind() == "export_statement"
+        && let Some(grandparent) = parent.parent()
+    {
+        for i in 0..grandparent.child_count() {
+            if let Some(child) = grandparent.child(i) {
+                if child.id() == parent.id() {
+                    break;
+                }
+                if child.kind() == "decorator" {
+                    decorators.push(parsed.text_for_node(&child));
                 }
             }
         }
@@ -407,7 +406,7 @@ class UserController {
 }
 "#;
         let summary = parse_and_summarize(src).unwrap();
-        assert!(summary.guards.len() >= 1);
+        assert!(!summary.guards.is_empty());
     }
 
     #[test]
@@ -426,7 +425,7 @@ class UserController {
 }
 "#;
         let summary = parse_and_summarize(src).unwrap();
-        assert!(summary.interceptors.len() >= 1);
+        assert!(!summary.interceptors.is_empty());
     }
 
     #[test]

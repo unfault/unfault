@@ -108,10 +108,10 @@ pub fn summarize_flask(file: &ParsedFile) -> Option<FlaskFileSummary> {
 }
 
 fn collect_flask_apps(file: &ParsedFile, node: Node, out: &mut Vec<FlaskApp>) {
-    if node.kind() == "assignment" {
-        if let Some(app) = extract_flask_app(file, node) {
-            out.push(app);
-        }
+    if node.kind() == "assignment"
+        && let Some(app) = extract_flask_app(file, node)
+    {
+        out.push(app);
     }
 
     let mut cursor = node.walk();
@@ -148,10 +148,10 @@ fn extract_flask_app(file: &ParsedFile, node: Node) -> Option<FlaskApp> {
 }
 
 fn collect_flask_blueprints(file: &ParsedFile, node: Node, out: &mut Vec<FlaskBlueprint>) {
-    if node.kind() == "assignment" {
-        if let Some(bp) = extract_flask_blueprint(file, node) {
-            out.push(bp);
-        }
+    if node.kind() == "assignment"
+        && let Some(bp) = extract_flask_blueprint(file, node)
+    {
+        out.push(bp);
     }
 
     let mut cursor = node.walk();
@@ -488,27 +488,26 @@ fn extract_route_methods(file: &ParsedFile, args: Node) -> String {
             }
 
             // value should be a list literal like ['GET', 'POST']
-            if let Some(list_node) = value {
-                if list_node.kind() == "list" {
-                    let mut methods: Vec<String> = Vec::new();
-                    let mut list_cursor = list_node.walk();
-                    for item in list_node.children(&mut list_cursor) {
-                        if item.kind() == "string" {
-                            if let Ok(text) = item.utf8_text(source_bytes) {
-                                let method =
-                                    text.trim_matches(|c| c == '"' || c == '\'').to_uppercase();
-                                if !method.is_empty() {
-                                    methods.push(method);
-                                }
-                            }
+            if let Some(list_node) = value
+                && list_node.kind() == "list"
+            {
+                let mut methods: Vec<String> = Vec::new();
+                let mut list_cursor = list_node.walk();
+                for item in list_node.children(&mut list_cursor) {
+                    if item.kind() == "string"
+                        && let Ok(text) = item.utf8_text(source_bytes)
+                    {
+                        let method = text.trim_matches(|c| c == '"' || c == '\'').to_uppercase();
+                        if !method.is_empty() {
+                            methods.push(method);
                         }
                     }
-                    return match methods.len() {
-                        0 => "GET".to_string(),
-                        1 => methods.remove(0),
-                        _ => "ANY".to_string(),
-                    };
                 }
+                return match methods.len() {
+                    0 => "GET".to_string(),
+                    1 => methods.remove(0),
+                    _ => "ANY".to_string(),
+                };
             }
         }
     }
@@ -678,10 +677,10 @@ fn clean_schema_name(raw: &str) -> Option<String> {
 }
 
 fn collect_flask_error_handlers(file: &ParsedFile, node: Node, out: &mut Vec<FlaskErrorHandler>) {
-    if node.kind() == "decorated_definition" {
-        if let Some(handler) = extract_flask_error_handler(file, node) {
-            out.push(handler);
-        }
+    if node.kind() == "decorated_definition"
+        && let Some(handler) = extract_flask_error_handler(file, node)
+    {
+        out.push(handler);
     }
 
     let mut cursor = node.walk();
@@ -716,8 +715,7 @@ fn extract_flask_error_handler(
         {
             let handler_name = func_def
                 .child_by_field_name("name")
-                .map(|n| n.utf8_text(source_bytes).ok())
-                .flatten()
+                .and_then(|n| n.utf8_text(source_bytes).ok())
                 .unwrap_or("unknown")
                 .to_string();
 
@@ -774,13 +772,10 @@ fn extract_first_string_arg(file: &ParsedFile, args: Node) -> Option<String> {
 
     let mut cursor = args.walk();
     for child in args.children(&mut cursor) {
-        match child.kind() {
-            "string" => {
-                let text = child.utf8_text(source_bytes).ok()?;
-                let path = text.trim_matches(|c| c == '"' || c == '\'');
-                return Some(path.to_string());
-            }
-            _ => {}
+        if child.kind() == "string" {
+            let text = child.utf8_text(source_bytes).ok()?;
+            let path = text.trim_matches(|c| c == '"' || c == '\'');
+            return Some(path.to_string());
         }
     }
 
@@ -792,12 +787,9 @@ fn extract_first_int_arg(file: &ParsedFile, args: Node) -> Option<u32> {
 
     let mut cursor = args.walk();
     for child in args.children(&mut cursor) {
-        match child.kind() {
-            "integer" => {
-                let text = child.utf8_text(source_bytes).ok()?;
-                return text.parse().ok();
-            }
-            _ => {}
+        if child.kind() == "integer" {
+            let text = child.utf8_text(source_bytes).ok()?;
+            return text.parse().ok();
         }
     }
 

@@ -660,21 +660,18 @@ Based on this context, please answer the user's question about their codebase he
 
             // Parse SSE events (data: {...}\n\n format)
             for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let json_str = &line[6..];
+                if let Some(json_str) = line.strip_prefix("data: ") {
                     if json_str == "[DONE]" {
                         continue;
                     }
 
                     if let Ok(stream_response) =
                         serde_json::from_str::<OpenAIStreamResponse>(json_str)
+                        && let Some(choice) = stream_response.choices.first()
+                        && let Some(content) = &choice.delta.content
                     {
-                        if let Some(choice) = stream_response.choices.first() {
-                            if let Some(content) = &choice.delta.content {
-                                wrapper.write(content);
-                                full_content.push_str(content);
-                            }
-                        }
+                        wrapper.write(content);
+                        full_content.push_str(content);
                     }
                 }
             }
@@ -814,19 +811,14 @@ Based on this context, please answer the user's question about their codebase he
 
             // Parse SSE events (event: type\ndata: {...}\n\n format)
             for line in text.lines() {
-                if line.starts_with("data: ") {
-                    let json_str = &line[6..];
-
-                    if let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(json_str) {
-                        if event.event_type == "content_block_delta" {
-                            if let Some(delta) = &event.delta {
-                                if let Some(text) = &delta.text {
-                                    wrapper.write(text);
-                                    full_content.push_str(text);
-                                }
-                            }
-                        }
-                    }
+                if let Some(json_str) = line.strip_prefix("data: ")
+                    && let Ok(event) = serde_json::from_str::<AnthropicStreamEvent>(json_str)
+                    && event.event_type == "content_block_delta"
+                    && let Some(delta) = &event.delta
+                    && let Some(text) = &delta.text
+                {
+                    wrapper.write(text);
+                    full_content.push_str(text);
                 }
             }
         }
@@ -952,11 +944,11 @@ Based on this context, please answer the user's question about their codebase he
                     message: Option<OllamaMessageResponse>,
                 }
 
-                if let Ok(chunk) = serde_json::from_str::<OllamaStreamChunk>(line) {
-                    if let Some(message) = chunk.message {
-                        wrapper.write(&message.content);
-                        full_content.push_str(&message.content);
-                    }
+                if let Ok(chunk) = serde_json::from_str::<OllamaStreamChunk>(line)
+                    && let Some(message) = chunk.message
+                {
+                    wrapper.write(&message.content);
+                    full_content.push_str(&message.content);
                 }
             }
         }

@@ -189,7 +189,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = GoUncheckedErrorRule::default();
+        let rule = GoUncheckedErrorRule;
         assert_eq!(rule.id(), "go.unchecked_error");
     }
 

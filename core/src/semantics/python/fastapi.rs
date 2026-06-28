@@ -122,10 +122,10 @@ pub fn summarize_fastapi(file: &ParsedFile) -> Option<FastApiFileSummary> {
 }
 
 fn collect_fastapi_apps(file: &ParsedFile, node: Node, out: &mut Vec<FastApiApp>) {
-    if node.kind() == "assignment" {
-        if let Some(app) = extract_fastapi_app(file, node) {
-            out.push(app);
-        }
+    if node.kind() == "assignment"
+        && let Some(app) = extract_fastapi_app(file, node)
+    {
+        out.push(app);
     }
 
     let mut cursor = node.walk();
@@ -135,10 +135,10 @@ fn collect_fastapi_apps(file: &ParsedFile, node: Node, out: &mut Vec<FastApiApp>
 }
 
 fn collect_fastapi_middlewares(file: &ParsedFile, node: Node, out: &mut Vec<FastApiMiddleware>) {
-    if node.kind() == "call" {
-        if let Some(mw) = extract_middleware_site(file, node) {
-            out.push(mw);
-        }
+    if node.kind() == "call"
+        && let Some(mw) = extract_middleware_site(file, node)
+    {
+        out.push(mw);
     }
 
     let mut cursor = node.walk();
@@ -156,10 +156,10 @@ fn collect_fastapi_routers(file: &ParsedFile, root: Node, out: &mut Vec<FastApiR
         //       object: identifier("app")
         //       attribute: identifier("include_router")
         //
-        if node.kind() == "call" {
-            if let Some(router) = extract_include_router_call(file, node) {
-                out.push(router);
-            }
+        if node.kind() == "call"
+            && let Some(router) = extract_include_router_call(file, node)
+        {
+            out.push(router);
         }
 
         let mut child = node.child(0);
@@ -321,10 +321,10 @@ fn extract_include_router_call(file: &ParsedFile, call_node: Node) -> Option<Fas
 /// - `@router.post("/path")`
 fn collect_fastapi_routes(file: &ParsedFile, node: Node, out: &mut Vec<FastApiRoute>) {
     // Look for decorated_definition nodes
-    if node.kind() == "decorated_definition" {
-        if let Some(route) = extract_fastapi_route(file, node) {
-            out.push(route);
-        }
+    if node.kind() == "decorated_definition"
+        && let Some(route) = extract_fastapi_route(file, node)
+    {
+        out.push(route);
     }
 
     let mut cursor = node.walk();
@@ -344,10 +344,10 @@ fn collect_fastapi_exception_handlers(
     out: &mut Vec<FastApiExceptionHandler>,
 ) {
     // Look for decorated_definition nodes
-    if node.kind() == "decorated_definition" {
-        if let Some(handler) = extract_fastapi_exception_handler(file, node) {
-            out.push(handler);
-        }
+    if node.kind() == "decorated_definition"
+        && let Some(handler) = extract_fastapi_exception_handler(file, node)
+    {
+        out.push(handler);
     }
 
     let mut cursor = node.walk();
@@ -386,8 +386,7 @@ fn extract_fastapi_exception_handler(
             // Get the function name
             let handler_name = func_def
                 .child_by_field_name("name")
-                .map(|n| n.utf8_text(source_bytes).ok())
-                .flatten()
+                .and_then(|n| n.utf8_text(source_bytes).ok())
                 .unwrap_or("unknown")
                 .to_string();
 
@@ -510,8 +509,7 @@ fn extract_fastapi_route(file: &ParsedFile, decorated_def: Node) -> Option<FastA
             // Get the function name
             let handler_name = func_def
                 .child_by_field_name("name")
-                .map(|n| n.utf8_text(source_bytes).ok())
-                .flatten()
+                .and_then(|n| n.utf8_text(source_bytes).ok())
                 .unwrap_or("unknown")
                 .to_string();
 
@@ -589,13 +587,13 @@ fn extract_handler_params(file: &ParsedFile, func_def: &Node) -> Vec<RouteParam>
                     } else {
                         // Fallback: parse the text "name: type" directly
                         let text = file.text_for_node(&param_node);
-                        if let Some((name, type_ann)) = parse_typed_param_text(&text) {
-                            if name != "self" {
-                                params.push(RouteParam {
-                                    name,
-                                    type_annotation: Some(type_ann),
-                                });
-                            }
+                        if let Some((name, type_ann)) = parse_typed_param_text(&text)
+                            && name != "self"
+                        {
+                            params.push(RouteParam {
+                                name,
+                                type_annotation: Some(type_ann),
+                            });
                         }
                     }
                 }
@@ -631,13 +629,13 @@ fn extract_handler_params(file: &ParsedFile, func_def: &Node) -> Vec<RouteParam>
                     } else {
                         // Fallback: parse "name: type = value" directly
                         let text = file.text_for_node(&param_node);
-                        if let Some((name, type_ann)) = parse_typed_default_param_text(&text) {
-                            if name != "self" {
-                                params.push(RouteParam {
-                                    name,
-                                    type_annotation: Some(type_ann),
-                                });
-                            }
+                        if let Some((name, type_ann)) = parse_typed_default_param_text(&text)
+                            && name != "self"
+                        {
+                            params.push(RouteParam {
+                                name,
+                                type_annotation: Some(type_ann),
+                            });
                         }
                     }
                 }

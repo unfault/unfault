@@ -167,41 +167,40 @@ impl Rule for GoSentinelErrorComparisonRule {
             for decl in &go.declarations {
                 if let Some(ref value) = decl.value_repr {
                     for sentinel in SENTINEL_ERRORS {
-                        if value.contains(&format!("== {}", sentinel))
-                            || value.contains(&format!("{} ==", sentinel))
+                        if (value.contains(&format!("== {}", sentinel))
+                            || value.contains(&format!("{} ==", sentinel)))
+                            && !uses_errors_is
                         {
-                            if !uses_errors_is {
-                                let line = decl.location.range.start_line + 1;
+                            let line = decl.location.range.start_line + 1;
 
-                                let title =
-                                    format!("Direct comparison with {} in assignment", sentinel);
+                            let title =
+                                format!("Direct comparison with {} in assignment", sentinel);
 
-                                let description = format!(
-                                    "Assignment at line {} uses direct error comparison which \
+                            let description = format!(
+                                "Assignment at line {} uses direct error comparison which \
                                      breaks with wrapped errors. Use errors.Is() instead.",
-                                    line
-                                );
+                                line
+                            );
 
-                                findings.push(RuleFinding {
-                                    rule_id: self.id().to_string(),
-                                    title,
-                                    description: Some(description),
-                                    kind: FindingKind::StabilityRisk,
-                                    severity: Severity::Medium,
-                                    confidence: 0.80,
-                                    dimension: Dimension::Correctness,
-                                    file_id: *file_id,
-                                    file_path: go.path.clone(),
-                                    line: Some(line),
-                                    column: None,
-                                    end_line: None,
-                                    end_column: None,
-                                    byte_range: None,
-                                    patch: None,
-                                    fix_preview: Some("Use errors.Is()".to_string()),
-                                    tags: vec!["go".into(), "error-handling".into()],
-                                });
-                            }
+                            findings.push(RuleFinding {
+                                rule_id: self.id().to_string(),
+                                title,
+                                description: Some(description),
+                                kind: FindingKind::StabilityRisk,
+                                severity: Severity::Medium,
+                                confidence: 0.80,
+                                dimension: Dimension::Correctness,
+                                file_id: *file_id,
+                                file_path: go.path.clone(),
+                                line: Some(line),
+                                column: None,
+                                end_line: None,
+                                end_column: None,
+                                byte_range: None,
+                                patch: None,
+                                fix_preview: Some("Use errors.Is()".to_string()),
+                                tags: vec!["go".into(), "error-handling".into()],
+                            });
                         }
                     }
                 }

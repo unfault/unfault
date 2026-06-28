@@ -151,18 +151,18 @@ impl SemanticsCache {
             // IndexEntry, so we parse the filename instead.
             let stem = e.filename.strip_suffix(".msgpack").unwrap_or(&e.filename);
             let parts: Vec<&str> = stem.splitn(5, '_').collect();
-            if parts.len() >= 2 {
-                if let Ok(path_hash) = u64::from_str_radix(parts[1], 16) {
-                    map.insert(
-                        path_hash,
-                        CacheEntry {
-                            cache_path: cache_dir.join(&e.filename),
-                            content_hash: e.content_hash,
-                            mtime_secs: e.mtime_secs,
-                            file_size: e.file_size,
-                        },
-                    );
-                }
+            if parts.len() >= 2
+                && let Ok(path_hash) = u64::from_str_radix(parts[1], 16)
+            {
+                map.insert(
+                    path_hash,
+                    CacheEntry {
+                        cache_path: cache_dir.join(&e.filename),
+                        content_hash: e.content_hash,
+                        mtime_secs: e.mtime_secs,
+                        file_size: e.file_size,
+                    },
+                );
             }
         }
         Some(map)
@@ -251,36 +251,36 @@ impl SemanticsCache {
                 if let Ok(read_dir) = fs::read_dir(&cache_dir) {
                     for entry in read_dir.flatten() {
                         let path = entry.path();
-                        if path.extension().map_or(false, |e| e == "msgpack") {
+                        if path.extension().is_some_and(|e| e == "msgpack") {
                             // Skip the index file itself.
-                            if path.file_name().map_or(false, |n| n == "index.msgpack") {
+                            if path.file_name().is_some_and(|n| n == "index.msgpack") {
                                 continue;
                             }
                             let filename = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
                             let parts: Vec<&str> = filename.splitn(5, '_').collect();
-                            if parts.len() >= 2 {
-                                if let (Ok(content_hash), Ok(path_hash)) = (
+                            if parts.len() >= 2
+                                && let (Ok(content_hash), Ok(path_hash)) = (
                                     u64::from_str_radix(parts[0], 16),
                                     u64::from_str_radix(parts[1], 16),
-                                ) {
-                                    let mtime_secs = parts
-                                        .get(2)
-                                        .and_then(|s| u64::from_str_radix(s, 16).ok())
-                                        .unwrap_or(0);
-                                    let file_size = parts
-                                        .get(3)
-                                        .and_then(|s| u64::from_str_radix(s, 16).ok())
-                                        .unwrap_or(0);
-                                    map.insert(
-                                        path_hash,
-                                        CacheEntry {
-                                            cache_path: path.clone(),
-                                            content_hash,
-                                            mtime_secs,
-                                            file_size,
-                                        },
-                                    );
-                                }
+                                )
+                            {
+                                let mtime_secs = parts
+                                    .get(2)
+                                    .and_then(|s| u64::from_str_radix(s, 16).ok())
+                                    .unwrap_or(0);
+                                let file_size = parts
+                                    .get(3)
+                                    .and_then(|s| u64::from_str_radix(s, 16).ok())
+                                    .unwrap_or(0);
+                                map.insert(
+                                    path_hash,
+                                    CacheEntry {
+                                        cache_path: path.clone(),
+                                        content_hash,
+                                        mtime_secs,
+                                        file_size,
+                                    },
+                                );
                             }
                         }
                     }
@@ -449,7 +449,7 @@ impl SemanticsCache {
         }
         for entry in fs::read_dir(&self.cache_dir)? {
             let entry = entry?;
-            if entry.path().extension().map_or(false, |e| e == "msgpack") {
+            if entry.path().extension().is_some_and(|e| e == "msgpack") {
                 fs::remove_file(entry.path())?;
             }
         }

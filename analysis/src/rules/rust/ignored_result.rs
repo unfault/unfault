@@ -325,7 +325,7 @@ fn set_header(headers: &mut http::HeaderMap) {
 "#,
         );
 
-        let findings = rule.evaluate(&vec![(file_id, sem)], None).await;
+        let findings = rule.evaluate(&[(file_id, sem)], None).await;
         assert!(
             findings.iter().all(|f| f.rule_id != "rust.ignored_result"),
             "should not flag if-let Ok(...) pattern as ignored result"
@@ -357,7 +357,7 @@ fn process() -> Result<(), Error> {
                 || ignored_findings.iter().all(|f| !f
                     .description
                     .as_ref()
-                    .map_or(false, |d| d.contains("write_all"))),
+                    .is_some_and(|d| d.contains("write_all"))),
             "Should not flag proper error handling with ?"
         );
     }

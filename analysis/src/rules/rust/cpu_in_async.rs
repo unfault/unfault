@@ -370,9 +370,9 @@ async fn {func}() {{
             range: PatchRange::InsertBeforeLine {
                 line: cpu_call.line,
             },
-            replacement: format!(
-                "// TODO: Offload to spawn_blocking: tokio::task::spawn_blocking(move || {{ ... }})\n"
-            ),
+            replacement:
+                "// TODO: Offload to spawn_blocking: tokio::task::spawn_blocking(move || { ... })\n"
+                    .to_string(),
         }],
     };
 

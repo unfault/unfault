@@ -81,35 +81,33 @@ fn detect_frameworks(parsed: &ParsedFile, node: Node, summary: &mut GoFrameworkS
     if node.kind() == "import_declaration" || node.kind() == "import_spec" {
         let text = parsed.text_for_node(&node);
 
-        if text.contains("github.com/gin-gonic/gin") {
-            if !summary.frameworks.contains(&GoHttpFramework::Gin) {
-                summary.frameworks.push(GoHttpFramework::Gin);
-            }
+        if text.contains("github.com/gin-gonic/gin")
+            && !summary.frameworks.contains(&GoHttpFramework::Gin)
+        {
+            summary.frameworks.push(GoHttpFramework::Gin);
         }
-        if text.contains("github.com/labstack/echo") {
-            if !summary.frameworks.contains(&GoHttpFramework::Echo) {
-                summary.frameworks.push(GoHttpFramework::Echo);
-            }
+        if text.contains("github.com/labstack/echo")
+            && !summary.frameworks.contains(&GoHttpFramework::Echo)
+        {
+            summary.frameworks.push(GoHttpFramework::Echo);
         }
-        if text.contains("github.com/gofiber/fiber") {
-            if !summary.frameworks.contains(&GoHttpFramework::Fiber) {
-                summary.frameworks.push(GoHttpFramework::Fiber);
-            }
+        if text.contains("github.com/gofiber/fiber")
+            && !summary.frameworks.contains(&GoHttpFramework::Fiber)
+        {
+            summary.frameworks.push(GoHttpFramework::Fiber);
         }
-        if text.contains("github.com/go-chi/chi") {
-            if !summary.frameworks.contains(&GoHttpFramework::Chi) {
-                summary.frameworks.push(GoHttpFramework::Chi);
-            }
+        if text.contains("github.com/go-chi/chi")
+            && !summary.frameworks.contains(&GoHttpFramework::Chi)
+        {
+            summary.frameworks.push(GoHttpFramework::Chi);
         }
-        if text.contains("github.com/gorilla/mux") {
-            if !summary.frameworks.contains(&GoHttpFramework::Mux) {
-                summary.frameworks.push(GoHttpFramework::Mux);
-            }
+        if text.contains("github.com/gorilla/mux")
+            && !summary.frameworks.contains(&GoHttpFramework::Mux)
+        {
+            summary.frameworks.push(GoHttpFramework::Mux);
         }
-        if text.contains("net/http") {
-            if !summary.frameworks.contains(&GoHttpFramework::NetHttp) {
-                summary.frameworks.push(GoHttpFramework::NetHttp);
-            }
+        if text.contains("net/http") && !summary.frameworks.contains(&GoHttpFramework::NetHttp) {
+            summary.frameworks.push(GoHttpFramework::NetHttp);
         }
     }
 
@@ -122,10 +120,10 @@ fn detect_frameworks(parsed: &ParsedFile, node: Node, summary: &mut GoFrameworkS
 }
 
 fn collect_routes(parsed: &ParsedFile, node: Node, summary: &mut GoFrameworkSummary) {
-    if node.kind() == "call_expression" {
-        if let Some(route) = extract_route(parsed, node, &summary.frameworks) {
-            summary.routes.push(route);
-        }
+    if node.kind() == "call_expression"
+        && let Some(route) = extract_route(parsed, node, &summary.frameworks)
+    {
+        summary.routes.push(route);
     }
 
     // Recurse
@@ -335,12 +333,12 @@ fn find_methods_chain(parsed: &ParsedFile, node: Node) -> Option<String> {
     }
 
     // Also check siblings in expression statement
-    if full_text.contains(".Methods(") {
-        if let Some(start) = full_text.find(".Methods(\"") {
-            let rest = &full_text[start + 10..];
-            if let Some(end) = rest.find('"') {
-                return Some(rest[..end].to_string());
-            }
+    if full_text.contains(".Methods(")
+        && let Some(start) = full_text.find(".Methods(\"")
+    {
+        let rest = &full_text[start + 10..];
+        if let Some(end) = rest.find('"') {
+            return Some(rest[..end].to_string());
         }
     }
 

@@ -82,6 +82,7 @@ impl Rule for PythonUnboundedMemoryOperationRule {
 }
 
 /// Check if a call represents an unbounded memory pattern.
+#[allow(clippy::too_many_arguments)]
 fn check_unbounded_pattern(
     callee: &str,
     args_repr: &str,

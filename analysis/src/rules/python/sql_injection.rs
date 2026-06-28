@@ -249,7 +249,7 @@ impl Rule for PythonSqlInjectionRule {
                                 file_id: *file_id,
                                 hunks: vec![PatchHunk {
                                     range: PatchRange::InsertAfterLine {
-                                        line: location.line as u32,
+                                        line: location.line,
                                     },
                                     replacement: format!(
                                         "# FIXME: SQL injection risk! Use parameterized query:\n\
@@ -317,10 +317,11 @@ impl PythonSqlInjectionRule {
         // Simple extraction - replace {var} with %s
         let mut result = s.to_string();
 
-        // Remove f-string prefix
-        if result.starts_with("f\"") || result.starts_with("F\"") {
-            result = result[2..].to_string();
-        } else if result.starts_with("f'") || result.starts_with("F'") {
+        // Remove f-string prefix (f"…", F"…", f'…', F'…')
+        if matches!(
+            &result.as_bytes()[..2.min(result.len())],
+            b"f\"" | b"F\"" | b"f'" | b"F'"
+        ) {
             result = result[2..].to_string();
         }
 
@@ -353,10 +354,11 @@ impl PythonSqlInjectionRule {
     fn transform_fstring_to_parameterized(s: &str) -> (String, String) {
         let mut result = s.to_string();
 
-        // Remove f-string prefix
-        if result.starts_with("f\"") || result.starts_with("F\"") {
-            result = result[2..].to_string();
-        } else if result.starts_with("f'") || result.starts_with("F'") {
+        // Remove f-string prefix (f"…", F"…", f'…', F'…')
+        if matches!(
+            &result.as_bytes()[..2.min(result.len())],
+            b"f\"" | b"F\"" | b"f'" | b"F'"
+        ) {
             result = result[2..].to_string();
         }
 
@@ -447,7 +449,7 @@ mod tests {
 
     #[test]
     fn rule_implements_default() {
-        let rule = PythonSqlInjectionRule::default();
+        let rule = PythonSqlInjectionRule;
         assert_eq!(rule.id(), "python.sql_injection");
     }
 

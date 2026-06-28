@@ -204,12 +204,12 @@ fn extract_bare_type_name(type_annotation: &str) -> String {
     let type_name = type_annotation.trim();
 
     // Handle generic types like Optional[SomeModel] or List[SomeModel]
-    if let Some(inner_start) = type_name.find('[') {
-        if let Some(inner_end) = type_name.rfind(']') {
-            let inner = type_name[inner_start + 1..inner_end].trim();
-            // Recursively extract from inner type
-            return extract_bare_type_name(inner);
-        }
+    if let Some(inner_start) = type_name.find('[')
+        && let Some(inner_end) = type_name.rfind(']')
+    {
+        let inner = type_name[inner_start + 1..inner_end].trim();
+        // Recursively extract from inner type
+        return extract_bare_type_name(inner);
     }
 
     type_name.to_string()
@@ -353,10 +353,10 @@ fn has_pydantic_body_param(
     ctx: &TypeResolutionContext,
 ) -> bool {
     for param in handler_params {
-        if let Some(ref type_ann) = param.type_annotation {
-            if ctx.is_pydantic_model(type_ann) {
-                return true;
-            }
+        if let Some(ref type_ann) = param.type_annotation
+            && ctx.is_pydantic_model(type_ann)
+        {
+            return true;
         }
     }
     false

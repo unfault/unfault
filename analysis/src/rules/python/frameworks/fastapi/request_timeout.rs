@@ -50,6 +50,12 @@ fn has_request_import(imports: &[PyImport]) -> bool {
 #[derive(Debug)]
 pub struct FastApiRequestTimeoutRule;
 
+impl Default for FastApiRequestTimeoutRule {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FastApiRequestTimeoutRule {
     pub fn new() -> Self {
         Self

@@ -210,13 +210,13 @@ impl WorkspaceInfo {
         let mut profiles = Vec::new();
 
         // If workspace settings specify a profile, use it as the primary
-        if let Some(ref loaded_settings) = self.settings {
-            if let Some(ref profile_override) = loaded_settings.settings.profile {
-                profiles.push(AdvertisedProfile {
-                    id: profile_override.clone(),
-                    confidence: 1.0, // Highest confidence for explicit override
-                });
-            }
+        if let Some(ref loaded_settings) = self.settings
+            && let Some(ref profile_override) = loaded_settings.settings.profile
+        {
+            profiles.push(AdvertisedProfile {
+                id: profile_override.clone(),
+                confidence: 1.0, // Highest confidence for explicit override
+            });
         }
 
         // Add framework-specific profiles (lower confidence if override exists)
@@ -249,7 +249,7 @@ impl WorkspaceInfo {
         }
 
         // Add generic language profiles for languages without framework detection
-        for (language, _count) in &self.languages {
+        for language in self.languages.keys() {
             let has_framework_profile = profiles.iter().any(|p| {
                 p.id.starts_with(match language {
                     Language::Python => "python_",
@@ -436,57 +436,52 @@ impl WorkspaceScanner {
                         // Framework detection - only read file if not already detected
                         match language {
                             Language::Python => {
-                                if !has_fastapi.load(Ordering::Relaxed)
+                                if (!has_fastapi.load(Ordering::Relaxed)
                                     || !has_flask.load(Ordering::Relaxed)
-                                    || !has_django.load(Ordering::Relaxed)
+                                    || !has_django.load(Ordering::Relaxed))
+                                    && let Ok(contents) = fs::read_to_string(path)
                                 {
-                                    if let Ok(contents) = fs::read_to_string(path) {
-                                        if contents.contains("from fastapi")
-                                            || contents.contains("import fastapi")
-                                        {
-                                            has_fastapi.store(true, Ordering::Relaxed);
-                                        }
-                                        if contents.contains("from flask")
-                                            || contents.contains("import flask")
-                                            || contents.contains("from flask_smorest")
-                                            || contents.contains("import flask_smorest")
-                                            || contents.contains("from flask_restful")
-                                            || contents.contains("import flask_restful")
-                                            || contents.contains(".action_route(")
-                                        {
-                                            has_flask.store(true, Ordering::Relaxed);
-                                        }
-                                        if contents.contains("from django")
-                                            || contents.contains("import django")
-                                        {
-                                            has_django.store(true, Ordering::Relaxed);
-                                        }
+                                    if contents.contains("from fastapi")
+                                        || contents.contains("import fastapi")
+                                    {
+                                        has_fastapi.store(true, Ordering::Relaxed);
+                                    }
+                                    if contents.contains("from flask")
+                                        || contents.contains("import flask")
+                                        || contents.contains("from flask_smorest")
+                                        || contents.contains("import flask_smorest")
+                                        || contents.contains("from flask_restful")
+                                        || contents.contains("import flask_restful")
+                                        || contents.contains(".action_route(")
+                                    {
+                                        has_flask.store(true, Ordering::Relaxed);
+                                    }
+                                    if contents.contains("from django")
+                                        || contents.contains("import django")
+                                    {
+                                        has_django.store(true, Ordering::Relaxed);
                                     }
                                 }
                             }
                             Language::JavaScript | Language::TypeScript => {
-                                if !has_express.load(Ordering::Relaxed) {
-                                    if let Ok(contents) = fs::read_to_string(path) {
-                                        if contents.contains("require('express')")
-                                            || contents.contains("require(\"express\")")
-                                            || contents.contains("from 'express'")
-                                            || contents.contains("from \"express\"")
-                                        {
-                                            has_express.store(true, Ordering::Relaxed);
-                                        }
-                                    }
+                                if !has_express.load(Ordering::Relaxed)
+                                    && let Ok(contents) = fs::read_to_string(path)
+                                    && (contents.contains("require('express')")
+                                        || contents.contains("require(\"express\")")
+                                        || contents.contains("from 'express'")
+                                        || contents.contains("from \"express\""))
+                                {
+                                    has_express.store(true, Ordering::Relaxed);
                                 }
                             }
                             Language::Go => {
-                                if !has_gin.load(Ordering::Relaxed) {
-                                    if let Ok(contents) = fs::read_to_string(path) {
-                                        if contents.contains("github.com/gin-gonic/gin")
-                                            || contents.contains("gin.Context")
-                                            || contents.contains("gin.Engine")
-                                        {
-                                            has_gin.store(true, Ordering::Relaxed);
-                                        }
-                                    }
+                                if !has_gin.load(Ordering::Relaxed)
+                                    && let Ok(contents) = fs::read_to_string(path)
+                                    && (contents.contains("github.com/gin-gonic/gin")
+                                        || contents.contains("gin.Context")
+                                        || contents.contains("gin.Engine"))
+                                {
+                                    has_gin.store(true, Ordering::Relaxed);
                                 }
                             }
                             _ => {}
