@@ -242,6 +242,45 @@ impl DecoratorSemantic {
     }
 }
 
+/// A raw call-site captured from a function body, with source location.
+///
+/// Populated during graph construction from per-language `FunctionCall`
+/// entries; used as a fallback when cross-file `Calls` edges could not be
+/// resolved (e.g. calls to functions imported from unanalysed packages,
+/// dependency-injected services, or bound methods on runtime objects).
+///
+/// Carrying the line lets downstream consumers (telemetry, coverage,
+/// boundary detection) report precise call-site locations without
+/// re-scanning the source file.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RawCall {
+    /// The callee expression as written in source (e.g. `"db_session.commit"`,
+    /// `"requests.get"`, `"self.service.process"`).
+    pub expr: String,
+    /// 1-based line number of the call site. `0` when unknown (legacy entries
+    /// or hand-constructed test fixtures).
+    #[serde(default)]
+    pub line: u32,
+}
+
+impl RawCall {
+    pub fn new(expr: impl Into<String>, line: u32) -> Self {
+        Self {
+            expr: expr.into(),
+            line,
+        }
+    }
+
+    /// Construct a raw call with no known line. Use sparingly — prefer
+    /// preserving the original source location from `FunctionCall::line`.
+    pub fn lineless(expr: impl Into<String>) -> Self {
+        Self {
+            expr: expr.into(),
+            line: 0,
+        }
+    }
+}
+
 /// Nodes in the code graph.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GraphNode {
@@ -293,12 +332,14 @@ pub enum GraphNode {
         /// Response schema from `@blp.response(200, SchemaY)` or `@marshal_with`.
         #[serde(default)]
         response_schema: Option<String>,
-        /// Raw call-site names extracted from the function body.
+        /// Raw call-sites extracted from the function body, with line numbers.
         /// Populated during graph construction; used as a fallback when cross-file
         /// `Calls` edges could not be resolved (e.g. calls to functions imported
-        /// from unanalysed packages or via dependency injection).
+        /// from unanalysed packages or via dependency injection). Each entry's
+        /// `line` field is the 1-based source line of the call site, or `0`
+        /// when the line was not captured.
         #[serde(default)]
-        raw_calls: Vec<String>,
+        raw_calls: Vec<RawCall>,
     },
 
     /// A class or type definition
@@ -1855,9 +1896,15 @@ fn add_function_nodes(
             None
         };
 
-        // Collect raw call-site names for this function.  Used as a fallback
-        // in coverage analysis when cross-file Calls edges weren't resolved.
-        let raw_calls: Vec<String> = func.calls.iter().map(|c| c.callee_expr.clone()).collect();
+        // Collect raw call-sites for this function with line numbers. Used as
+        // a fallback in coverage analysis when cross-file Calls edges weren't
+        // resolved, and by telemetry to locate bound-method call sites
+        // (`db_session.commit`, etc.) precisely.
+        let raw_calls: Vec<RawCall> = func
+            .calls
+            .iter()
+            .map(|c| RawCall::new(c.callee_expr.clone(), c.line))
+            .collect();
 
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -2117,13 +2164,31 @@ fn add_fastapi_nodes(
             )
         });
 
-        // Collect raw call-site expressions for this handler from py.calls.
-        let handler_raw_calls: Vec<String> = py
+        // Collect raw call-sites for this handler from py.calls, with line.
+        let handler_raw_calls: Vec<RawCall> = py
             .calls
             .iter()
             .filter(|c| c.function_call.caller_function == route.handler_name)
-            .map(|c| c.function_call.callee_expr.clone())
+            .map(|c| {
+                RawCall::new(
+                    c.function_call.callee_expr.clone(),
+                    c.function_call.location.line,
+                )
+            })
             .collect();
+
+        // Resolve the handler's own definition line. Prefer the matching
+        // `FunctionDef` (which carries the `def` keyword line); fall back to
+        // the route's decorator/annotation location when no definition is
+        // recoverable (e.g. handler defined in another file or generated).
+        // `CommonLocation::line` is 1-based; `0` means unrecorded.
+        let handler_line = py
+            .functions()
+            .iter()
+            .find(|f| f.name == route.handler_name)
+            .map(|f| f.location.line)
+            .filter(|&l| l > 0)
+            .or(Some(route.location.range.start_line + 1));
 
         let qualified_name = route.handler_name.clone();
         let func_node = cg.graph.add_node(GraphNode::Function {
@@ -2136,7 +2201,7 @@ fn add_fastapi_nodes(
             http_path: Some(full_path.clone()),
             decorators: handler_decorators,
             is_writer: handler_is_writer,
-            line: None,
+            line: handler_line,
             column: None,
             request_schema: None,
             response_schema: None,
@@ -2227,13 +2292,28 @@ fn add_flask_nodes(
             .map(|d| DecoratorSemantic::classify(&d.name, &d.text))
             .collect();
 
-        // Collect raw call-site expressions for this handler from py.calls.
-        let handler_raw_calls: Vec<String> = py
+        // Collect raw call-sites for this handler from py.calls, with line.
+        let handler_raw_calls: Vec<RawCall> = py
             .calls
             .iter()
             .filter(|c| c.function_call.caller_function == route.handler_name)
-            .map(|c| c.function_call.callee_expr.clone())
+            .map(|c| {
+                RawCall::new(
+                    c.function_call.callee_expr.clone(),
+                    c.function_call.location.line,
+                )
+            })
             .collect();
+
+        // Resolve handler definition line — prefer FunctionDef location,
+        // fall back to the route's own AST location. See FastAPI block.
+        let handler_line = py
+            .functions()
+            .iter()
+            .find(|f| f.name == route.handler_name)
+            .map(|f| f.location.line)
+            .filter(|&l| l > 0)
+            .or(Some(route.location.range.start_line + 1));
 
         let qualified_name = route.handler_name.clone();
         let func_node = cg.graph.add_node(GraphNode::Function {
@@ -2246,7 +2326,7 @@ fn add_flask_nodes(
             http_path: Some(route.path.clone()),
             decorators: handler_decorators,
             is_writer: file_is_writer,
-            line: None,
+            line: handler_line,
             column: None,
             request_schema: route.request_schema.clone(),
             response_schema: route.response_schema.clone(),
@@ -2294,13 +2374,28 @@ fn add_express_nodes(
         let http_method = route.method.to_uppercase();
         let http_path = route.path.clone();
 
-        // Collect raw call-site expressions for this handler from ts.calls.
-        let handler_raw_calls: Vec<String> = ts
+        // Collect raw call-sites for this handler from ts.calls, with line.
+        let handler_raw_calls: Vec<RawCall> = ts
             .calls
             .iter()
             .filter(|c| c.function_call.caller_function == handler_name)
-            .map(|c| c.function_call.callee_expr.clone())
+            .map(|c| {
+                RawCall::new(
+                    c.function_call.callee_expr.clone(),
+                    c.function_call.location.line,
+                )
+            })
             .collect();
+
+        // Resolve handler definition line — prefer FunctionDef, fall back to
+        // the route's AST location. See FastAPI block for rationale.
+        let handler_line = ts
+            .functions()
+            .iter()
+            .find(|f| f.name == handler_name)
+            .map(|f| f.location.line)
+            .filter(|&l| l > 0)
+            .or(Some(route.location.range.start_line + 1));
 
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -2312,7 +2407,7 @@ fn add_express_nodes(
             http_path,
             decorators: vec![],
             is_writer: false,
-            line: None,
+            line: handler_line,
             column: None,
             request_schema: None,
             response_schema: None,
@@ -2357,13 +2452,28 @@ fn add_go_framework_nodes(
             continue;
         }
 
-        // Collect raw call-site expressions for this handler from go.calls.
-        let handler_raw_calls: Vec<String> = go
+        // Collect raw call-sites for this handler from go.calls, with line.
+        let handler_raw_calls: Vec<RawCall> = go
             .calls
             .iter()
             .filter(|c| c.function_call.caller_function == handler_name)
-            .map(|c| c.function_call.callee_expr.clone())
+            .map(|c| {
+                RawCall::new(
+                    c.function_call.callee_expr.clone(),
+                    c.function_call.location.line,
+                )
+            })
             .collect();
+
+        // Resolve handler definition line — prefer FunctionDef, fall back to
+        // the route's AST location. See FastAPI block for rationale.
+        let handler_line = go
+            .functions()
+            .iter()
+            .find(|f| f.name == handler_name)
+            .map(|f| f.location.line)
+            .filter(|&l| l > 0)
+            .or(Some(route.location.range.start_line + 1));
 
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -2375,7 +2485,7 @@ fn add_go_framework_nodes(
             http_path: Some(route.path.clone()),
             decorators: vec![],
             is_writer: false,
-            line: None,
+            line: handler_line,
             column: None,
             request_schema: None,
             response_schema: None,
@@ -2416,13 +2526,28 @@ fn add_rust_framework_nodes(
             continue;
         }
 
-        // Collect raw call-site expressions for this handler from rs.calls.
-        let handler_raw_calls: Vec<String> = rs
+        // Collect raw call-sites for this handler from rs.calls, with line.
+        let handler_raw_calls: Vec<RawCall> = rs
             .calls
             .iter()
             .filter(|c| c.function_call.caller_function == handler_name)
-            .map(|c| c.function_call.callee_expr.clone())
+            .map(|c| {
+                RawCall::new(
+                    c.function_call.callee_expr.clone(),
+                    c.function_call.location.line,
+                )
+            })
             .collect();
+
+        // Resolve handler definition line — prefer FunctionDef, fall back to
+        // the route's AST location. See FastAPI block for rationale.
+        let handler_line = rs
+            .functions()
+            .iter()
+            .find(|f| f.name == handler_name)
+            .map(|f| f.location.line)
+            .filter(|&l| l > 0)
+            .or(Some(route.location.range.start_line + 1));
 
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -2434,7 +2559,7 @@ fn add_rust_framework_nodes(
             http_path: Some(route.path.clone()),
             decorators: vec![],
             is_writer: false,
-            line: None,
+            line: handler_line,
             column: None,
             request_schema: None,
             response_schema: None,
@@ -2904,7 +3029,7 @@ async def get_item(item_id):
 
         let last_segments: Vec<String> = handler
             .iter()
-            .map(|c| c.split('.').last().unwrap_or(c).to_string())
+            .map(|c| c.expr.split('.').last().unwrap_or(&c.expr).to_string())
             .collect();
 
         for expected in &["fetch_item", "enrich_data", "build_response"] {
@@ -2915,6 +3040,13 @@ async def get_item(item_id):
                 handler
             );
         }
+
+        // Each call site should carry a non-zero line number.
+        assert!(
+            handler.iter().all(|c| c.line > 0),
+            "every raw_call must have a 1-based line, got {:?}",
+            handler
+        );
     }
 
     #[test]

@@ -10,6 +10,58 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.55] — 2026-06-28
+
+### Changed
+
+- **`GraphNode::Function.raw_calls` is now `Vec<RawCall>` instead of
+  `Vec<String>`.** Each entry carries `expr` (the call-site expression as
+  written in source) and `line` (1-based source line of the call site).
+
+  This closes the last structural gap in the telemetry substrate: the
+  within-function line for bound-method and unresolved cross-module calls
+  is now available without re-scanning source files. Telemetry uses this
+  to populate `location.line` for callees and boundary call sites that
+  previously had `line: null` because no resolved definition existed.
+
+  The on-disk graph cache changes shape and will be transparently rebuilt
+  on the next run (`try_load_graph_cache` already handles deserialization
+  failures by rebuilding).
+
+- **All framework route handlers now populate `location.line`** at
+  graph-build time, not in telemetry's wiring layer. FastAPI, Flask,
+  Express, Go (Gin/Echo/Fiber/Chi), and Rust (Axum/Actix/Rocket/Warp/Poem)
+  handler nodes now look up the matching `FunctionDef.location.line` and
+  fall back to the route's own AST location when no `def` line is
+  recoverable. Previously every framework adder hard-coded `line: None`,
+  which is why v1.0.54's fix in `analysis/src/graph/mod.rs` (the dead-code
+  builder) had no effect on the production graph built by `unfault-core`.
+
+- **`stub_callees_from_raw_calls` now propagates the call-site line.**
+  When a callee can be resolved to a `Function` node, its definition line
+  is preferred (unchanged). When it can't (bound method on a runtime
+  object, dynamic import, cross-module ambiguous resolution), the
+  call-site line from `RawCall::line` is used instead — so unresolved
+  callees still land the agent on the exact source line of the call,
+  inside the caller's file.
+
+### Fixed
+
+- **`FileLogging.quality` is serialized as `kind` in JSON** for vocabulary
+  consistency with `RouteLogs::kind` and `CalleeInfo::kind`. The internal
+  Rust field name stays `quality` so call sites don't need to change.
+
+### Notes
+
+- **`(method, path)` collisions are intentional substrate.** When the
+  target codebase registers two distinct handlers under the same method
+  and path (class-based views, blueprint collisions, multiple
+  `add_url_rule` calls), each is a distinct fact and surfaces as its own
+  `RouteTelemetry` entry. The dedup key is `(method, path, handler)`,
+  not `(method, path)`. Collapsing on `(method, path)` would erase
+  information the agent needs to detect routing bugs in the target.
+  A comment in `analyze_file_list` now documents this.
+
 ## [1.0.54] — 2026-06-28
 
 ### Fixed

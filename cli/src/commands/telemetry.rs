@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 
 use crate::commands::graph::{
-    CoverageContext, CoverageNode, Location, NodeRole, SignalKind, SpanSignal, UnobservedPaths,
+    CoverageContext, CoverageNode, Location, NodeRole, SpanSignal, UnobservedPaths,
     build_coverage_context, build_graph_with_spinner,
 };
 use crate::exit_codes::*;
@@ -279,6 +279,11 @@ pub struct RouteTelemetry {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct FileLogging {
     pub file: String,
+    /// Logging signal kind for this file. Field is named `kind` for vocabulary
+    /// consistency with `RouteLogs::kind` and `CalleeInfo::kind`. The internal
+    /// Rust field stays `quality` to avoid churning all call sites; the
+    /// serialized JSON name is what the contract specifies.
+    #[serde(rename = "kind")]
     pub quality: LoggingQuality,
     pub library: String,
 }
@@ -443,7 +448,17 @@ fn analyze_file_list(
         let fl = file_logging_quality(graph, file_path);
         let fm = file_metrics(graph, file_path);
         for (method, path, handler, line) in &handlers {
-            if routes.iter().any(|r: &RouteTelemetry| r.method == *method && r.path == *path && r.handler == *handler) {
+            // Dedup key is intentionally `(method, path, handler)` and NOT
+            // `(method, path)`. When the same (method, path) is registered to
+            // multiple handlers — class-based views, blueprint collisions,
+            // multiple `app.add_url_rule` calls — every distinct handler is a
+            // separate substrate fact and must surface. Collapsing them by
+            // `(method, path)` alone would erase information the agent needs.
+            // The same `(method, path, handler)` triple from two file_path
+            // iterations IS deduped here, which is what we want.
+            if routes.iter().any(|r: &RouteTelemetry| {
+                r.method == *method && r.path == *path && r.handler == *handler
+            }) {
                 continue;
             }
             if let Some(rt) = analyze_single_route(graph, path, Some(method), verbose) {
@@ -460,7 +475,11 @@ fn analyze_file_list(
                     unobserved: rt.unobserved,
                     logs: RouteLogs {
                         kind: fl.quality.clone(),
-                        library: if fl.library.is_empty() { None } else { Some(fl.library.clone()) },
+                        library: if fl.library.is_empty() {
+                            None
+                        } else {
+                            Some(fl.library.clone())
+                        },
                     },
                     metrics: RouteMetrics {
                         present: fm.present,
@@ -471,14 +490,20 @@ fn analyze_file_list(
         }
     }
 
-    let logging_files: Vec<FileLogging> = files.iter().map(|f| file_logging_quality(graph, f)).collect();
+    let logging_files: Vec<FileLogging> = files
+        .iter()
+        .map(|f| file_logging_quality(graph, f))
+        .collect();
     let metrics_files: Vec<FileMetrics> = files.iter().map(|f| file_metrics(graph, f)).collect();
     let boundaries = build_boundaries(&routes);
 
     let corpus = Corpus {
         files: logging_files.len(),
         routes_total: routes.len(),
-        routes_read: routes.iter().filter(|r| !is_write_method(&r.method)).count(),
+        routes_read: routes
+            .iter()
+            .filter(|r| !is_write_method(&r.method))
+            .count(),
         routes_write: routes.iter().filter(|r| is_write_method(&r.method)).count(),
     };
 
@@ -529,19 +554,37 @@ fn analyze_route(
         instrumented_callees: rt.instrumented_callees,
         callees: rt.callees,
         unobserved: rt.unobserved,
-        logs: RouteLogs { kind: fl.quality, library: if fl.library.is_empty() { None } else { Some(fl.library) } },
-        metrics: RouteMetrics { present: fm.present, library: fm.library },
+        logs: RouteLogs {
+            kind: fl.quality,
+            library: if fl.library.is_empty() {
+                None
+            } else {
+                Some(fl.library)
+            },
+        },
+        metrics: RouteMetrics {
+            present: fm.present,
+            library: fm.library,
+        },
     }];
     let logging_file = file_logging_quality(graph, &anchor_file);
     let metrics_file = file_metrics(graph, &anchor_file);
     let corpus = Corpus {
         files: 1,
         routes_total: routes_vec.len(),
-        routes_read: routes_vec.iter().filter(|r| !is_write_method(&r.method)).count(),
-        routes_write: routes_vec.iter().filter(|r| is_write_method(&r.method)).count(),
+        routes_read: routes_vec
+            .iter()
+            .filter(|r| !is_write_method(&r.method))
+            .count(),
+        routes_write: routes_vec
+            .iter()
+            .filter(|r| is_write_method(&r.method))
+            .count(),
     };
     let report = TelemetryReport {
-        target: format!("{} {}", ctx.anchor.role.method_str().unwrap_or(""), path).trim().to_string(),
+        target: format!("{} {}", ctx.anchor.role.method_str().unwrap_or(""), path)
+            .trim()
+            .to_string(),
         target_kind: "module".to_string(),
         corpus,
         logging: build_logging_section(vec![logging_file]),
@@ -573,16 +616,32 @@ fn analyze_function(graph: &CodeGraph, name: &str, verbose: bool) -> Option<Tele
         instrumented_callees: rt.instrumented_callees,
         callees: rt.callees,
         unobserved: rt.unobserved,
-        logs: RouteLogs { kind: fl.quality, library: if fl.library.is_empty() { None } else { Some(fl.library) } },
-        metrics: RouteMetrics { present: fm.present, library: fm.library },
+        logs: RouteLogs {
+            kind: fl.quality,
+            library: if fl.library.is_empty() {
+                None
+            } else {
+                Some(fl.library)
+            },
+        },
+        metrics: RouteMetrics {
+            present: fm.present,
+            library: fm.library,
+        },
     }];
     let logging_file = file_logging_quality(graph, &anchor_file);
     let metrics_file = file_metrics(graph, &anchor_file);
     let corpus = Corpus {
         files: 1,
         routes_total: routes_vec.len(),
-        routes_read: routes_vec.iter().filter(|r| !is_write_method(&r.method)).count(),
-        routes_write: routes_vec.iter().filter(|r| is_write_method(&r.method)).count(),
+        routes_read: routes_vec
+            .iter()
+            .filter(|r| !is_write_method(&r.method))
+            .count(),
+        routes_write: routes_vec
+            .iter()
+            .filter(|r| is_write_method(&r.method))
+            .count(),
     };
     let report = TelemetryReport {
         target: name.to_string(),
@@ -623,7 +682,11 @@ fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
         .map(|n| {
             let ck = callee_kind_from_name(&n.name);
             // Fall back to anchor file when callee has no file resolved.
-            let file = if n.file.is_empty() { anchor_file.clone() } else { n.file.clone() };
+            let file = if n.file.is_empty() {
+                anchor_file.clone()
+            } else {
+                n.file.clone()
+            };
             CalleeInfo {
                 name: n.name.clone(),
                 location: Location::new(file, n.line),
@@ -637,11 +700,15 @@ fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
         .collect();
 
     // Counts exclude builtins and constructors.
-    let countable: Vec<&CalleeInfo> = callees.iter()
+    let countable: Vec<&CalleeInfo> = callees
+        .iter()
         .filter(|c| matches!(c.kind, CalleeKind::Function | CalleeKind::Method))
         .collect();
     let total_callees = countable.len();
-    let instrumented_callees = countable.iter().filter(|c| c.anchor_kind != AnchorKind::None).count();
+    let instrumented_callees = countable
+        .iter()
+        .filter(|c| c.anchor_kind != AnchorKind::None)
+        .count();
 
     RouteTraversal {
         anchor_kind: span_to_anchor_kind(&ctx.anchor.span),
@@ -671,16 +738,54 @@ fn span_to_attributes(span: &SpanSignal) -> Vec<String> {
 
 fn callee_kind_from_name(name: &str) -> CalleeKind {
     // Capitalised first letter → constructor or type reference.
-    if name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false) {
+    if name
+        .chars()
+        .next()
+        .map(|c| c.is_uppercase())
+        .unwrap_or(false)
+    {
         return CalleeKind::Construct;
     }
     // Known Python/JS builtins.
     const BUILTINS: &[&str] = &[
-        "any","all","map","filter","zip","sorted","reversed","enumerate",
-        "range","iter","next","len","str","int","float","bool","list",
-        "dict","tuple","set","type","print","repr","hash","id","callable",
-        "getattr","setattr","hasattr","delattr","super","vars","dir",
-        "console","promise","object","array","json",
+        "any",
+        "all",
+        "map",
+        "filter",
+        "zip",
+        "sorted",
+        "reversed",
+        "enumerate",
+        "range",
+        "iter",
+        "next",
+        "len",
+        "str",
+        "int",
+        "float",
+        "bool",
+        "list",
+        "dict",
+        "tuple",
+        "set",
+        "type",
+        "print",
+        "repr",
+        "hash",
+        "id",
+        "callable",
+        "getattr",
+        "setattr",
+        "hasattr",
+        "delattr",
+        "super",
+        "vars",
+        "dir",
+        "console",
+        "promise",
+        "object",
+        "array",
+        "json",
     ];
     if BUILTINS.contains(&name.to_lowercase().as_str()) {
         return CalleeKind::Builtin;
@@ -693,7 +798,11 @@ fn callee_kind_from_name(name: &str) -> CalleeKind {
 }
 
 fn infer_http_method_kind(call_expr: &str) -> Option<StatementKind> {
-    let last = call_expr.split('.').last().unwrap_or(call_expr).to_lowercase();
+    let last = call_expr
+        .split('.')
+        .last()
+        .unwrap_or(call_expr)
+        .to_lowercase();
     match last.as_str() {
         "get" | "head" | "options" => Some(StatementKind::Select),
         "post" => Some(StatementKind::Insert),
@@ -704,10 +813,14 @@ fn infer_http_method_kind(call_expr: &str) -> Option<StatementKind> {
 }
 
 fn infer_statement_kind(call_expr: &str) -> StatementKind {
-    let last = call_expr.split('.').last().unwrap_or(call_expr).to_lowercase();
+    let last = call_expr
+        .split('.')
+        .last()
+        .unwrap_or(call_expr)
+        .to_lowercase();
     match last.as_str() {
-        "select" | "scalars" | "scalar" | "scalar_one" | "scalar_one_or_none"
-        | "fetchall" | "fetchone" | "all" | "first" | "one" | "one_or_none" => StatementKind::Select,
+        "select" | "scalars" | "scalar" | "scalar_one" | "scalar_one_or_none" | "fetchall"
+        | "fetchone" | "all" | "first" | "one" | "one_or_none" => StatementKind::Select,
         "insert" | "add" | "bulk_insert_mappings" => StatementKind::Insert,
         "update" | "bulk_update_mappings" => StatementKind::Update,
         "delete" | "remove" => StatementKind::Delete,
@@ -789,13 +902,26 @@ fn compute_logging_clusters(files: &[FileLogging], min_size: usize) -> Vec<Loggi
         .into_iter()
         .filter(|(_, v)| v.len() >= min_size)
         .map(|(prefix, entries)| {
-            let structured = entries.iter().filter(|e| e.quality == LoggingQuality::Structured).count();
-            let plain = entries.iter().filter(|e| e.quality == LoggingQuality::Plain).count();
-            let none = entries.iter().filter(|e| e.quality == LoggingQuality::None_).count();
+            let structured = entries
+                .iter()
+                .filter(|e| e.quality == LoggingQuality::Structured)
+                .count();
+            let plain = entries
+                .iter()
+                .filter(|e| e.quality == LoggingQuality::Plain)
+                .count();
+            let none = entries
+                .iter()
+                .filter(|e| e.quality == LoggingQuality::None_)
+                .count();
             LoggingCluster {
                 path_prefix: prefix,
                 file_count: entries.len(),
-                quality_breakdown: LoggingBreakdown { structured, plain, none },
+                quality_breakdown: LoggingBreakdown {
+                    structured,
+                    plain,
+                    none,
+                },
             }
         })
         .collect();
@@ -1172,17 +1298,20 @@ fn render_sections(report: &TelemetryReport) {
     // ── Logging section ──
     println!("  {}Logging{}", "──".cyan(), "──".cyan());
     let structured = report
-        .logging.files
+        .logging
+        .files
         .iter()
         .filter(|l| l.quality == LoggingQuality::Structured)
         .count();
     let plain = report
-        .logging.files
+        .logging
+        .files
         .iter()
         .filter(|l| l.quality == LoggingQuality::Plain)
         .count();
     let none = report
-        .logging.files
+        .logging
+        .files
         .iter()
         .filter(|l| l.quality == LoggingQuality::None_)
         .count();
@@ -1309,14 +1438,21 @@ fn render_merged(report: &TelemetryReport) {
             LoggingQuality::Plain => format!("{} plain", "○".normal()),
             LoggingQuality::None_ => format!("{} none", "·".dimmed()),
         };
-        let lib_str = r.logs.library.as_deref()
+        let lib_str = r
+            .logs
+            .library
+            .as_deref()
             .map(|l| format!("  ({})", l.bright_black()))
             .unwrap_or_default();
         println!("  logging: {}{}", quality_str, lib_str);
 
         // Metrics
         let metrics_status = if r.metrics.present {
-            format!("{} {}", "◉".green(), r.metrics.library.as_deref().unwrap_or("present").green())
+            format!(
+                "{} {}",
+                "◉".green(),
+                r.metrics.library.as_deref().unwrap_or("present").green()
+            )
         } else {
             format!("{} {}", "○".normal(), "none".normal())
         };
@@ -1335,9 +1471,24 @@ fn render_catalog(report: &TelemetryReport) {
     let total_routes = report.corpus.routes_total;
     let reads = report.corpus.routes_read;
     let writes = report.corpus.routes_write;
-    let log_structured = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Structured).count();
-    let log_plain = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Plain).count();
-    let log_none_count = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::None_).count();
+    let log_structured = report
+        .logging
+        .files
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Structured)
+        .count();
+    let log_plain = report
+        .logging
+        .files
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Plain)
+        .count();
+    let log_none_count = report
+        .logging
+        .files
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::None_)
+        .count();
     let metrics_present = report.metrics.files.iter().filter(|m| m.present).count();
     let metrics_total = report.metrics.files.len();
     let read_deep = report
@@ -1371,9 +1522,19 @@ fn render_catalog(report: &TelemetryReport) {
         .filter(|r| is_write_method(&r.method) && r.anchor_kind == AnchorKind::None)
         .count();
     let db_total = report.boundaries.db.len();
-    let db_covered = report.boundaries.db.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let db_covered = report
+        .boundaries
+        .db
+        .iter()
+        .filter(|s| s.anchor_kind != AnchorKind::None)
+        .count();
     let http_total = report.boundaries.http.len();
-    let http_covered = report.boundaries.http.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let http_covered = report
+        .boundaries
+        .http
+        .iter()
+        .filter(|s| s.anchor_kind != AnchorKind::None)
+        .count();
 
     println!();
     println!("Telemetry in {}", report.target.bright_white().bold());
@@ -1448,10 +1609,7 @@ fn render_catalog(report: &TelemetryReport) {
         } else {
             let mut parts: Vec<String> = Vec::new();
             if fine_total > 0 {
-                parts.push(format!(
-                    "{} fine (explicit attributes)",
-                    fine_total
-                ));
+                parts.push(format!("{} fine (explicit attributes)", fine_total));
             }
             if shallow_total > 0 {
                 parts.push(format!("{} coarse (framework only)", shallow_total));
@@ -1550,9 +1708,24 @@ fn render_summary(report: &TelemetryReport) {
         println!();
     }
 
-    let structured = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Structured).count();
-    let plain = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::Plain).count();
-    let none = report.logging.files.iter().filter(|l| l.quality == LoggingQuality::None_).count();
+    let structured = report
+        .logging
+        .files
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Structured)
+        .count();
+    let plain = report
+        .logging
+        .files
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Plain)
+        .count();
+    let none = report
+        .logging
+        .files
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::None_)
+        .count();
 
     println!("  Logging");
     if structured > 0 {
@@ -1598,7 +1771,6 @@ fn render_summary(report: &TelemetryReport) {
     }
     println!();
 }
-
 
 // ── Rendering: compact (--compact flag) ───────────────────────────────────────
 
@@ -1674,22 +1846,51 @@ fn render_boundary_group(label: &str, sites: &[BoundaryCallSite]) {
         return;
     }
     let total = sites.len();
-    let covered = sites.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let covered = sites
+        .iter()
+        .filter(|s| s.anchor_kind != AnchorKind::None)
+        .count();
     let pct = (covered as f64 / total as f64 * 100.0) as usize;
-    let icon = if pct == 100 { "●".green() } else if pct > 0 { "◐".yellow() } else { "○".normal() };
+    let icon = if pct == 100 {
+        "●".green()
+    } else if pct > 0 {
+        "◐".yellow()
+    } else {
+        "○".normal()
+    };
     let pct_str = format!("{}%", pct);
-    let colored_pct = if pct == 100 { pct_str.green() } else if pct >= 50 { pct_str.yellow() } else { pct_str.red() };
-    println!("  {}  {:<16} {:>2} / {:>2}  {}", icon, label, covered, total, colored_pct);
+    let colored_pct = if pct == 100 {
+        pct_str.green()
+    } else if pct >= 50 {
+        pct_str.yellow()
+    } else {
+        pct_str.red()
+    };
+    println!(
+        "  {}  {:<16} {:>2} / {:>2}  {}",
+        icon, label, covered, total, colored_pct
+    );
 }
 
 fn render_boundaries_line(report: &TelemetryReport) {
     let b = &report.boundaries;
     let db_total = b.db.len();
-    let db_covered = b.db.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let db_covered =
+        b.db.iter()
+            .filter(|s| s.anchor_kind != AnchorKind::None)
+            .count();
     let http_total = b.http.len();
-    let http_covered = b.http.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let http_covered = b
+        .http
+        .iter()
+        .filter(|s| s.anchor_kind != AnchorKind::None)
+        .count();
     let remote_total = b.remote.len();
-    let remote_covered = b.remote.iter().filter(|s| s.anchor_kind != AnchorKind::None).count();
+    let remote_covered = b
+        .remote
+        .iter()
+        .filter(|s| s.anchor_kind != AnchorKind::None)
+        .count();
     let parts: Vec<String> = vec![
         format!("db {} / {}", db_covered, db_total),
         format!("http {} / {}", http_covered, http_total),
@@ -1701,7 +1902,6 @@ fn render_boundaries_line(report: &TelemetryReport) {
 fn is_write_method(method: &str) -> bool {
     matches!(method, "POST" | "PUT" | "PATCH" | "DELETE")
 }
-
 
 fn fmt_count(n: usize, total: usize) -> String {
     if total == 0 {
@@ -1716,27 +1916,5 @@ fn pct(n: usize, total: usize) -> String {
         "0".to_string()
     } else {
         format!("{}", ((n as f64 / total as f64) * 100.0) as usize)
-    }
-}
-
-// ── SignalKind display ────────────────────────────────────────────────────────
-
-impl SignalKind {
-    fn label(&self) -> &'static str {
-        match self {
-            SignalKind::Trace => "trace",
-            SignalKind::Log => "log",
-            SignalKind::Metric => "metric",
-            SignalKind::Error => "error",
-        }
-    }
-
-    fn icon_colored(&self) -> colored::ColoredString {
-        match self {
-            SignalKind::Trace => "◉".green(),
-            SignalKind::Log => "≡".cyan(),
-            SignalKind::Metric => "⬡".yellow(),
-            SignalKind::Error => "✖".red(),
-        }
     }
 }

@@ -905,7 +905,10 @@ pub struct Location {
 
 impl Location {
     pub fn new(file: impl Into<String>, line: Option<u32>) -> Self {
-        Self { file: file.into(), line }
+        Self {
+            file: file.into(),
+            line,
+        }
     }
 }
 
@@ -1472,7 +1475,8 @@ fn build_unobserved_paths(anchor: &CoverageNode) -> UnobservedPaths {
         &mut deepest_path,
     );
 
-    let total = by_role.database.len() + by_role.http.len() + by_role.remote.len() + by_role.logic.len();
+    let total =
+        by_role.database.len() + by_role.http.len() + by_role.remote.len() + by_role.logic.len();
     let anchor_unobserved = matches!(anchor.span, SpanSignal::None);
 
     UnobservedPaths {
@@ -1493,7 +1497,11 @@ fn walk_unobserved_callees(
     deepest_path: &mut Vec<PathHop>,
 ) {
     for child in children {
-        let file = if child.file.is_empty() { fallback_file.to_string() } else { child.file.clone() };
+        let file = if child.file.is_empty() {
+            fallback_file.to_string()
+        } else {
+            child.file.clone()
+        };
         let mut child_path = path_so_far.clone();
         child_path.push(PathHop {
             name: child.name.clone(),
@@ -1617,15 +1625,22 @@ pub fn build_auto_instrument_set(graph: &unfault_analysis::graph::CodeGraph) -> 
             if !observability_files.contains(&file) {
                 continue;
             }
-            for call_expr in raw_calls {
-                if let Some(framework) = classify_instrumentor_call(call_expr) {
+            for call in raw_calls {
+                if let Some(framework) = classify_instrumentor_call(&call.expr) {
                     // Keep first entry found for each framework (arbitrary but stable).
+                    // Prefer the call's own line over the enclosing function's line
+                    // when available — it points at the activation site itself.
+                    let call_line = if call.line > 0 {
+                        Some(call.line)
+                    } else {
+                        *line
+                    };
                     result
                         .entry(framework.clone())
                         .or_insert_with(|| AutoInstrumentEntry {
                             framework,
                             file: file.clone(),
-                            line: *line,
+                            line: call_line,
                         });
                 }
             }
@@ -1975,8 +1990,8 @@ fn stub_route_callers_via_raw_calls(
         };
 
         // Match the anchor name against the last segment of each raw call.
-        let hit = raw_calls.iter().any(|call_expr| {
-            let last = call_expr.split('.').last().unwrap_or(call_expr.as_str());
+        let hit = raw_calls.iter().any(|call| {
+            let last = call.expr.split('.').last().unwrap_or(call.expr.as_str());
             last == anchor_name
         });
         if !hit {
@@ -2024,7 +2039,8 @@ fn stub_callees_from_raw_calls(
     let mut seen = std::collections::HashSet::new();
     let mut result = Vec::new();
 
-    for call_expr in raw_calls {
+    for call in raw_calls {
+        let call_expr = &call.expr;
         // Classify the call expression FIRST.  If it's a recognised db /
         // http-client boundary we keep it regardless of receiver shape —
         // this is the whole point of category-based coverage.
@@ -2055,15 +2071,48 @@ fn stub_callees_from_raw_calls(
             }
             const LOGIC_SKIP: &[&str] = &[
                 // Python builtins
-                "any", "all", "map", "filter", "zip", "sorted", "reversed",
-                "enumerate", "range", "iter", "next", "len", "str", "int",
-                "float", "bool", "list", "dict", "tuple", "set", "type",
-                "print", "repr", "hash", "id", "callable", "getattr",
-                "setattr", "hasattr", "delattr", "super", "vars", "dir",
+                "any",
+                "all",
+                "map",
+                "filter",
+                "zip",
+                "sorted",
+                "reversed",
+                "enumerate",
+                "range",
+                "iter",
+                "next",
+                "len",
+                "str",
+                "int",
+                "float",
+                "bool",
+                "list",
+                "dict",
+                "tuple",
+                "set",
+                "type",
+                "print",
+                "repr",
+                "hash",
+                "id",
+                "callable",
+                "getattr",
+                "setattr",
+                "hasattr",
+                "delattr",
+                "super",
+                "vars",
+                "dir",
                 // FastAPI / Starlette markers
-                "depends", "depend",
+                "depends",
+                "depend",
                 // Common JS/TS globals
-                "console", "promise", "object", "array", "json",
+                "console",
+                "promise",
+                "object",
+                "array",
+                "json",
             ];
             let name_lower = name.to_lowercase();
             if LOGIC_SKIP.contains(&name_lower.as_str()) {
@@ -2109,18 +2158,30 @@ fn stub_callees_from_raw_calls(
                         }
                     })
                     .collect();
-                if matches.len() == 1 { Some(matches[0]) } else { None }
+                if matches.len() == 1 {
+                    Some(matches[0])
+                } else {
+                    None
+                }
             }
         };
+
+        // Capture the call-site line from the raw_calls entry. This is the
+        // line the call APPEARS on inside the caller's body — distinct from
+        // the callee's definition line. Used as a fallback for bound-method
+        // and unresolved cross-module calls where no definition line exists.
+        let call_site_line = if call.line > 0 { Some(call.line) } else { None };
 
         let (file, line, span, role) = if let Some(idx) = resolved {
             let node = &graph.graph[idx];
             let f = unfault_analysis::graph::traversal::node_file_path_pub(graph, node)
                 .unwrap_or_default();
+            // Prefer the resolved function's definition line; fall back to
+            // the call-site line so the user always has a useful location.
             let l = if let GraphNode::Function { line, .. } = node {
-                *line
+                line.or(call_site_line)
             } else {
-                None
+                call_site_line
             };
             let s = node_span_signal(graph, node, file_libs, &auto_instruments);
             // If the resolved function has its own classification, prefer it.
@@ -2134,7 +2195,14 @@ fn stub_callees_from_raw_calls(
             };
             (f, l, s, r)
         } else {
-            (String::new(), None, SpanSignal::None, inferred_role)
+            // Unresolved (bound method, dynamic import, cross-module ambiguous).
+            // The call-site line lets the caller still locate the boundary.
+            (
+                String::new(),
+                call_site_line,
+                SpanSignal::None,
+                inferred_role,
+            )
         };
 
         // For db / http-client boundary calls we display the full expression
@@ -2289,10 +2357,10 @@ fn node_role(
     // File-level library imports are deliberately ignored here: a function
     // sitting next to a SQLAlchemy import doesn't make it a db function.
     if let GraphNode::Function { raw_calls, .. } = node {
-        if raw_calls.iter().any(|expr| is_db_call_expr(expr)) {
+        if raw_calls.iter().any(|c| is_db_call_expr(&c.expr)) {
             return NodeRole::Database;
         }
-        if raw_calls.iter().any(|expr| is_http_client_call_expr(expr)) {
+        if raw_calls.iter().any(|c| is_http_client_call_expr(&c.expr)) {
             return NodeRole::HttpClient;
         }
     }
@@ -2937,6 +3005,7 @@ mod coverage_tests {
     // FastAPI handler never appeared in the db queries category.
 
     fn make_handler_with_raw_calls(raw: Vec<&str>) -> unfault_analysis::graph::GraphNode {
+        use unfault_core::graph::RawCall;
         unfault_analysis::graph::GraphNode::Function {
             file_id: unfault_core::parse::ast::FileId(1),
             name: "h".to_string(),
@@ -2951,7 +3020,8 @@ mod coverage_tests {
             column: None,
             request_schema: None,
             response_schema: None,
-            raw_calls: raw.into_iter().map(|s| s.to_string()).collect(),
+            // Synthetic test fixture: line 0 means "unknown" (legacy entry).
+            raw_calls: raw.into_iter().map(RawCall::lineless).collect(),
         }
     }
 
