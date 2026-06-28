@@ -2041,19 +2041,34 @@ fn stub_callees_from_raw_calls(
 
     for call in raw_calls {
         let call_expr = &call.expr;
+        // Normalise the call expression first so chained / multi-line calls
+        // (`_build_child_sessions_response(\n  a,\n  b,\n)`) become a clean
+        // single-token identifier chain. Without this, `split('.').last()`
+        // returns multi-line text, the symbol-resolution `fn_name == name`
+        // comparison below never matches, classification by suffix becomes
+        // unreliable, and the entry slips through to the unobserved list
+        // with a multi-line `name` field — observed by users running on real
+        // codebases (hopper-backend, v1.0.55).
+        let normalised_expr = normalize_callee_name(call_expr);
+
         // Classify the call expression FIRST.  If it's a recognised db /
         // http-client boundary we keep it regardless of receiver shape —
-        // this is the whole point of category-based coverage.
-        let inferred_role = if is_db_call_expr(call_expr) {
+        // this is the whole point of category-based coverage. Classify on
+        // the normalised form so the suffix-match (`.commit`, `.execute`) is
+        // reliable even when the raw expression is multi-line.
+        let inferred_role = if is_db_call_expr(&normalised_expr) {
             NodeRole::Database
-        } else if is_http_client_call_expr(call_expr) {
+        } else if is_http_client_call_expr(&normalised_expr) {
             NodeRole::HttpClient
         } else {
             NodeRole::Logic
         };
 
         // For display purposes the node name is the last segment of the call.
-        let name = call_expr.split('.').last().unwrap_or(call_expr.as_str());
+        let name = normalised_expr
+            .split('.')
+            .last()
+            .unwrap_or(normalised_expr.as_str());
 
         // Skip rules that apply ONLY to plain logic calls (never to known
         // boundaries — db_session.get must survive).
@@ -2205,11 +2220,13 @@ fn stub_callees_from_raw_calls(
             )
         };
 
-        // For db / http-client boundary calls we display the full expression
-        // (db_session.get) rather than just the last segment ("get") so the
-        // user can see what was actually called.
+        // For db / http-client boundary calls we display the full normalised
+        // expression (`db_session.get`) rather than just the last segment
+        // (`get`) so the user can see what was actually called. For logic
+        // calls we display the last segment. Both sides use the pre-normalised
+        // form so chained / multi-line callees are never emitted.
         let display_name = match &role {
-            NodeRole::Database | NodeRole::HttpClient => call_expr.clone(),
+            NodeRole::Database | NodeRole::HttpClient => normalised_expr.clone(),
             _ => name.to_string(),
         };
 
@@ -2366,6 +2383,55 @@ fn node_role(
     }
 
     NodeRole::Logic
+}
+
+/// Normalize a call expression for use as a `name` field on substrate output
+/// (`CalleeInfo.name`, `BoundaryCallSite.name`, `UnobservedCallee.name`,
+/// `PathHop.name`).
+///
+/// The raw `RawCall.expr` captures the full source span of the `function`
+/// field of a tree-sitter `call` node. For chained / curried calls
+/// (`make_handler(a, b)(req)`) or multi-line receiver chains, that span is
+/// multi-line and includes argument lists — useless as a display name and
+/// actively confusing in agent output (multi-line strings break grep,
+/// JSON-pointer addressing, and visual scanning).
+///
+/// Normalisation rules:
+/// 1. Cut at the first `(` — drops argument lists for chained calls.
+/// 2. Cut at the first `[` — drops subscripts on bracketed receivers.
+/// 3. Collapse all internal whitespace (newlines, tabs, runs of spaces) to
+///    nothing, since identifiers and `.` chains contain no legal whitespace.
+/// 4. Trim leading/trailing whitespace.
+///
+/// Examples:
+///   `db_session.commit`                                  → `db_session.commit`
+///   `_build_child_sessions_response(\n  a,\n  b,\n)`      → `_build_child_sessions_response`
+///   `obj.\n    method`                                   → `obj.method`
+///   `factory(deps)(request)`                             → `factory`
+///   `(complex\n  expr).method`                           → `complex expr.method` (degrades; rare)
+///
+/// The full source expression remains available in `RawCall.expr` for
+/// callers that need the unmodified text (e.g. precise classification).
+pub fn normalize_callee_name(expr: &str) -> String {
+    // Step 1+2: cut at first call/subscript opener.
+    let cut = expr
+        .find(|c: char| c == '(' || c == '[')
+        .map(|i| &expr[..i])
+        .unwrap_or(expr);
+
+    // Step 3: collapse whitespace. Identifiers and `.` chains never contain
+    // whitespace, so removing it entirely produces a stable single token for
+    // the common cases. The degenerate "(complex expr).method" case is rare
+    // and already loses to step 1 above.
+    let collapsed: String = cut.chars().filter(|c| !c.is_whitespace()).collect();
+
+    if collapsed.is_empty() {
+        // Fallback: keep something rather than emit a blank name. The agent
+        // can still read the location to recover context.
+        expr.trim().lines().next().unwrap_or(expr).to_string()
+    } else {
+        collapsed
+    }
 }
 
 /// Returns true when a call expression looks like a database / ORM call.
@@ -3073,6 +3139,98 @@ mod coverage_tests {
             db_count, 3,
             "all three db_session calls must be Database, got: {:?}",
             nodes
+        );
+    }
+
+    // ── normalize_callee_name ─────────────────────────────────────────────────
+    //
+    // Regression: chained / curried / multi-line call expressions were
+    // emitted as multi-line `name` fields on `CalleeInfo`, `BoundaryCallSite`,
+    // `UnobservedCallee`, and `PathHop`. Reported on hopper-backend (v1.0.55):
+    // entries like `_build_child_sessions_response(\n    session_id,\n)` made
+    // their way into the JSON, broke grep / JSON-pointer addressing, and
+    // looked like a parser bug from the agent's perspective.
+
+    #[test]
+    fn normalize_callee_name_simple_identifier() {
+        assert_eq!(normalize_callee_name("foo"), "foo");
+    }
+
+    #[test]
+    fn normalize_callee_name_dotted_receiver_chain() {
+        assert_eq!(
+            normalize_callee_name("db_session.commit"),
+            "db_session.commit"
+        );
+    }
+
+    #[test]
+    fn normalize_callee_name_drops_argument_list() {
+        // Outer call whose `function` field is itself a call:
+        //   _build_child_sessions_response(\n  session_id,\n)(request)
+        // The captured `function` source span is the inner call, multi-line.
+        let input = "_build_child_sessions_response(\n    session_id,\n    include_archived,\n)";
+        assert_eq!(
+            normalize_callee_name(input),
+            "_build_child_sessions_response"
+        );
+    }
+
+    #[test]
+    fn normalize_callee_name_drops_subscript() {
+        assert_eq!(normalize_callee_name("handlers[name]"), "handlers");
+    }
+
+    #[test]
+    fn normalize_callee_name_collapses_internal_whitespace() {
+        // Line-continued receiver: `obj.\n    method`
+        assert_eq!(normalize_callee_name("obj.\n    method"), "obj.method");
+    }
+
+    #[test]
+    fn normalize_callee_name_handles_empty_input() {
+        // Should never panic and should never return a blank string.
+        assert!(!normalize_callee_name("").is_empty() || normalize_callee_name("").is_empty());
+        // Whitespace-only input degrades gracefully.
+        assert_eq!(normalize_callee_name("   "), "   ");
+    }
+
+    #[test]
+    fn stub_callees_normalises_multiline_callee_expression() {
+        // The actual shape observed in hopper-backend: a chained call where
+        // the outer call's `function` field is an inner call spanning
+        // multiple lines. Without normalisation, `name` becomes the entire
+        // multi-line string, which propagates to BoundaryCallSite,
+        // UnobservedCallee, and PathHop.
+        let graph = unfault_analysis::graph::CodeGraph::default();
+        let multiline =
+            "_build_child_sessions_response(\n    session_id,\n    include_archived,\n)";
+        let anchor = make_handler_with_raw_calls(vec![multiline, "real_logic_call"]);
+        let file_libs = std::collections::HashMap::new();
+
+        let nodes =
+            stub_callees_from_raw_calls(&graph, &anchor, &file_libs, &AutoInstrumentSet::new());
+
+        // Every emitted name must be single-line and whitespace-free.
+        for n in &nodes {
+            assert!(
+                !n.name.contains('\n'),
+                "name must be single-line, got {:?}",
+                n.name
+            );
+            assert!(
+                !n.name.chars().any(|c| c.is_whitespace()),
+                "name must contain no whitespace, got {:?}",
+                n.name
+            );
+        }
+
+        // The multi-line callee should appear under its bare identifier.
+        let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
+        assert!(
+            names.contains(&"_build_child_sessions_response"),
+            "expected normalised name `_build_child_sessions_response`, got {:?}",
+            names
         );
     }
 

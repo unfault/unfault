@@ -2,7 +2,7 @@ use anyhow::Result;
 use colored::Colorize;
 
 use crate::commands::graph::{
-    CoverageContext, CoverageNode, Location, NodeRole, SpanSignal, UnobservedPaths,
+    CoverageContext, CoverageNode, Location, NodeRole, PathHop, SpanSignal, UnobservedPaths,
     build_coverage_context, build_graph_with_spinner,
 };
 use crate::exit_codes::*;
@@ -214,7 +214,7 @@ pub enum CalleeKind {
 }
 
 /// SQL-level statement kind inferred from the call expression.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StatementKind {
     Select,
@@ -255,6 +255,21 @@ pub struct CalleeInfo {
     /// Attributes/span-name when anchor_kind is explicit; empty array otherwise.
     #[serde(default)]
     pub anchor_attributes: Vec<String>,
+    /// Call chain from the route handler down to (but not including) this
+    /// callee. `via.len() == depth - 1` invariantly: depth 1 callees are
+    /// reached directly from the handler, so `via` is empty; depth 2 has
+    /// one intermediate; etc. Each hop carries `name` and `location` so an
+    /// agent can verify reachability without re-walking the graph.
+    ///
+    /// Added to address the multi-route attribution confusion observed on
+    /// hopper-backend (v1.0.55): the same callee appearing under several
+    /// routes is correct substrate when those routes genuinely share
+    /// downstream helpers, and `via` makes the chain explicit so the agent
+    /// (or human) can confirm — vs. the prior output where the boundary
+    /// said `in_function: serve_attachment` without any path, looking like
+    /// a misattribution bug.
+    #[serde(default)]
+    pub via: Vec<PathHop>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -338,13 +353,29 @@ pub struct BoundaryCallSite {
     pub name: String,
     pub kind: CalleeKind,
     pub location: Location,
+    /// The route that ultimately reaches this boundary, formatted as
+    /// `"METHOD /path"` (e.g. `"POST /sites/{site_id}/publish"`).
     pub in_route: String,
+    /// The route HANDLER function name (not the immediate enclosing
+    /// function of the call site). Kept for backwards compatibility;
+    /// use `via` to see the actual call chain when these differ.
     pub in_function: String,
     pub anchor_kind: AnchorKind,
     #[serde(default)]
     pub anchor_attributes: Vec<String>,
     /// SQL verb for db entries; HTTP method for http entries; null for remote.
     pub statement_kind: Option<StatementKind>,
+    /// Call chain from the route handler down to (but not including) this
+    /// boundary call site. Empty when the boundary is called directly from
+    /// the handler. Each hop carries `name` and `location` so an agent can
+    /// verify reachability without re-walking the graph.
+    ///
+    /// When the same boundary appears under several different routes, this
+    /// field is what lets the agent confirm whether the substrate is
+    /// correct (routes legitimately share a downstream helper) or whether
+    /// further investigation is needed.
+    #[serde(default)]
+    pub via: Vec<PathHop>,
 }
 
 /// Corpus counts (derived from routes + logging).
@@ -668,18 +699,24 @@ fn analyze_single_route(
 
 fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
     let anchor_file = ctx.anchor.file.clone();
-    let mut all_nodes: Vec<&CoverageNode> = Vec::new();
-    collect_nodes(&ctx.anchor, &mut all_nodes);
+    // Walk the call tree with full path context so each callee can carry
+    // its chain from the route handler. `via` lets agents verify
+    // reachability without re-walking the graph and makes shared-helper
+    // attribution across routes auditable.
+    let mut all_nodes: Vec<(&CoverageNode, Vec<PathHop>)> = Vec::new();
+    let mut path_buf: Vec<PathHop> = Vec::new();
+    collect_nodes_with_path(&ctx.anchor, &mut path_buf, &mut all_nodes);
     for c in &ctx.callers {
-        collect_nodes(c, &mut all_nodes);
+        path_buf.clear();
+        collect_nodes_with_path(c, &mut path_buf, &mut all_nodes);
     }
 
     // Build flat callee list (exclude anchor itself).
     // Builtins and constructors are tagged but excluded from counts.
     let callees: Vec<CalleeInfo> = all_nodes
         .iter()
-        .filter(|n| n.depth != 0)
-        .map(|n| {
+        .filter(|(n, _)| n.depth != 0)
+        .map(|(n, via)| {
             let ck = callee_kind_from_name(&n.name);
             // Fall back to anchor file when callee has no file resolved.
             let file = if n.file.is_empty() {
@@ -695,6 +732,7 @@ fn traversal_from_context(ctx: &CoverageContext) -> RouteTraversal {
                 depth: n.depth,
                 anchor_kind: span_to_anchor_kind(&n.span),
                 anchor_attributes: span_to_attributes(&n.span),
+                via: via.clone(),
             }
         })
         .collect();
@@ -812,21 +850,86 @@ fn infer_http_method_kind(call_expr: &str) -> Option<StatementKind> {
     }
 }
 
+/// Map a database / ORM call expression to a `StatementKind`.
+///
+/// Classification rules (case-insensitive on the final method segment):
+///
+/// **Select (read):**
+///   `select`, `scalar`, `scalars`, `scalar_one`, `scalar_one_or_none`,
+///   `fetchall`, `fetchone`, `fetchmany`, `all`, `first`, `one`,
+///   `one_or_none`, `get`, `query`, `filter`, `filter_by`, `count`,
+///   `exists`, `refresh`
+///
+/// **Insert:** `insert`, `add`, `add_all`, `bulk_insert_mappings`,
+///   `bulk_save_objects`, `create` (Django `objects.create`)
+///
+/// **Update:** `update`, `bulk_update_mappings`, `merge` (SQLAlchemy
+///   upsert — semantically update), `save` (Django/peewee instance save;
+///   classification leans update because most `.save()` calls in route
+///   bodies are mutations of an already-loaded instance)
+///
+/// **Delete:** `delete`, `remove`
+///
+/// **Commit/Rollback:** `commit`, `flush`, `rollback`
+///
+/// **Raw:** `execute`, `exec`, `executemany`, `raw`, `text`
+///
+/// **Django `.objects.X` short-circuit:** when the expression contains
+/// `.objects.`, the queryset method is classified directly without
+/// receiver heuristics (e.g. `User.objects.create` → insert).
+///
+/// Anything not recognised falls back to `Other`. This is intentionally
+/// conservative — the receiver heuristic in `is_db_call_expr` is what
+/// guarantees we only get here for genuine db calls, so reaching `Other`
+/// usually means we encountered a less common method name. Audit the
+/// telemetry output for `statement_kind: "other"` to find candidates
+/// for this list.
 fn infer_statement_kind(call_expr: &str) -> StatementKind {
-    let last = call_expr
-        .split('.')
-        .last()
-        .unwrap_or(call_expr)
-        .to_lowercase();
-    match last.as_str() {
-        "select" | "scalars" | "scalar" | "scalar_one" | "scalar_one_or_none" | "fetchall"
-        | "fetchone" | "all" | "first" | "one" | "one_or_none" => StatementKind::Select,
-        "insert" | "add" | "bulk_insert_mappings" => StatementKind::Insert,
-        "update" | "bulk_update_mappings" => StatementKind::Update,
+    let lower = call_expr.to_lowercase();
+    let last = lower.split('.').last().unwrap_or(lower.as_str());
+
+    // Django queryset short-circuit: `.objects.<method>` is unambiguous.
+    // (`is_db_call_expr` flags anything with `.objects.` as database.)
+    if lower.contains(".objects.") {
+        return match last {
+            "get" | "filter" | "exclude" | "all" | "first" | "last" | "count" | "exists"
+            | "values" | "values_list" | "select_related" | "prefetch_related" | "annotate"
+            | "aggregate" | "earliest" | "latest" | "in_bulk" | "raw" | "only" | "defer" => {
+                StatementKind::Select
+            }
+            "create" | "get_or_create" | "bulk_create" => StatementKind::Insert,
+            "update" | "update_or_create" | "bulk_update" => StatementKind::Update,
+            "delete" => StatementKind::Delete,
+            _ => StatementKind::Other,
+        };
+    }
+
+    match last {
+        // ── Read ───────────────────────────────────────────────────────────
+        "select" | "scalar" | "scalars" | "scalar_one" | "scalar_one_or_none" | "fetchall"
+        | "fetchone" | "fetchmany" | "all" | "first" | "one" | "one_or_none" | "get" | "query"
+        | "filter" | "filter_by" | "count" | "exists" | "refresh" => StatementKind::Select,
+
+        // ── Insert ─────────────────────────────────────────────────────────
+        "insert" | "add" | "add_all" | "bulk_insert_mappings" | "bulk_save_objects" | "create" => {
+            StatementKind::Insert
+        }
+
+        // ── Update ─────────────────────────────────────────────────────────
+        // `merge` is SQLAlchemy's upsert. `save` is ambiguous but most often
+        // updates an already-loaded instance in route handler context.
+        "update" | "bulk_update_mappings" | "merge" | "save" => StatementKind::Update,
+
+        // ── Delete ─────────────────────────────────────────────────────────
         "delete" | "remove" => StatementKind::Delete,
+
+        // ── Transaction control ────────────────────────────────────────────
         "commit" | "flush" => StatementKind::Commit,
         "rollback" => StatementKind::Rollback,
-        "execute" | "exec" | "raw" => StatementKind::Raw,
+
+        // ── Raw SQL ────────────────────────────────────────────────────────
+        "execute" | "exec" | "executemany" | "raw" | "text" => StatementKind::Raw,
+
         _ => StatementKind::Other,
     }
 }
@@ -857,6 +960,7 @@ fn build_boundaries(routes: &[RouteTelemetry]) -> Boundaries {
                 anchor_kind: callee.anchor_kind.clone(),
                 anchor_attributes: callee.anchor_attributes.clone(),
                 statement_kind: None, // filled below for db
+                via: callee.via.clone(),
             };
             match &callee.role {
                 NodeRole::Database => {
@@ -1014,11 +1118,27 @@ fn find_function_anchor(graph: &CodeGraph, name: &str) -> Option<GraphNodeIndex>
         })
 }
 
-fn collect_nodes<'a>(node: &'a CoverageNode, out: &mut Vec<&'a CoverageNode>) {
-    out.push(node);
+/// Recursively flatten a coverage subtree while recording the chain of
+/// parents from the root down to (but not including) each visited node.
+/// Used to build `CalleeInfo.via` so every callee carries a verifiable
+/// path from the route handler.
+///
+/// The root node is emitted with an empty path; each descendant gets the
+/// concatenation of its ancestors' `(name, location)` pairs.
+fn collect_nodes_with_path<'a>(
+    node: &'a CoverageNode,
+    path: &mut Vec<PathHop>,
+    out: &mut Vec<(&'a CoverageNode, Vec<PathHop>)>,
+) {
+    out.push((node, path.clone()));
+    path.push(PathHop {
+        name: node.name.clone(),
+        location: Location::new(node.file.clone(), node.line),
+    });
     for child in &node.children {
-        collect_nodes(child, out);
+        collect_nodes_with_path(child, path, out);
     }
+    path.pop();
 }
 
 // ── Helpers: logging quality ─────────────────────────────────────────────────
@@ -1916,5 +2036,343 @@ fn pct(n: usize, total: usize) -> String {
         "0".to_string()
     } else {
         format!("{}", ((n as f64 / total as f64) * 100.0) as usize)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── infer_statement_kind ─────────────────────────────────────────────────
+    //
+    // Regression: hopper-backend reported `db_session.get` (and several other
+    // common ORM read methods) as `statement_kind: "other"`. The old matcher
+    // only knew `select`/`scalars`/`fetchall`-style methods. The agent's
+    // first-pass classification was less informative than it could be.
+
+    #[test]
+    fn statement_kind_sqlalchemy_session_get_is_select() {
+        assert_eq!(
+            infer_statement_kind("db_session.get"),
+            StatementKind::Select
+        );
+        assert_eq!(infer_statement_kind("session.get"), StatementKind::Select);
+        assert_eq!(
+            infer_statement_kind("self.db_session.get"),
+            StatementKind::Select
+        );
+    }
+
+    #[test]
+    fn statement_kind_sqlalchemy_query_chain_is_select() {
+        assert_eq!(infer_statement_kind("session.query"), StatementKind::Select);
+        assert_eq!(
+            infer_statement_kind("session.filter"),
+            StatementKind::Select
+        );
+        assert_eq!(
+            infer_statement_kind("session.filter_by"),
+            StatementKind::Select
+        );
+        assert_eq!(infer_statement_kind("session.count"), StatementKind::Select);
+        assert_eq!(
+            infer_statement_kind("session.exists"),
+            StatementKind::Select
+        );
+    }
+
+    #[test]
+    fn statement_kind_sqlalchemy_writes() {
+        assert_eq!(infer_statement_kind("session.add"), StatementKind::Insert);
+        assert_eq!(
+            infer_statement_kind("session.add_all"),
+            StatementKind::Insert
+        );
+        assert_eq!(
+            infer_statement_kind("session.bulk_save_objects"),
+            StatementKind::Insert
+        );
+        // merge is upsert — classified as update.
+        assert_eq!(infer_statement_kind("session.merge"), StatementKind::Update);
+        assert_eq!(
+            infer_statement_kind("session.delete"),
+            StatementKind::Delete
+        );
+    }
+
+    #[test]
+    fn statement_kind_transaction_control() {
+        assert_eq!(
+            infer_statement_kind("db_session.commit"),
+            StatementKind::Commit
+        );
+        assert_eq!(infer_statement_kind("session.flush"), StatementKind::Commit);
+        assert_eq!(
+            infer_statement_kind("session.rollback"),
+            StatementKind::Rollback
+        );
+    }
+
+    #[test]
+    fn statement_kind_raw_sql() {
+        assert_eq!(infer_statement_kind("session.execute"), StatementKind::Raw);
+        assert_eq!(infer_statement_kind("conn.executemany"), StatementKind::Raw);
+        assert_eq!(infer_statement_kind("text"), StatementKind::Raw);
+        assert_eq!(infer_statement_kind("cursor.exec"), StatementKind::Raw);
+    }
+
+    #[test]
+    fn statement_kind_django_queryset_methods() {
+        // `.objects.X` short-circuit: classification is by queryset method.
+        assert_eq!(
+            infer_statement_kind("User.objects.get"),
+            StatementKind::Select
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.filter"),
+            StatementKind::Select
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.all"),
+            StatementKind::Select
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.first"),
+            StatementKind::Select
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.exists"),
+            StatementKind::Select
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.count"),
+            StatementKind::Select
+        );
+
+        assert_eq!(
+            infer_statement_kind("User.objects.create"),
+            StatementKind::Insert
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.bulk_create"),
+            StatementKind::Insert
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.get_or_create"),
+            StatementKind::Insert
+        );
+
+        assert_eq!(
+            infer_statement_kind("User.objects.update"),
+            StatementKind::Update
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.bulk_update"),
+            StatementKind::Update
+        );
+        assert_eq!(
+            infer_statement_kind("User.objects.delete"),
+            StatementKind::Delete
+        );
+    }
+
+    #[test]
+    fn statement_kind_django_instance_save_classified_as_update() {
+        // `.save()` on an instance most often updates an already-loaded row.
+        // This is a deliberate lean — the alternative is `Other` which is
+        // less informative.
+        assert_eq!(infer_statement_kind("user.save"), StatementKind::Update);
+    }
+
+    #[test]
+    fn statement_kind_sqlalchemy_core_standalone() {
+        assert_eq!(infer_statement_kind("select"), StatementKind::Select);
+        assert_eq!(infer_statement_kind("insert"), StatementKind::Insert);
+        assert_eq!(infer_statement_kind("update"), StatementKind::Update);
+        assert_eq!(infer_statement_kind("delete"), StatementKind::Delete);
+    }
+
+    #[test]
+    fn statement_kind_unknown_falls_back_to_other() {
+        assert_eq!(
+            infer_statement_kind("session.some_custom_method"),
+            StatementKind::Other
+        );
+        assert_eq!(infer_statement_kind(""), StatementKind::Other);
+    }
+
+    #[test]
+    fn statement_kind_case_insensitive() {
+        assert_eq!(
+            infer_statement_kind("Session.COMMIT"),
+            StatementKind::Commit
+        );
+        assert_eq!(
+            infer_statement_kind("DB_Session.Get"),
+            StatementKind::Select
+        );
+    }
+
+    // ── collect_nodes_with_path ──────────────────────────────────────────────
+    //
+    // Regression: `BoundaryCallSite.in_function` was set to the route
+    // handler name, not the immediate enclosing function of the call site.
+    // When the same boundary appeared under several routes, the agent had
+    // no way to tell whether attribution was correct (routes legitimately
+    // share helpers) or a bug. `via` carries the chain from the handler so
+    // the agent can audit the path themselves.
+
+    fn make_node(
+        name: &str,
+        file: &str,
+        line: Option<u32>,
+        depth: i32,
+        children: Vec<CoverageNode>,
+    ) -> CoverageNode {
+        CoverageNode {
+            name: name.to_string(),
+            file: file.to_string(),
+            line,
+            depth,
+            direction: "down".to_string(),
+            span: SpanSignal::None,
+            role: NodeRole::Logic,
+            children,
+        }
+    }
+
+    #[test]
+    fn collect_nodes_with_path_empty_for_root() {
+        // Root node always has an empty path: nothing is upstream of it.
+        let root = make_node("handler", "app.py", Some(1), 0, vec![]);
+        let mut path = Vec::new();
+        let mut out = Vec::new();
+        collect_nodes_with_path(&root, &mut path, &mut out);
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].0.name, "handler");
+        assert!(
+            out[0].1.is_empty(),
+            "root node must have empty via, got {:?}",
+            out[0].1
+        );
+    }
+
+    #[test]
+    fn collect_nodes_with_path_records_ancestors() {
+        // handler → service → helper → db_session.commit
+        let tree = make_node(
+            "handler",
+            "app.py",
+            Some(10),
+            0,
+            vec![make_node(
+                "service",
+                "service.py",
+                Some(20),
+                1,
+                vec![make_node(
+                    "helper",
+                    "helper.py",
+                    Some(30),
+                    2,
+                    vec![make_node(
+                        "db_session.commit",
+                        "helper.py",
+                        Some(35),
+                        3,
+                        vec![],
+                    )],
+                )],
+            )],
+        );
+
+        let mut path = Vec::new();
+        let mut out = Vec::new();
+        collect_nodes_with_path(&tree, &mut path, &mut out);
+
+        // Four nodes, each carrying its depth-many ancestors.
+        assert_eq!(out.len(), 4);
+
+        // handler: depth 0, empty path
+        assert_eq!(out[0].0.name, "handler");
+        assert!(out[0].1.is_empty());
+
+        // service: depth 1, path = [handler]
+        assert_eq!(out[1].0.name, "service");
+        assert_eq!(out[1].1.len(), 1);
+        assert_eq!(out[1].1[0].name, "handler");
+
+        // helper: depth 2, path = [handler, service]
+        assert_eq!(out[2].0.name, "helper");
+        assert_eq!(out[2].1.len(), 2);
+        assert_eq!(out[2].1[0].name, "handler");
+        assert_eq!(out[2].1[1].name, "service");
+
+        // db_session.commit: depth 3, path = [handler, service, helper]
+        assert_eq!(out[3].0.name, "db_session.commit");
+        assert_eq!(out[3].1.len(), 3);
+        assert_eq!(out[3].1[0].name, "handler");
+        assert_eq!(out[3].1[1].name, "service");
+        assert_eq!(out[3].1[2].name, "helper");
+    }
+
+    #[test]
+    fn collect_nodes_with_path_invariant_via_len_equals_depth() {
+        // Invariant: for any callee, via.len() == depth.
+        // (Root has depth 0 and empty via; the documented contract on
+        // `CalleeInfo.via` says via.len() == depth - 1 for non-root callees,
+        // which is the same thing once you exclude the root from the filter.)
+        let tree = make_node(
+            "h",
+            "f.py",
+            Some(1),
+            0,
+            vec![make_node(
+                "a",
+                "f.py",
+                Some(2),
+                1,
+                vec![make_node("b", "f.py", Some(3), 2, vec![])],
+            )],
+        );
+
+        let mut path = Vec::new();
+        let mut out = Vec::new();
+        collect_nodes_with_path(&tree, &mut path, &mut out);
+
+        for (node, via) in &out {
+            assert_eq!(
+                via.len() as i32,
+                node.depth,
+                "via.len() must equal depth for {}, got {} != {}",
+                node.name,
+                via.len(),
+                node.depth,
+            );
+        }
+    }
+
+    #[test]
+    fn collect_nodes_with_path_locations_preserved() {
+        // Each hop must carry the parent's file and line so an agent can
+        // open the file at the right spot.
+        let tree = make_node(
+            "outer",
+            "outer.py",
+            Some(100),
+            0,
+            vec![make_node("inner", "inner.py", Some(200), 1, vec![])],
+        );
+
+        let mut path = Vec::new();
+        let mut out = Vec::new();
+        collect_nodes_with_path(&tree, &mut path, &mut out);
+
+        let inner_via = &out[1].1;
+        assert_eq!(inner_via.len(), 1);
+        assert_eq!(inner_via[0].name, "outer");
+        assert_eq!(inner_via[0].location.file, "outer.py");
+        assert_eq!(inner_via[0].location.line, Some(100));
     }
 }

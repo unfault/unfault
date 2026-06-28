@@ -10,6 +10,109 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.56] — 2026-06-28
+
+Substrate-trust release. Four fixes targeted at the rough edges flagged
+by an agent workflow run on hopper-backend (real-world ~250-file FastAPI
+codebase, v1.0.55).
+
+### Added
+
+- **`via: Vec<PathHop>` on `CalleeInfo` and `BoundaryCallSite`.** Every
+  callee and every boundary call site now carries the call chain from
+  the route handler down to (but not including) itself. Each hop has
+  `name` and `location`, so an agent can verify reachability without
+  re-walking the graph.
+
+  This was added to address the multi-route attribution confusion: when
+  the same boundary appears under several routes (e.g.
+  `_build_child_sessions_response` showing up under `get_session_by_id`,
+  `serve_attachment`, and `get_automation`), it was unclear whether the
+  attribution was substrate fact (routes legitimately share helpers) or
+  bug. `via` makes the chain explicit so the user can audit it.
+
+  Invariant: `via.len() == depth` for every callee. Depth-1 callees
+  reached directly from the handler have empty `via`.
+
+  Also clarifies the meaning of `BoundaryCallSite.in_function`: it is
+  the ROUTE HANDLER, not the immediate enclosing function. The old
+  field is kept for backward compatibility; use `via` for the chain.
+
+### Fixed
+
+- **Multi-line `name` fields in telemetry output.** Chained / curried
+  calls (`make_handler(deps)(request)`) and multi-line receiver chains
+  produced multi-line `name` fields on `CalleeInfo`, `BoundaryCallSite`,
+  `UnobservedCallee`, and `PathHop`. Example observed on hopper-backend:
+
+      "name": "_build_child_sessions_response(\n    session_id,\n    include_archived,\n)"
+
+  The raw expression is faithfully captured by the parser (tree-sitter
+  `function` field of the outer `call` node is the inner call's source
+  span), but that text is unusable as a display name — it breaks grep,
+  JSON-pointer addressing, and visual scanning.
+
+  Added `normalize_callee_name` in `cli/src/commands/graph.rs`:
+
+  1. Cut at the first `(` or `[`, dropping argument lists / subscripts.
+  2. Collapse all internal whitespace (identifiers and `.` chains contain
+     no legal whitespace).
+  3. Trim and degrade gracefully on edge cases.
+
+  The normalised form is now used both as the display `name` and as the
+  symbol-resolution key in `stub_callees_from_raw_calls`. The latter fix
+  is load-bearing: with the multi-line key, `fn_name == name` against
+  the graph's clean `GraphNode::Function.name` never matched, so chained
+  callees that were actually resolvable in the codebase stayed
+  unresolved and surfaced as unobserved boundaries with multi-line
+  names.
+
+  `RawCall.expr` continues to carry the unmodified source span for
+  callers that need it (precise classification, future receiver-chain
+  analysis).
+
+- **`statement_kind` precision for ORM/SQL calls.** The classifier now
+  recognises the common method-name vocabulary across SQLAlchemy ORM,
+  SQLAlchemy Core, Django ORM, and generic cursor APIs. Notably
+  `db_session.get` → `select` (was `other`), `session.query` /
+  `session.filter` → `select`, `session.merge` → `update` (upsert),
+  `session.add_all` → `insert`, `executemany` → `raw`. Django queryset
+  short-circuit: `.objects.<method>` is classified directly
+  (`User.objects.create` → `insert`, `User.objects.bulk_update` →
+  `update`, etc.). `StatementKind` now derives `PartialEq, Eq` to
+  enable testing.
+
+  Unknown methods still fall back to `other` — that bucket is the audit
+  signal for the next round of vocabulary additions.
+
+- **Duplicate roots in `unfault graph function-impact`.** When the same
+  function was represented by two graph nodes with identical
+  `(file, qualified_name)` — e.g. extractor overlap, the same shape as
+  the `(method, path)` collisions documented in v1.0.55 —
+  `extract_flow` walked both and printed duplicate roots. Now
+  deduplicates by `(file, display_name)` after the name search.
+
+  Cross-file name collisions are preserved (two distinct definitions in
+  two different files still surface as two roots) — that is the
+  disambiguation signal a caller needs to either narrow with
+  `file:function` or read both intentionally.
+
+### Notes
+
+- 22 new regression tests across `cli` and `analysis` covering all four
+  items: 6 for `normalize_callee_name` + multi-line callee integration,
+  10 for `infer_statement_kind` (every recognised category +
+  case-insensitivity + Django queryset short-circuit + fallback), 4 for
+  `collect_nodes_with_path` (root invariant, ancestor recording,
+  `via.len() == depth` invariant, location preservation), and 2 for
+  `extract_flow` dedup (within-file collapse + cross-file preservation).
+
+- `BoundaryCallSite.via` increases JSON size by roughly `depth` hops per
+  boundary. Typical call trees are shallow (≤ 5) so per-boundary cost
+  is a few hundred bytes. The user-facing benefit — auditable
+  attribution chains — outweighs the size cost for agent-driven
+  workflows where the whole report is read once and acted on.
+
 ## [1.0.55] — 2026-06-28
 
 ### Changed

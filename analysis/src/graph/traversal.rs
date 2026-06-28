@@ -24,6 +24,28 @@ pub fn extract_flow(
         return FlowContext::default();
     }
 
+    // Deduplicate by (file, display_name). Without this, when the same
+    // function appears as both a top-level Function node and (e.g.) a method
+    // on some class with the same suffix, or when two extractor passes
+    // create overlapping nodes for the same definition, the user sees
+    // duplicate roots for what is logically a single function. Reported on
+    // hopper-backend (v1.0.55) for `publish_site_endpoint` and was the same
+    // shape as the `(method, path)` collisions issue.
+    //
+    // We dedup AFTER the name search so that genuinely distinct functions
+    // sharing a name across files still surface — that's the disambiguation
+    // signal a caller needs to either narrow with `file:function` or read
+    // multiple roots intentionally.
+    let mut seen: HashSet<(Option<String>, String)> = HashSet::new();
+    let start_indices: Vec<_> = start_indices
+        .into_iter()
+        .filter(|&idx| {
+            let node = &graph.graph[idx];
+            let key = (node_file_path(graph, node), node.display_name());
+            seen.insert(key)
+        })
+        .collect();
+
     let mut roots = Vec::new();
     let mut all_paths = Vec::new();
 
@@ -1469,5 +1491,143 @@ pub fn get_brief(graph: &CodeGraph, subtree: &str) -> BriefContext {
         incoming_imports,
         internal_entry_points: entry_points,
         size,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::{GraphEdgeKind, RawCall};
+    use crate::parse::ast::FileId;
+    use crate::types::context::Language;
+
+    /// Build a graph where the same function name appears twice in the same
+    /// file — exercising the dedup path in `extract_flow`. This is the shape
+    /// reported on hopper-backend for `publish_site_endpoint` and matches the
+    /// `(method, path)` collision pattern seen previously in telemetry: two
+    /// graph extractor passes producing overlapping nodes for what is
+    /// logically a single function definition.
+    fn build_graph_with_duplicate_function() -> CodeGraph {
+        let mut graph = CodeGraph::new();
+
+        let file = graph.graph.add_node(GraphNode::File {
+            file_id: FileId(1),
+            path: "src/router.py".to_string(),
+            language: Language::Python,
+        });
+        graph.file_nodes.insert(FileId(1), file);
+        graph.path_to_file.insert("src/router.py".to_string(), file);
+
+        // Two nodes with the same qualified_name + file. Simulates the case
+        // where a second extractor pass created a duplicate node for the
+        // same definition (the bug shape reported by the user).
+        let make_fn = |graph: &mut CodeGraph| -> petgraph::graph::NodeIndex {
+            graph.graph.add_node(GraphNode::Function {
+                file_id: FileId(1),
+                name: "publish_site_endpoint".to_string(),
+                qualified_name: "publish_site_endpoint".to_string(),
+                is_async: true,
+                is_handler: true,
+                http_method: Some("POST".to_string()),
+                http_path: Some("/sites/{site_id}/publish".to_string()),
+                decorators: vec![],
+                is_writer: true,
+                line: Some(279),
+                column: None,
+                request_schema: None,
+                response_schema: None,
+                raw_calls: Vec::<RawCall>::new(),
+            })
+        };
+
+        let fn1 = make_fn(&mut graph);
+        let fn2 = make_fn(&mut graph);
+        graph.graph.add_edge(file, fn1, GraphEdgeKind::Contains);
+        graph.graph.add_edge(file, fn2, GraphEdgeKind::Contains);
+        graph
+    }
+
+    #[test]
+    fn extract_flow_deduplicates_same_file_same_name_roots() {
+        let graph = build_graph_with_duplicate_function();
+        let flow = extract_flow(&graph, "publish_site_endpoint", None, 5);
+
+        assert_eq!(
+            flow.roots.len(),
+            1,
+            "duplicate Function nodes with the same (file, qualified_name) \
+             must collapse to a single root, got {:?}",
+            flow.roots
+        );
+        assert_eq!(flow.roots[0].name, "publish_site_endpoint");
+    }
+
+    /// Build a graph where two genuinely distinct functions share a name
+    /// across two files. Dedup must NOT collapse these — they are different
+    /// definitions and the caller needs to see both to disambiguate.
+    fn build_graph_with_cross_file_name_collision() -> CodeGraph {
+        let mut graph = CodeGraph::new();
+
+        let file_a = graph.graph.add_node(GraphNode::File {
+            file_id: FileId(1),
+            path: "src/users.py".to_string(),
+            language: Language::Python,
+        });
+        graph.file_nodes.insert(FileId(1), file_a);
+        graph
+            .path_to_file
+            .insert("src/users.py".to_string(), file_a);
+
+        let file_b = graph.graph.add_node(GraphNode::File {
+            file_id: FileId(2),
+            path: "src/admin.py".to_string(),
+            language: Language::Python,
+        });
+        graph.file_nodes.insert(FileId(2), file_b);
+        graph
+            .path_to_file
+            .insert("src/admin.py".to_string(), file_b);
+
+        let make_fn = |graph: &mut CodeGraph, file_id: FileId| -> petgraph::graph::NodeIndex {
+            graph.graph.add_node(GraphNode::Function {
+                file_id,
+                name: "get_profile".to_string(),
+                qualified_name: "get_profile".to_string(),
+                is_async: true,
+                is_handler: false,
+                http_method: None,
+                http_path: None,
+                decorators: vec![],
+                is_writer: false,
+                line: Some(10),
+                column: None,
+                request_schema: None,
+                response_schema: None,
+                raw_calls: Vec::<RawCall>::new(),
+            })
+        };
+
+        let fn_a = make_fn(&mut graph, FileId(1));
+        let fn_b = make_fn(&mut graph, FileId(2));
+        graph.graph.add_edge(file_a, fn_a, GraphEdgeKind::Contains);
+        graph.graph.add_edge(file_b, fn_b, GraphEdgeKind::Contains);
+        graph
+    }
+
+    #[test]
+    fn extract_flow_preserves_cross_file_name_collisions() {
+        // Two distinct definitions in different files must both surface so
+        // the caller can disambiguate. Dedup only collapses (file, name)
+        // duplicates within the SAME file.
+        let graph = build_graph_with_cross_file_name_collision();
+        let flow = extract_flow(&graph, "get_profile", None, 5);
+
+        assert_eq!(
+            flow.roots.len(),
+            2,
+            "distinct definitions across files must NOT be collapsed; \
+             dedup only applies within a single file, got {:?}",
+            flow.roots
+        );
     }
 }
