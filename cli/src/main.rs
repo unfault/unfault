@@ -202,6 +202,7 @@ enum Commands {
     ///   unfault telemetry "POST /api/orders"
     ///   unfault telemetry src/api/ --json
     ///   unfault telemetry src/api/payments/ --compact
+    ///   unfault telemetry src/api/payments/ --summary
     Telemetry {
         /// Target: directory, file, function, or METHOD /path route
         #[arg(value_name = "TARGET")]
@@ -215,6 +216,9 @@ enum Commands {
         /// Compact per-route inline layout instead of per-signal sections
         #[arg(long)]
         compact: bool,
+        /// Aggregate dashboard view (default for directories shows unobserved-regions catalog)
+        #[arg(long)]
+        summary: bool,
         /// Enable verbose output
         #[arg(long, short = 'v')]
         verbose: bool,
@@ -754,6 +758,7 @@ async fn run_command(command: Commands) -> i32 {
             workspace,
             json,
             compact,
+            summary,
             verbose,
             refresh_cache,
             offline,
@@ -763,6 +768,7 @@ async fn run_command(command: Commands) -> i32 {
                 workspace_path: workspace,
                 json,
                 compact,
+                summary,
                 verbose,
                 offline,
                 refresh_cache,

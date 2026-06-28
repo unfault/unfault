@@ -10,6 +10,17 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.48] — 2026-06-28
+
+### Changed
+
+- **New default output for `unfault telemetry <directory>`.**
+  The default view is now a catalog led by unobserved regions (metrics, logging,
+  db, http gaps) followed by a "What's already said" overview. The previous
+  aggregate dashboard is available via `--summary`.
+
+- **Renamed "Dark regions" to "Unobserved regions"** for a more neutral tone.
+
 ## [1.0.47] — 2026-06-28
 
 ### Fixed

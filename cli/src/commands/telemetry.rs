@@ -23,6 +23,7 @@ pub struct TelemetryArgs {
     pub workspace_path: Option<String>,
     pub json: bool,
     pub compact: bool,
+    pub summary: bool,
     pub verbose: bool,
     pub offline: bool,
     pub refresh_cache: bool,
@@ -78,8 +79,17 @@ pub async fn execute(args: TelemetryArgs) -> Result<i32> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else if args.compact {
         render_compact(&report);
+    } else if args.summary {
+        match target_kind {
+            TargetKind::Directory => render_summary(&report),
+            _ => match target_kind {
+                TargetKind::Route { .. } | TargetKind::Function => render_merged(&report),
+                _ => render_sections(&report),
+            },
+        }
     } else {
         match target_kind {
+            TargetKind::Directory => render_catalog(&report),
             TargetKind::Route { .. } | TargetKind::Function => render_merged(&report),
             _ => render_sections(&report),
         }
@@ -1049,6 +1059,312 @@ fn render_merged(report: &TelemetryReport) {
     println!();
     render_boundaries_section(report);
     render_legend();
+}
+
+// ── Rendering: catalog (new default for directories) ─────────────────────────
+
+fn render_catalog(report: &TelemetryReport) {
+    let total_files = report.logging.len();
+    let total_routes = report.routes.len();
+    let reads = report
+        .routes
+        .iter()
+        .filter(|r| !is_write_method(&r.method))
+        .count();
+    let writes = report
+        .routes
+        .iter()
+        .filter(|r| is_write_method(&r.method))
+        .count();
+
+    println!();
+    println!("Telemetry in {}", report.target.bright_white().bold());
+    println!(
+        "{} files, {} routes ({} read, {} write)",
+        total_files.to_string().yellow(),
+        total_routes.to_string().yellow(),
+        reads.to_string().yellow(),
+        writes.to_string().yellow(),
+    );
+    println!();
+
+    // ── Unobserved regions ──
+    println!("{}", "Unobserved regions".red().bold());
+
+    let metrics_absent = report.metrics.iter().filter(|m| !m.present).count();
+    let metrics_present = report.metrics.iter().filter(|m| m.present).count();
+    if metrics_absent == report.metrics.len() && metrics_absent > 0 {
+        println!(
+            "  Metrics absent across the whole area ({} of {} files emit any metric)",
+            metrics_present.to_string().yellow(),
+            report.metrics.len().to_string().yellow(),
+        );
+    }
+
+    let log_none_count = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::None_)
+        .count();
+    let log_total = report.logging.len();
+    if log_none_count > 0 {
+        println!(
+            "  Logging absent in {} of {} files",
+            log_none_count.to_string().yellow(),
+            log_total.to_string().yellow(),
+        );
+        let clusters = top_logging_clusters(&report.logging, 3);
+        if !clusters.is_empty() {
+            println!("    largest clusters: {}", clusters.join(", "));
+        }
+    }
+
+    let db_uncovered = report
+        .db_queries
+        .total
+        .saturating_sub(report.db_queries.covered);
+    if db_uncovered > 0 {
+        println!(
+            "  {} of {} db queries have no span",
+            db_uncovered.to_string().yellow(),
+            report.db_queries.total.to_string().yellow(),
+        );
+    }
+
+    let http_uncovered = report
+        .http_clients
+        .total
+        .saturating_sub(report.http_clients.covered);
+    if http_uncovered > 0 {
+        println!(
+            "  {} of {} http clients have no span",
+            http_uncovered.to_string().yellow(),
+            report.http_clients.total.to_string().yellow(),
+        );
+    }
+    println!();
+
+    // ── What's already said ──
+    println!("{}", "What's already said".green().bold());
+
+    let read_deep = report
+        .routes
+        .iter()
+        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
+        .count();
+    let read_shallow = report
+        .routes
+        .iter()
+        .filter(|r| !is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
+        .count();
+    let write_deep = report
+        .routes
+        .iter()
+        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Deep)
+        .count();
+    let write_shallow = report
+        .routes
+        .iter()
+        .filter(|r| is_write_method(&r.method) && r.trace_quality == TraceQuality::Shallow)
+        .count();
+
+    println!(
+        "  Spans      read routes: {} with explicit attributes, {} framework",
+        read_deep.to_string().green(),
+        read_shallow.to_string().yellow(),
+    );
+    println!(
+        "             write routes: {} with explicit attributes, {} framework auto",
+        write_deep.to_string().green(),
+        write_shallow.to_string().yellow(),
+    );
+
+    let log_structured = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Structured)
+        .count();
+    let log_plain = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Plain)
+        .count();
+    println!(
+        "  Logging    structured in {} file{}, plain in {}",
+        log_structured.to_string().green(),
+        if log_structured == 1 { "" } else { "s" },
+        log_plain.to_string().yellow(),
+    );
+
+    if metrics_present == 0 {
+        println!("  Metrics    none");
+    } else {
+        println!(
+            "  Metrics    {} file{} have metrics",
+            metrics_present.to_string().green(),
+            if metrics_present == 1 { "" } else { "s" },
+        );
+    }
+
+    println!(
+        "  Db         {} of {} calls have a span",
+        report.db_queries.covered.to_string().green(),
+        report.db_queries.total.to_string().yellow(),
+    );
+    println!(
+        "  Http       {} of {} calls have a span",
+        report.http_clients.covered.to_string().green(),
+        report.http_clients.total.to_string().yellow(),
+    );
+
+    println!();
+    println!(
+        "{}",
+        format!(
+            "To see the same as an aggregate dashboard: unfault telemetry {} --summary",
+            report.target
+        )
+        .bright_black()
+    );
+    println!();
+}
+
+// ── Rendering: summary (--summary flag for directories) ──────────────────────
+
+fn render_summary(report: &TelemetryReport) {
+    println!();
+    println!("Telemetry summary, {}", report.target.bright_white().bold());
+    println!();
+
+    let total = report.routes.len();
+    if total > 0 {
+        println!("  Traces by method");
+        let reads: Vec<&RouteTelemetry> = report
+            .routes
+            .iter()
+            .filter(|r| !is_write_method(&r.method))
+            .collect();
+        let writes: Vec<&RouteTelemetry> = report
+            .routes
+            .iter()
+            .filter(|r| is_write_method(&r.method))
+            .collect();
+        for (routes, label, methods) in [
+            (&reads, "read", ""),
+            (&writes, "write", "(POST/PUT/PATCH/DELETE)"),
+        ] {
+            let n = routes.len();
+            if n == 0 {
+                continue;
+            }
+            let deep = routes
+                .iter()
+                .filter(|r| r.trace_quality == TraceQuality::Deep)
+                .count();
+            let shallow = routes
+                .iter()
+                .filter(|r| r.trace_quality == TraceQuality::Shallow)
+                .count();
+            let unobserved = routes
+                .iter()
+                .filter(|r| r.trace_quality == TraceQuality::Unobserved)
+                .count();
+            println!(
+                "  {} ({:>3})   explicit attrs {:>3}   framework auto {:>3}   no span {:>3}   {}",
+                label,
+                n,
+                deep,
+                shallow,
+                unobserved,
+                methods.bright_black(),
+            );
+        }
+        println!();
+    }
+
+    let structured = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Structured)
+        .count();
+    let plain = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::Plain)
+        .count();
+    let none = report
+        .logging
+        .iter()
+        .filter(|l| l.quality == LoggingQuality::None_)
+        .count();
+
+    println!("  Logging");
+    if structured > 0 {
+        println!(
+            "  structured     {} file{}",
+            structured,
+            if structured == 1 { "" } else { "s" }
+        );
+    }
+    if plain > 0 {
+        println!(
+            "  plain          {} file{}",
+            plain,
+            if plain == 1 { "" } else { "s" }
+        );
+    }
+    if none > 0 {
+        println!(
+            "  none           {} file{}",
+            none,
+            if none == 1 { "" } else { "s" }
+        );
+    }
+    println!();
+
+    let has_metrics = report.metrics.iter().any(|m| m.present);
+    let absent_count = report.metrics.iter().filter(|m| !m.present).count();
+    println!("  Metrics");
+    if has_metrics {
+        let present_count = report.metrics.iter().filter(|m| m.present).count();
+        println!(
+            "  present        {} file{}",
+            present_count,
+            if present_count == 1 { "" } else { "s" }
+        );
+    }
+    if absent_count > 0 {
+        println!(
+            "  none           {} file{}",
+            absent_count,
+            if absent_count == 1 { "" } else { "s" }
+        );
+    }
+    println!();
+}
+
+// ── Helper: top directory clusters for absent logging ───────────────────────
+
+fn top_logging_clusters(logging: &[FileLogging], n: usize) -> Vec<String> {
+    let mut dir_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for entry in logging {
+        if entry.quality != LoggingQuality::None_ {
+            continue;
+        }
+        if let Some(parent) = std::path::Path::new(&entry.file).parent() {
+            let dir = parent.to_string_lossy().to_string();
+            if !dir.is_empty() {
+                *dir_counts.entry(dir).or_insert(0) += 1;
+            }
+        }
+    }
+    let mut sorted: Vec<(String, usize)> = dir_counts.into_iter().collect();
+    sorted.sort_by(|a, b| b.1.cmp(&a.1));
+    sorted
+        .into_iter()
+        .take(n)
+        .map(|(dir, count)| format!("{}/ ({} files)", dir, count))
+        .collect()
 }
 
 // ── Rendering: compact (--compact flag) ───────────────────────────────────────
