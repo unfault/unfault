@@ -10,6 +10,16 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.40] — 2026-06-28
+
+### Added
+
+- **Telemetry legend footer** — `unfault telemetry` now prints a compact
+  icon legend at the bottom of text output explaining trace quality levels
+  (● deep / ◐ shallow / ○ unobserved), logging quality (◉ structured /
+  ○ plain / · none), and signal kind icons (◉ trace / ≡ log / ⬡ metric /
+  ✖ error).
+
 ## [1.0.39] — 2026-06-28
 
 ### Fixed
