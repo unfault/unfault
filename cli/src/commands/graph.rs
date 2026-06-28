@@ -181,7 +181,7 @@ pub async fn execute_impact(args: ImpactArgs) -> Result<i32> {
         eprintln!("{} Analyzing impact of: {}", "→".cyan(), args.file_path);
     }
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
     if !args.verbose {
         if let Some(impact) = crate::session::query_cache::get_impact(
@@ -292,7 +292,7 @@ pub async fn execute_library(args: LibraryArgs) -> Result<i32> {
         eprintln!("{} Finding files using: {}", "→".cyan(), args.library_name);
     }
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     if !args.verbose {
         if let Some(deps) = crate::session::query_cache::get_library(
             &workspace_path,
@@ -381,7 +381,7 @@ pub async fn execute_deps(args: DepsArgs) -> Result<i32> {
         eprintln!("{} Finding dependencies of: {}", "→".cyan(), args.file_path);
     }
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     if !args.verbose {
         if let Some(deps) =
             crate::session::query_cache::get_deps(&workspace_path, &args.file_path, &commit_sha)
@@ -477,7 +477,7 @@ pub async fn execute_critical(args: CriticalArgs) -> Result<i32> {
         );
     }
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
     // Cache the centrality path (importance_score uses a different return type — skip).
     if !args.verbose && args.sort_by != "importance_score" {
@@ -604,7 +604,7 @@ pub async fn execute_stats(args: StatsArgs) -> Result<i32> {
         eprintln!("{} Building graph statistics...", "→".cyan());
     }
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     if !args.verbose {
         if let Some(overview) = crate::session::query_cache::get_stats(&workspace_path, &commit_sha)
         {
@@ -887,7 +887,7 @@ pub async fn execute_routes(args: RoutesArgs) -> Result<i32> {
         eprintln!("{} Building code graph...", "→".cyan());
     }
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     let cache_params = format!(
         "{}|{}",
         args.method.as_deref().unwrap_or(""),
@@ -1061,7 +1061,7 @@ pub async fn execute_coverage(args: CoverageArgs) -> Result<i32> {
     };
 
     // Query-cache key
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     let cache_params = format!(
         "{}|{}|{}|{}",
         args.target,
@@ -2810,7 +2810,7 @@ pub async fn execute_function_impact(args: FunctionImpactArgs) -> Result<i32> {
         eprintln!("{} Analyzing call flow of: {}", "→".cyan(), args.function);
     }
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     if !args.verbose {
         if let Some(flow) = crate::session::query_cache::get_function_impact(
             &workspace_path,
@@ -2987,7 +2987,7 @@ pub async fn execute_callers(args: CallersArgs) -> Result<i32> {
     // ── Query cache fast path ─────────────────────────────────────────────────
     // Skip when --debug is set (debug needs the live graph) or --verbose
     // (user wants timing info, so they want the full run).
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
     let cached_ctx = if !args.debug && !args.verbose {
         crate::session::query_cache::get_callers(
@@ -3195,7 +3195,7 @@ pub async fn execute_brief(args: BriefArgs) -> Result<i32> {
         None => std::env::current_dir()?,
     };
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
     if !args.verbose {
         if let Some(ctx) = crate::session::query_cache::get::<
@@ -3406,7 +3406,7 @@ pub async fn execute_path(args: PathArgs) -> Result<i32> {
         None => (None, args.to.clone()),
     };
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
     let cache_key = format!("{}|{}", args.from, args.to);
 
     if !args.verbose {
@@ -3530,7 +3530,7 @@ pub async fn execute_handlers(args: HandlersArgs) -> Result<i32> {
         None => std::env::current_dir()?,
     };
 
-    let commit_sha = crate::session::query_cache::current_commit_sha(&workspace_path);
+    let commit_sha = crate::session::query_cache::workspace_state_key(&workspace_path);
 
     if !args.verbose {
         if let Some(ctx) =

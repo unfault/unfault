@@ -10,6 +10,32 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.33] — 2026-06-28
+
+### Fixed
+
+- **Graph commands now use the cache whenever the workspace is clean.** All
+  `unfault graph` commands (`impact`, `library`, `deps`, `stats`, `critical`,
+  `callers`, `path`, `handlers`, `routes`, `coverage`, `brief`,
+  `function-impact`) previously keyed the query cache only on the git HEAD
+  commit SHA, so a cache hit was returned even when files had been edited,
+  staged, or left untracked — serving stale results. A new
+  `workspace_state_key()` function in `query_cache` replaces the bare
+  `current_commit_sha()` at every cache call site:
+
+  - **Clean workspace** (no dirty, staged, or untracked files) → key is the
+    bare commit SHA, identical to before. Full cache hits on every invocation
+    with no workspace changes.
+  - **Dirty workspace** → key is `{sha}+dirty:{xxh3(git status --porcelain)}`.
+    Each distinct working-tree state gets its own cache bucket; stale results
+    are never served. As soon as the workspace returns to clean the key reverts
+    to the bare SHA and cached clean results are reused immediately.
+
+  The `git status --porcelain` call is fast (milliseconds). The display-only
+  `current_commit_sha` call inside `execute_refresh` is unchanged.
+
+- Bumped: `unfault-core` 0.5.33, `unfault-analysis` 0.4.33, `unfault` 1.0.33.
+
 ## [1.0.32] — 2026-06-27
 
 ### Added

@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::SystemTime;
 
-use serde::{Serialize, de::DeserializeOwned};
+use serde::{de::DeserializeOwned, Serialize};
 use xxhash_rust::xxh3::xxh3_64;
 
 /// Bump when the encoding format changes incompatibly.
@@ -98,6 +98,59 @@ pub fn current_commit_sha(workspace_path: &Path) -> String {
     let _ = fs::write(&cache_file, &sha);
 
     sha
+}
+
+/// Return a workspace state key that incorporates both the HEAD commit SHA
+/// and any workspace dirtiness (modified, staged, or untracked files).
+///
+/// ## Cache behaviour
+///
+/// - **Clean workspace** (no dirty/staged/untracked files): returns the bare
+///   commit SHA, identical to `current_commit_sha`. Query cache entries remain
+///   valid across repeated invocations with no workspace changes — this is the
+///   fast path.
+/// - **Dirty workspace**: appends a compact hex hash of `git status --porcelain`
+///   output so that each distinct set of working-tree changes gets its own
+///   cache bucket. As soon as the workspace returns to a clean state the key
+///   reverts to the bare SHA and previously-cached clean results are reused.
+///
+/// The `git status --porcelain` call is cheap (milliseconds) and avoids the
+/// expensive graph rebuild for unchanged workspaces.
+pub fn workspace_state_key(workspace_path: &Path) -> String {
+    let commit_sha = current_commit_sha(workspace_path);
+
+    // Run `git status --porcelain` to detect any working-tree or index changes.
+    // This single command covers: modified tracked files, staged changes, and
+    // untracked files (the '?' lines). Ignored files are not included.
+    let status_output = Command::new("git")
+        .args(["status", "--porcelain"])
+        .current_dir(workspace_path)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                String::from_utf8(o.stdout).ok()
+            } else {
+                None
+            }
+        });
+
+    match status_output {
+        // No git or command failed — fall back to commit SHA only.
+        None => commit_sha,
+        Some(status) if status.trim().is_empty() => {
+            // Clean workspace: use bare commit SHA so cache entries are reused
+            // across all invocations until a commit or file change occurs.
+            commit_sha
+        }
+        Some(status) => {
+            // Dirty workspace: hash the porcelain output and append it.
+            // Each distinct working-tree state gets its own cache bucket,
+            // so stale results are never served.
+            let dirty_hash = xxh3_64(status.as_bytes());
+            format!("{commit_sha}+dirty:{dirty_hash:016x}")
+        }
+    }
 }
 
 /// Directory where query cache files are stored.
