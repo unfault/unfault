@@ -10,6 +10,21 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.42] — 2026-06-28
+
+### Fixed
+
+- **Graph cache no longer invalidates on source-file mtime churn.** The
+  graph-cache key introduced in 1.0.41 used path, size, and mtime metadata,
+  which meant touched/generated source files could force a graph rebuild for
+  every different graph query. Same-argument calls appeared fast only because
+  the query-result cache returned before graph loading.
+
+  Git workspaces now key the graph cache from `HEAD`, `git status`, and content
+  hashes of dirty source files (plus dirty `.gitignore` files). Clean repos key
+  off `HEAD`; dirty repos invalidate on content changes, not mtime-only touches.
+  Non-git workspaces keep the metadata fallback.
+
 ## [1.0.41] — 2026-06-28
 
 ### Fixed

@@ -155,13 +155,20 @@ fn save_graph_cache(
     Ok(())
 }
 
-/// Compute the graph cache key from discovered source file metadata.
+/// Compute the graph cache key for the current workspace state.
 ///
-/// This deliberately includes every discovered source file, not just files that
-/// successfully entered the semantics cache. That lets graph-only commands load
-/// the cached graph without first deserializing every semantics entry, while
-/// still invalidating when files are added, removed, renamed, or modified.
+/// For git workspaces this avoids mtimes entirely: clean repos key off HEAD,
+/// while dirty repos include `git status` plus content hashes for dirty source
+/// files. This keeps the graph cache stable when files are merely touched, but
+/// invalidates when tracked or untracked source content changes.
+///
+/// For non-git workspaces we fall back to path/size/mtime metadata so graph-only
+/// commands can still avoid deserializing every semantics entry on cache hits.
 fn graph_cache_key_from_files(workspace_path: &Path, files: &[PathBuf]) -> u64 {
+    if let Some(hash) = graph_cache_key_from_git_state(workspace_path) {
+        return hash;
+    }
+
     let mut entries: Vec<(String, u64, u128)> = files
         .iter()
         .map(|path| {
@@ -200,6 +207,99 @@ fn graph_cache_key_from_files(workspace_path: &Path, files: &[PathBuf]) -> u64 {
     }
 
     xxhash_rust::xxh3::xxh3_64(&bytes)
+}
+
+fn graph_cache_key_from_git_state(workspace_path: &Path) -> Option<u64> {
+    let head = std::process::Command::new("git")
+        .args(["rev-parse", "--verify", "HEAD"])
+        .current_dir(workspace_path)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(o.stdout)
+            } else {
+                None
+            }
+        })?;
+
+    let status = std::process::Command::new("git")
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+        .current_dir(workspace_path)
+        .output()
+        .ok()
+        .and_then(|o| {
+            if o.status.success() {
+                Some(o.stdout)
+            } else {
+                None
+            }
+        })?;
+
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"unfault-graph-cache-git-v1\0");
+    bytes.extend_from_slice(&head);
+    bytes.push(0);
+    bytes.extend_from_slice(&status);
+    bytes.push(0);
+
+    let mut dirty_source_hashes = Vec::new();
+    for path in dirty_paths_from_porcelain_z(&status) {
+        let full_path = workspace_path.join(&path);
+        let is_source = detect_language(&full_path).is_some() && !is_test_file(&full_path);
+        let affects_discovery = full_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name == ".gitignore")
+            .unwrap_or(false);
+
+        if !is_source && !affects_discovery {
+            continue;
+        }
+
+        let content_hash = std::fs::read(&full_path)
+            .ok()
+            .map(|content| xxhash_rust::xxh3::xxh3_64(&content));
+        dirty_source_hashes.push((path, content_hash));
+    }
+
+    dirty_source_hashes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    for (path, content_hash) in dirty_source_hashes {
+        bytes.extend_from_slice(path.as_bytes());
+        bytes.push(0);
+        match content_hash {
+            Some(hash) => bytes.extend_from_slice(&hash.to_le_bytes()),
+            None => bytes.extend_from_slice(&0u64.to_le_bytes()),
+        }
+    }
+
+    Some(xxhash_rust::xxh3::xxh3_64(&bytes))
+}
+
+fn dirty_paths_from_porcelain_z(status: &[u8]) -> Vec<String> {
+    let mut paths = Vec::new();
+    let mut parts = status.split(|b| *b == 0).filter(|part| !part.is_empty());
+
+    while let Some(record) = parts.next() {
+        if record.len() < 4 {
+            continue;
+        }
+
+        let status_code = &record[..2];
+        let path = String::from_utf8_lossy(&record[3..]).to_string();
+        paths.push(path);
+
+        // Rename/copy records in porcelain -z are `XY new\0old\0`.
+        if status_code[0] == b'R'
+            || status_code[1] == b'R'
+            || status_code[0] == b'C'
+            || status_code[1] == b'C'
+        {
+            let _ = parts.next();
+        }
+    }
+
+    paths
 }
 
 /// Load the cached code graph without reading per-file semantics entries.
