@@ -10,6 +10,15 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.45] — 2026-06-28
+
+### Fixed
+
+- **Warm graph-cache checks now show progress without implying a rebuild.**
+  Non-verbose graph commands display `Loading graph cache...` while checking
+  `.unfault/cache/graph.msgpack`, then switch to `Building graph...` only when
+  the shared graph cache misses.
+
 ## [1.0.44] — 2026-06-28
 
 ### Fixed
