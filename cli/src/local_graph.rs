@@ -37,7 +37,7 @@ pub fn build_analysis_graph(
     workspace_path: &std::path::Path,
     verbose: bool,
 ) -> Result<unfault_analysis::graph::CodeGraph> {
-    use crate::session::ir_builder::build_ir_cached;
+    use crate::session::ir_builder::{build_ir_cached, try_load_code_graph_only};
 
     if verbose {
         eprintln!(
@@ -45,6 +45,23 @@ pub fn build_analysis_graph(
             "→".cyan(),
             workspace_path.display()
         );
+    }
+
+    if let Some(graph) =
+        try_load_code_graph_only(workspace_path, verbose).context("Failed to check graph cache")?
+    {
+        let graph = unfault_analysis::graph::CodeGraph::from(graph);
+
+        if verbose {
+            eprintln!(
+                "{} Graph: {} files, {} functions",
+                "✓".green(),
+                graph.file_nodes.len(),
+                graph.function_nodes.len()
+            );
+        }
+
+        return Ok(graph);
     }
 
     // Build IR (parses files, builds semantics, constructs graph)

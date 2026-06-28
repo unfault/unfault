@@ -10,6 +10,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.41] — 2026-06-28
+
+### Fixed
+
+- **Graph commands now load the graph cache before reading per-file semantics.**
+  `unfault graph stats`, `impact`, `deps`, and other graph-only commands were
+  still calling `build_ir_cached`, which deserialized semantics for every source
+  file before trying the graph cache. On large repos this preserved most of the
+  latency even when `graph.msgpack` was valid.
+
+  Graph-only commands now fingerprint discovered source files using stable path,
+  size, and mtime metadata, try `.unfault/cache/graph.msgpack` immediately, and
+  only fall back to full IR/semantics loading on a graph cache miss. This keeps
+  persistent parse misses cacheable while still invalidating on added, removed,
+  renamed, or modified files.
+
 ## [1.0.40] — 2026-06-28
 
 ### Added

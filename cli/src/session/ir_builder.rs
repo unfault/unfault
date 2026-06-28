@@ -155,6 +155,87 @@ fn save_graph_cache(
     Ok(())
 }
 
+/// Compute the graph cache key from discovered source file metadata.
+///
+/// This deliberately includes every discovered source file, not just files that
+/// successfully entered the semantics cache. That lets graph-only commands load
+/// the cached graph without first deserializing every semantics entry, while
+/// still invalidating when files are added, removed, renamed, or modified.
+fn graph_cache_key_from_files(workspace_path: &Path, files: &[PathBuf]) -> u64 {
+    let mut entries: Vec<(String, u64, u128)> = files
+        .iter()
+        .map(|path| {
+            let relative_path = path
+                .strip_prefix(workspace_path)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+
+            let (file_size, mtime_nanos) = std::fs::metadata(path)
+                .ok()
+                .map(|meta| {
+                    let mtime = meta
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map(|d| d.as_nanos())
+                        .unwrap_or(0);
+                    (meta.len(), mtime)
+                })
+                .unwrap_or((0, 0));
+
+            (relative_path, file_size, mtime_nanos)
+        })
+        .collect();
+
+    entries.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+    let mut bytes = Vec::with_capacity(entries.len() * 48);
+    bytes.extend_from_slice(b"unfault-graph-cache-metadata-v1\0");
+    for (relative_path, file_size, mtime_nanos) in entries {
+        bytes.extend_from_slice(relative_path.as_bytes());
+        bytes.push(0);
+        bytes.extend_from_slice(&file_size.to_le_bytes());
+        bytes.extend_from_slice(&mtime_nanos.to_le_bytes());
+    }
+
+    xxhash_rust::xxh3::xxh3_64(&bytes)
+}
+
+/// Load the cached code graph without reading per-file semantics entries.
+///
+/// Used by graph-only commands. On a graph cache miss, callers should fall back
+/// to `build_ir_cached`, which rebuilds semantics and refreshes the graph cache.
+pub fn try_load_code_graph_only(
+    workspace_path: &Path,
+    verbose: bool,
+) -> Result<Option<unfault_core::graph::CodeGraph>> {
+    let discover_start = Instant::now();
+    let files = discover_source_files(workspace_path)?;
+    let discover_ms = discover_start.elapsed().as_millis();
+
+    let aggregate_hash = graph_cache_key_from_files(workspace_path, &files);
+    let graph_cache_path = workspace_path
+        .join(".unfault")
+        .join("cache")
+        .join("graph.msgpack");
+
+    if verbose {
+        eprintln!(
+            "{} Graph-only cache check: {} files, discovery+fingerprint: {}ms",
+            "TIMING".yellow(),
+            files.len(),
+            discover_ms
+        );
+    }
+
+    Ok(try_load_graph_cache(
+        &graph_cache_path,
+        aggregate_hash,
+        verbose,
+    ))
+}
+
 /// Build an Intermediate Representation from files in a directory.
 ///
 /// This function:
@@ -640,7 +721,6 @@ pub fn build_ir_cached(
 
     let mut semantics_entries: Vec<(FileId, Arc<SourceSemantics>)> = Vec::new();
     let mut all_semantics: Vec<SourceSemantics> = Vec::new();
-    let mut content_hashes: Vec<u64>;
 
     for result in results {
         if let Some((file_id, semantics)) = result {
@@ -665,47 +745,23 @@ pub fn build_ir_cached(
 
     // Build or load the code graph.
     // Attempt to load a pre-built graph from disk to avoid rebuilding petgraph
-    // (~1.3s on large workspaces). The aggregate hash is computed only over
-    // files that successfully entered the semantics cache, so persistent
-    // parse-time misses do not affect the key and the graph cache still loads.
+    // (~1.3s on large workspaces). The graph key is computed from metadata for
+    // every discovered source file, so persistent parse-time misses still get a
+    // stable key while added/changed/deleted files invalidate the cache.
     let graph_start = Instant::now();
     let graph_cache_path = workspace_path
         .join(".unfault")
         .join("cache")
         .join("graph.msgpack");
 
-    // Compute aggregate hash over sorted content hashes to key the graph cache.
-    {
-        let cache_guard = cache.lock().unwrap();
-        content_hashes = files
-            .iter()
-            .filter_map(|f| {
-                let rel = f
-                    .strip_prefix(workspace_path)
-                    .unwrap_or(f)
-                    .to_string_lossy()
-                    .to_string();
-                let path_hash = xxhash_rust::xxh3::xxh3_64(rel.as_bytes());
-                cache_guard.get_stored_content_hash(path_hash)
-            })
-            .collect();
-    }
-    content_hashes.sort_unstable();
-    let aggregate_hash = {
-        let bytes: Vec<u8> = content_hashes
-            .iter()
-            .flat_map(|h| h.to_le_bytes())
-            .collect();
-        xxhash_rust::xxh3::xxh3_64(&bytes)
-    };
+    let aggregate_hash = graph_cache_key_from_files(workspace_path, &files);
 
     let code_graph = try_load_graph_cache(&graph_cache_path, aggregate_hash, verbose)
         .unwrap_or_else(|| build_code_graph(&semantics_entries));
 
-    // Always save the graph cache after building so the next run can skip
-    // petgraph reconstruction even if this run had semantics cache misses.
-    // The aggregate hash guarantees correctness: if any file content changed
-    // between runs the hash won't match and the cache will be rebuilt.
+    // Always save the graph cache after building so graph-only commands can
+    // skip both semantics deserialization and petgraph reconstruction on the
+    // next unchanged run.
     let _ = save_graph_cache(&graph_cache_path, aggregate_hash, &code_graph, verbose);
 
     let graph_ms = graph_start.elapsed().as_millis();
