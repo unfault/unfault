@@ -10,6 +10,59 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+## [1.0.57] — 2026-06-28
+
+### Added
+
+- **`unfault graph critical-unobserved <DIR>`** — flat ranked list of
+  every unobserved db / http / remote boundary in the target directory,
+  sorted by how many distinct HTTP routes have that boundary in their
+  unobserved call tree (`route_count` descending).
+
+  Replaces the N-call `function-impact` ranking workflow used on
+  hopper-backend: instead of calling `function-impact` once per
+  candidate and comparing path counts manually, a single call returns
+  a ready-to-act ranked list.
+
+  Flags:
+  - `--role db|http|remote|all` (default: `all`) — filter by boundary
+    category
+  - `--limit N` (default: 20) — cap the output length
+  - `--json` — machine-readable array of `CriticalUnobservedEntry`
+
+  JSON shape per entry:
+  ```jsonc
+  {
+    "name": "db_session.commit",
+    "location": { "file": "server/hosted/router.py", "line": 279 },
+    "role": "database",
+    "statement_kind": "commit",
+    "route_count": 13,
+    "routes": [
+      { "method": "POST", "path": "/sites/{site_id}/publish", "handler": "publish_site_endpoint" },
+      ...
+    ]
+  }
+  ```
+
+  The ranking key is `route_count` (how many routes expose this
+  boundary without a span), which is the same signal the user was
+  computing manually by calling `function-impact` per candidate and
+  comparing `paths.len()`. Ties are broken by `name` ascending for
+  stable output.
+
+  `statement_kind` is populated for database boundaries using the same
+  classifier as `BoundaryCallSite.statement_kind`.
+
+  Human output: coloured ranked table showing name, route count, role,
+  statement_kind, location, and the exposing routes.
+
+  Implementation: `rank_unobserved_boundaries` in
+  `cli/src/commands/telemetry.rs` is a pure function (no graph
+  required) so it is directly unit-testable. 7 new regression tests
+  cover ranking order, route deduplication, role filtering, statement
+  kind inference, tiebreaking, and route sort stability.
+
 ## [1.0.56] — 2026-06-28
 
 Substrate-trust release. Four fixes targeted at the rough edges flagged

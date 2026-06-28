@@ -98,6 +98,263 @@ pub async fn execute(args: TelemetryArgs) -> Result<i32> {
     Ok(EXIT_SUCCESS)
 }
 
+// ── critical-unobserved ───────────────────────────────────────────────────────
+
+/// Args for `unfault graph critical-unobserved`.
+pub struct CriticalUnobservedArgs {
+    /// Directory to analyse (same as `TelemetryArgs::target` for directories).
+    pub dir: String,
+    pub workspace_path: Option<String>,
+    /// Role filter: "db", "http", "remote", or "all".
+    pub role: String,
+    /// Maximum entries to return.
+    pub limit: usize,
+    pub json: bool,
+    pub verbose: bool,
+}
+
+/// A single ranked entry in the critical-unobserved report.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CriticalUnobservedEntry {
+    /// Normalised callee name (e.g. `"db_session.commit"`).
+    pub name: String,
+    pub location: Location,
+    /// Boundary role: `"database"`, `"http"`, or `"remote"`.
+    pub role: String,
+    /// SQL / HTTP verb, when inferrable from the call expression.
+    pub statement_kind: Option<StatementKind>,
+    /// Number of distinct routes that have this boundary unobserved.
+    pub route_count: usize,
+    /// The routes themselves, sorted by method + path.
+    pub routes: Vec<UnobservedRouteRef>,
+}
+
+/// A route reference inside a `CriticalUnobservedEntry`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct UnobservedRouteRef {
+    pub method: String,
+    pub path: String,
+    pub handler: String,
+}
+
+/// Core ranking logic for `critical-unobserved`, extracted for testability.
+///
+/// Groups every unobserved callee across all routes in `report` by
+/// `(name, location.file)`, deduplicates by route, and returns the list
+/// sorted by `route_count` descending (ties broken by name ascending).
+///
+/// `role_filter`: one of `"all"`, `"db"` / `"database"`, `"http"`, `"remote"`.
+pub fn rank_unobserved_boundaries(
+    report: &TelemetryReport,
+    role_filter: &str,
+) -> Vec<CriticalUnobservedEntry> {
+    let include_db = role_filter == "all" || role_filter == "db" || role_filter == "database";
+    let include_http = role_filter == "all" || role_filter == "http";
+    let include_remote = role_filter == "all" || role_filter == "remote";
+
+    // Key: (name, location_file) → (entry, set of route_keys already counted)
+    let mut index: std::collections::HashMap<
+        (String, String),
+        (CriticalUnobservedEntry, std::collections::HashSet<String>),
+    > = std::collections::HashMap::new();
+
+    for route in &report.routes {
+        let route_key = if route.method.is_empty() {
+            route.path.clone()
+        } else {
+            format!("{} {}", route.method, route.path)
+        };
+        let route_ref = UnobservedRouteRef {
+            method: route.method.clone(),
+            path: route.path.clone(),
+            handler: route.handler.clone(),
+        };
+
+        let by_role = &route.unobserved.by_role;
+        let mut candidates: Vec<(&super::graph::UnobservedCallee, &str)> = Vec::new();
+        if include_db {
+            candidates.extend(by_role.database.iter().map(|c| (c, "database")));
+        }
+        if include_http {
+            candidates.extend(by_role.http.iter().map(|c| (c, "http")));
+        }
+        if include_remote {
+            candidates.extend(by_role.remote.iter().map(|c| (c, "remote")));
+        }
+
+        for (callee, role_str) in candidates {
+            let key = (callee.name.clone(), callee.location.file.clone());
+
+            let (entry, seen_routes) = index.entry(key).or_insert_with(|| {
+                let stmt_kind = if role_str == "database" {
+                    Some(infer_statement_kind(&callee.name))
+                } else {
+                    None
+                };
+                (
+                    CriticalUnobservedEntry {
+                        name: callee.name.clone(),
+                        location: callee.location.clone(),
+                        role: role_str.to_string(),
+                        statement_kind: stmt_kind,
+                        route_count: 0,
+                        routes: Vec::new(),
+                    },
+                    std::collections::HashSet::new(),
+                )
+            });
+
+            if seen_routes.insert(route_key.clone()) {
+                entry.route_count += 1;
+                entry.routes.push(route_ref.clone());
+            }
+        }
+    }
+
+    let mut ranked: Vec<CriticalUnobservedEntry> = index
+        .into_values()
+        .map(|(mut e, _)| {
+            e.routes
+                .sort_by(|a, b| a.method.cmp(&b.method).then(a.path.cmp(&b.path)));
+            e
+        })
+        .collect();
+
+    ranked.sort_by(|a, b| b.route_count.cmp(&a.route_count).then(a.name.cmp(&b.name)));
+    ranked
+}
+
+/// Execute `unfault graph critical-unobserved <DIR>`.
+///
+/// Aggregates every unobserved db / http / remote boundary across all routes
+/// in the target directory, then ranks them by how many distinct HTTP routes
+/// have each boundary in their unobserved call tree. One call replaces the
+/// N-call `function-impact` ranking workflow.
+pub async fn execute_critical_unobserved(args: CriticalUnobservedArgs) -> Result<i32> {
+    let workspace_path = match &args.workspace_path {
+        Some(p) => std::path::PathBuf::from(p),
+        None => std::env::current_dir()?,
+    };
+
+    if args.verbose {
+        eprintln!("{} Building code graph...", "→".cyan());
+    }
+
+    let graph = match build_graph_with_spinner(&workspace_path, args.verbose, args.json) {
+        Ok(g) => g,
+        Err(e) => {
+            eprintln!(
+                "{} Failed to build code graph: {}",
+                "Error:".red().bold(),
+                e
+            );
+            return Ok(EXIT_ERROR);
+        }
+    };
+
+    let dir = args.dir.trim();
+    let report = match analyze_directory(&graph, dir, args.verbose) {
+        Some(r) => r,
+        None => {
+            // No routes in the target directory. JSON callers get an empty
+            // array (valid substrate); human callers get an informative message.
+            if args.json {
+                println!("[]");
+            } else {
+                println!("No routes found in '{}'.", dir);
+            }
+            return Ok(EXIT_SUCCESS);
+        }
+    };
+
+    // Determine which boundary categories to include.
+    let role_lower = args.role.to_lowercase();
+
+    let mut ranked = rank_unobserved_boundaries(&report, &role_lower);
+    ranked.truncate(args.limit);
+
+    if args.json {
+        println!("{}", serde_json::to_string_pretty(&ranked)?);
+        return Ok(EXIT_SUCCESS);
+    }
+
+    // ── Human renderer ────────────────────────────────────────────────────────
+    if ranked.is_empty() {
+        println!("No unobserved boundaries found in '{}'.", dir);
+        return Ok(EXIT_SUCCESS);
+    }
+
+    println!();
+    println!(
+        "  {}  {}",
+        "Critical unobserved boundaries".bold(),
+        format!("({} shown, ranked by route exposure)", ranked.len()).bright_black()
+    );
+    println!();
+
+    for (i, entry) in ranked.iter().enumerate() {
+        let rank_str = format!("{}.", i + 1);
+        let loc = if entry.location.line.is_some() {
+            format!("{}:{}", entry.location.file, entry.location.line.unwrap())
+        } else {
+            entry.location.file.clone()
+        };
+
+        let role_badge = match entry.role.as_str() {
+            "database" => "db".cyan().bold(),
+            "http" => "http".yellow().bold(),
+            "remote" => "remote".magenta().bold(),
+            _ => entry.role.as_str().normal(),
+        };
+
+        let stmt = entry
+            .statement_kind
+            .as_ref()
+            .map(|s| {
+                let label = serde_json::to_value(s)
+                    .ok()
+                    .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    .unwrap_or_default();
+                format!("  {}", label.bright_black())
+            })
+            .unwrap_or_default();
+
+        println!(
+            "  {} {} {}  {}{}",
+            rank_str.bright_black(),
+            entry.name.bright_white().bold(),
+            format!(
+                "({} route{})",
+                entry.route_count,
+                if entry.route_count == 1 { "" } else { "s" }
+            )
+            .bright_black(),
+            role_badge,
+            stmt,
+        );
+        println!("     {}", loc.bright_black());
+
+        for r in &entry.routes {
+            let method_colored = match r.method.as_str() {
+                "GET" => r.method.green(),
+                "POST" => r.method.yellow(),
+                "PUT" | "PATCH" => r.method.cyan(),
+                "DELETE" => r.method.red(),
+                _ => r.method.normal(),
+            };
+            println!(
+                "     {} {}  {}",
+                method_colored,
+                r.path.bright_white(),
+                format!("→ {}", r.handler).bright_black()
+            );
+        }
+        println!();
+    }
+
+    Ok(EXIT_SUCCESS)
+}
+
 // ── Target resolution ─────────────────────────────────────────────────────────
 
 enum TargetKind {
@@ -2211,6 +2468,223 @@ mod tests {
             infer_statement_kind("DB_Session.Get"),
             StatementKind::Select
         );
+    }
+
+    // ── rank_unobserved_boundaries ───────────────────────────────────────────
+    //
+    // Unit tests for the ranking / aggregation logic.
+
+    use crate::commands::graph::{
+        Location, NodeRole, UnobservedByRole, UnobservedCallee, UnobservedPaths,
+    };
+
+    fn make_unobserved_callee(name: &str, file: &str, role_tag: &str) -> UnobservedCallee {
+        UnobservedCallee {
+            name: name.to_string(),
+            location: Location::new(file, None),
+            role: match role_tag {
+                "database" => NodeRole::Database,
+                "http" => NodeRole::HttpClient,
+                "remote" => NodeRole::RemoteCall {
+                    service: "svc".to_string(),
+                },
+                _ => NodeRole::Logic,
+            },
+            depth: 1,
+            path: vec![],
+        }
+    }
+
+    fn make_route(method: &str, path: &str, handler: &str, db: Vec<&str>) -> RouteTelemetry {
+        let database: Vec<UnobservedCallee> = db
+            .iter()
+            .map(|name| make_unobserved_callee(name, "app.py", "database"))
+            .collect();
+        RouteTelemetry {
+            method: method.to_string(),
+            path: path.to_string(),
+            handler: handler.to_string(),
+            location: Location::new("app.py", None),
+            anchor_kind: AnchorKind::FrameworkAuto,
+            anchor_attributes: vec![],
+            logs: RouteLogs {
+                kind: LoggingQuality::None_,
+                library: None,
+            },
+            metrics: RouteMetrics {
+                present: false,
+                library: None,
+            },
+            total_callees: 0,
+            instrumented_callees: 0,
+            callees: vec![],
+            unobserved: UnobservedPaths {
+                total: database.len(),
+                anchor_unobserved: !database.is_empty(),
+                by_role: UnobservedByRole {
+                    database,
+                    http: vec![],
+                    remote: vec![],
+                    logic: vec![],
+                },
+                deepest: vec![],
+            },
+        }
+    }
+
+    fn empty_report(routes: Vec<RouteTelemetry>) -> TelemetryReport {
+        TelemetryReport {
+            target: ".".to_string(),
+            target_kind: "directory".to_string(),
+            corpus: Corpus {
+                files: 1,
+                routes_total: routes.len(),
+                routes_read: 0,
+                routes_write: 0,
+            },
+            routes,
+            logging: LoggingSection {
+                files: vec![],
+                clusters: vec![],
+            },
+            metrics: MetricsSection {
+                files: vec![],
+                clusters: vec![],
+            },
+            boundaries: Boundaries {
+                db: vec![],
+                http: vec![],
+                remote: vec![],
+            },
+        }
+    }
+
+    #[test]
+    fn rank_unobserved_sorts_by_route_count_descending() {
+        // commit appears in 3 routes, get in 2 routes, execute in 1 route.
+        let report = empty_report(vec![
+            make_route(
+                "POST",
+                "/a",
+                "h_a",
+                vec!["db_session.commit", "db_session.get"],
+            ),
+            make_route(
+                "POST",
+                "/b",
+                "h_b",
+                vec!["db_session.commit", "db_session.get", "db_session.execute"],
+            ),
+            make_route("POST", "/c", "h_c", vec!["db_session.commit"]),
+        ]);
+
+        let ranked = rank_unobserved_boundaries(&report, "all");
+
+        assert_eq!(ranked[0].name, "db_session.commit");
+        assert_eq!(ranked[0].route_count, 3);
+        assert_eq!(ranked[1].name, "db_session.get");
+        assert_eq!(ranked[1].route_count, 2);
+        assert_eq!(ranked[2].name, "db_session.execute");
+        assert_eq!(ranked[2].route_count, 1);
+    }
+
+    #[test]
+    fn rank_unobserved_deduplicates_same_route() {
+        // Same boundary called twice in different callees of the same route
+        // must count as ONE route exposure, not two.
+        let report = empty_report(vec![make_route(
+            "POST",
+            "/a",
+            "h_a",
+            vec!["db_session.commit", "db_session.commit"],
+        )]);
+
+        let ranked = rank_unobserved_boundaries(&report, "all");
+
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].route_count, 1, "same route must not double-count");
+    }
+
+    #[test]
+    fn rank_unobserved_role_filter_db_only() {
+        // Route has one db and one http boundary. When filtering to "db",
+        // only the db one must appear.
+        let db_callee = make_unobserved_callee("db_session.commit", "app.py", "database");
+        let http_callee = make_unobserved_callee("requests.post", "app.py", "http");
+        let mut route = make_route("POST", "/x", "h", vec![]);
+        route.unobserved.by_role.database = vec![db_callee];
+        route.unobserved.by_role.http = vec![http_callee];
+        let report = empty_report(vec![route]);
+
+        let db_ranked = rank_unobserved_boundaries(&report, "db");
+        assert_eq!(db_ranked.len(), 1);
+        assert_eq!(db_ranked[0].role, "database");
+
+        let http_ranked = rank_unobserved_boundaries(&report, "http");
+        assert_eq!(http_ranked.len(), 1);
+        assert_eq!(http_ranked[0].role, "http");
+
+        let all_ranked = rank_unobserved_boundaries(&report, "all");
+        assert_eq!(all_ranked.len(), 2);
+    }
+
+    #[test]
+    fn rank_unobserved_empty_routes_returns_empty() {
+        let report = empty_report(vec![]);
+        let ranked = rank_unobserved_boundaries(&report, "all");
+        assert!(ranked.is_empty());
+    }
+
+    #[test]
+    fn rank_unobserved_db_boundaries_get_statement_kind() {
+        let report = empty_report(vec![make_route(
+            "POST",
+            "/a",
+            "h",
+            vec!["db_session.commit", "db_session.get"],
+        )]);
+
+        let ranked = rank_unobserved_boundaries(&report, "db");
+
+        let commit = ranked
+            .iter()
+            .find(|e| e.name == "db_session.commit")
+            .unwrap();
+        assert_eq!(commit.statement_kind, Some(StatementKind::Commit));
+
+        let get = ranked.iter().find(|e| e.name == "db_session.get").unwrap();
+        assert_eq!(get.statement_kind, Some(StatementKind::Select));
+    }
+
+    #[test]
+    fn rank_unobserved_tie_broken_by_name() {
+        // Two boundaries each appearing in 1 route: alphabetical tiebreak.
+        let report = empty_report(vec![make_route(
+            "POST",
+            "/a",
+            "h",
+            vec!["db_session.zebra", "db_session.alpha"],
+        )]);
+
+        let ranked = rank_unobserved_boundaries(&report, "all");
+        assert_eq!(ranked[0].name, "db_session.alpha");
+        assert_eq!(ranked[1].name, "db_session.zebra");
+    }
+
+    #[test]
+    fn rank_unobserved_routes_sorted_in_each_entry() {
+        // Routes within an entry must be sorted method+path for stable JSON.
+        let report = empty_report(vec![
+            make_route("POST", "/z", "h_z", vec!["db_session.commit"]),
+            make_route("GET", "/a", "h_a", vec!["db_session.commit"]),
+        ]);
+
+        let ranked = rank_unobserved_boundaries(&report, "all");
+        assert_eq!(ranked[0].name, "db_session.commit");
+        assert_eq!(ranked[0].route_count, 2);
+        // Routes sorted: GET /a before POST /z
+        assert_eq!(ranked[0].routes[0].method, "GET");
+        assert_eq!(ranked[0].routes[1].method, "POST");
     }
 
     // ── collect_nodes_with_path ──────────────────────────────────────────────

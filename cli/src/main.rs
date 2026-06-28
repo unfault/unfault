@@ -572,6 +572,43 @@ enum GraphCommands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Rank all unobserved boundaries by how many routes reach them
+    ///
+    /// Aggregates every unobserved db / http / remote boundary across all
+    /// routes in the target directory and ranks them by route_count — the
+    /// number of distinct HTTP routes that have this boundary in their
+    /// unobserved call tree.
+    ///
+    /// This replaces the N-call `function-impact` ranking workflow: instead
+    /// of calling function-impact once per candidate and comparing path
+    /// counts manually, a single call here gives a flat ranked list ready
+    /// to act on.
+    ///
+    /// Examples:
+    ///   unfault graph critical-unobserved .
+    ///   unfault graph critical-unobserved src/api --role db
+    ///   unfault graph critical-unobserved . --json
+    ///   unfault graph critical-unobserved . --limit 5
+    CriticalUnobserved {
+        /// Directory to analyse (defaults to current directory)
+        #[arg(value_name = "DIR", default_value = ".")]
+        dir: String,
+        /// Workspace path (defaults to current directory)
+        #[arg(long, short = 'w', value_name = "PATH")]
+        workspace: Option<String>,
+        /// Filter by role: db, http, remote, or all (default: all)
+        #[arg(long, value_name = "ROLE", default_value = "all")]
+        role: String,
+        /// Maximum number of entries to show (default: 20)
+        #[arg(long, short = 'n', value_name = "COUNT", default_value = "20")]
+        limit: usize,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Enable verbose output
+        #[arg(long, short = 'v')]
+        verbose: bool,
+    },
 }
 
 /// Centrality sort metric options
@@ -1297,6 +1334,30 @@ async fn run_graph_command(command: GraphCommands) -> i32 {
                 Ok(exit_code) => exit_code,
                 Err(e) => {
                     eprintln!("Graph refresh error: {}", e);
+                    EXIT_ERROR
+                }
+            }
+        }
+        GraphCommands::CriticalUnobserved {
+            dir,
+            workspace,
+            role,
+            limit,
+            json,
+            verbose,
+        } => {
+            let args = commands::telemetry::CriticalUnobservedArgs {
+                dir,
+                workspace_path: workspace,
+                role,
+                limit,
+                json,
+                verbose,
+            };
+            match commands::telemetry::execute_critical_unobserved(args).await {
+                Ok(exit_code) => exit_code,
+                Err(e) => {
+                    eprintln!("Graph critical-unobserved error: {}", e);
                     EXIT_ERROR
                 }
             }
