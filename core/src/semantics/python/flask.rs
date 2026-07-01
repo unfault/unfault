@@ -7,6 +7,10 @@ use crate::parse::ast::{AstLocation, ParsedFile};
 pub struct FlaskFileSummary {
     pub apps: Vec<FlaskApp>,
     pub blueprints: Vec<FlaskBlueprint>,
+    /// All `app.register_blueprint(bp, url_prefix=...)` call sites found in
+    /// this file.  Used together with `blueprints` to resolve the effective
+    /// mount prefix for each blueprint's routes.
+    pub blueprint_registrations: Vec<BlueprintRegistration>,
     pub routes: Vec<FlaskRoute>,
     pub error_handlers: Vec<FlaskErrorHandler>,
     /// Config key/value pairs collected from both module-level assignments
@@ -25,6 +29,28 @@ pub struct FlaskApp {
 pub struct FlaskBlueprint {
     pub var_name: String,
     pub import_name: String,
+    /// `url_prefix` from `Blueprint('name', __name__, url_prefix='/foo')`.
+    /// `None` when no prefix is given in the constructor.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url_prefix: Option<String>,
+    pub location: AstLocation,
+}
+
+/// A `app.register_blueprint(bp, url_prefix='/foo')` call site.
+///
+/// Captures the blueprint variable name and the optional `url_prefix` kwarg
+/// passed at registration time.  When both the constructor prefix and the
+/// registration prefix are present Flask uses the registration value, so
+/// `BlueprintRegistration.url_prefix` wins over `FlaskBlueprint.url_prefix`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlueprintRegistration {
+    /// The variable name of the blueprint being registered (e.g. `"users_bp"`).
+    pub bp_var_name: String,
+    /// `url_prefix` kwarg from `register_blueprint(bp, url_prefix='/foo')`.
+    /// `None` when the kwarg is absent (Flask then falls back to the
+    /// blueprint's own constructor prefix, if any).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url_prefix: Option<String>,
     pub location: AstLocation,
 }
 
@@ -74,12 +100,14 @@ pub fn summarize_flask(file: &ParsedFile) -> Option<FlaskFileSummary> {
 
     let mut apps = Vec::new();
     let mut blueprints = Vec::new();
+    let mut blueprint_registrations = Vec::new();
     let mut routes = Vec::new();
     let mut error_handlers = Vec::new();
     let mut config_settings = Vec::new();
 
     collect_flask_apps(file, root, &mut apps);
     collect_flask_blueprints(file, root, &mut blueprints);
+    collect_flask_blueprint_registrations(file, root, &mut blueprint_registrations);
     collect_flask_routes(file, root, &mut routes);
     collect_flask_error_handlers(file, root, &mut error_handlers);
     collect_flask_config_settings(file, root, &mut config_settings);
@@ -101,6 +129,7 @@ pub fn summarize_flask(file: &ParsedFile) -> Option<FlaskFileSummary> {
     Some(FlaskFileSummary {
         apps,
         blueprints,
+        blueprint_registrations,
         routes,
         error_handlers,
         config_settings,
@@ -184,12 +213,89 @@ fn extract_flask_blueprint(file: &ParsedFile, node: Node) -> Option<FlaskBluepri
 
     let args = right.child_by_field_name("arguments")?;
     let import_name = extract_first_string_arg(file, args).unwrap_or_default();
+    // Also capture `url_prefix=` keyword argument when present in the constructor.
+    let url_prefix = extract_keyword_string_arg(file, args, "url_prefix");
 
     let location = file.location_for_node(&right);
 
     Some(FlaskBlueprint {
         var_name,
         import_name,
+        url_prefix,
+        location,
+    })
+}
+
+fn collect_flask_blueprint_registrations(
+    file: &ParsedFile,
+    node: Node,
+    out: &mut Vec<BlueprintRegistration>,
+) {
+    if node.kind() == "call" {
+        if let Some(reg) = extract_flask_blueprint_registration(file, node) {
+            out.push(reg);
+        }
+    }
+
+    let mut cursor = node.walk();
+    for child in node.children(&mut cursor) {
+        collect_flask_blueprint_registrations(file, child, out);
+    }
+}
+
+/// Extract a `BlueprintRegistration` from an `app.register_blueprint(bp, url_prefix='/foo')`
+/// call node.
+///
+/// Matches any `<expr>.register_blueprint(<identifier>, ...)` call, regardless
+/// of what the app variable is named.
+fn extract_flask_blueprint_registration(
+    file: &ParsedFile,
+    call_node: Node,
+) -> Option<BlueprintRegistration> {
+    let source_bytes = file.source.as_bytes();
+
+    let func = call_node.child_by_field_name("function")?;
+    if func.kind() != "attribute" {
+        return None;
+    }
+
+    let attr = func.child_by_field_name("attribute")?;
+    let method_name = attr.utf8_text(source_bytes).ok()?;
+    if method_name != "register_blueprint" {
+        return None;
+    }
+
+    let args = call_node.child_by_field_name("arguments")?;
+
+    // First positional argument is the blueprint variable.
+    let bp_var_name = {
+        let mut first = None;
+        let mut cursor = args.walk();
+        for child in args.children(&mut cursor) {
+            match child.kind() {
+                "(" | ")" | "," => continue,
+                "keyword_argument" => break,
+                _ => {
+                    first = Some(child.utf8_text(source_bytes).unwrap_or("").to_string());
+                    break;
+                }
+            }
+        }
+        first?
+    };
+
+    if bp_var_name.is_empty() {
+        return None;
+    }
+
+    // Optional `url_prefix=` keyword argument.
+    let url_prefix = extract_keyword_string_arg(file, args, "url_prefix");
+
+    let location = file.location_for_node(&call_node);
+
+    Some(BlueprintRegistration {
+        bp_var_name,
+        url_prefix,
         location,
     })
 }
@@ -787,6 +893,34 @@ fn extract_first_string_arg(file: &ParsedFile, args: Node) -> Option<String> {
     None
 }
 
+/// Extract the string value of a named keyword argument from an argument list.
+///
+/// Handles `url_prefix="/api"` or `prefix="/v1"` inside any call's argument list.
+fn extract_keyword_string_arg(file: &ParsedFile, args: Node, key: &str) -> Option<String> {
+    let source_bytes = file.source.as_bytes();
+    let mut cursor = args.walk();
+    for child in args.children(&mut cursor) {
+        if child.kind() != "keyword_argument" {
+            continue;
+        }
+        // keyword_argument children: <name> "=" <value>
+        let mut kw_cursor = child.walk();
+        let kw_children: Vec<_> = child.children(&mut kw_cursor).collect();
+        if kw_children.len() < 3 {
+            continue;
+        }
+        let kw_name = kw_children[0].utf8_text(source_bytes).unwrap_or("");
+        if kw_name != key {
+            continue;
+        }
+        let value_node = &kw_children[2];
+        let raw = value_node.utf8_text(source_bytes).ok()?;
+        let trimmed = raw.trim_matches(|c| c == '"' || c == '\'');
+        return Some(trimmed.to_string());
+    }
+    None
+}
+
 fn extract_first_int_arg(file: &ParsedFile, args: Node) -> Option<u32> {
     let source_bytes = file.source.as_bytes();
 
@@ -1310,6 +1444,80 @@ users_bp = Blueprint('users', __name__)
         let summary = summary.unwrap();
         assert_eq!(summary.blueprints.len(), 1);
         assert_eq!(summary.blueprints[0].var_name, "users_bp");
+        assert_eq!(summary.blueprints[0].url_prefix, None);
+    }
+
+    #[test]
+    fn detects_blueprint_constructor_url_prefix() {
+        let src = r#"
+from flask import Blueprint
+
+users_bp = Blueprint('users', __name__, url_prefix='/users')
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.blueprints.len(), 1);
+        assert_eq!(summary.blueprints[0].var_name, "users_bp");
+        assert_eq!(
+            summary.blueprints[0].url_prefix,
+            Some("/users".to_string())
+        );
+    }
+
+    #[test]
+    fn detects_register_blueprint_with_url_prefix() {
+        let src = r#"
+from flask import Flask, Blueprint
+
+users_bp = Blueprint('users', __name__)
+
+app = Flask(__name__)
+app.register_blueprint(users_bp, url_prefix='/api/users')
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.blueprint_registrations.len(), 1);
+        let reg = &summary.blueprint_registrations[0];
+        assert_eq!(reg.bp_var_name, "users_bp");
+        assert_eq!(reg.url_prefix, Some("/api/users".to_string()));
+    }
+
+    #[test]
+    fn detects_register_blueprint_without_url_prefix() {
+        let src = r#"
+from flask import Flask, Blueprint
+
+auth_bp = Blueprint('auth', __name__)
+
+app = Flask(__name__)
+app.register_blueprint(auth_bp)
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.blueprint_registrations.len(), 1);
+        let reg = &summary.blueprint_registrations[0];
+        assert_eq!(reg.bp_var_name, "auth_bp");
+        assert_eq!(reg.url_prefix, None);
+    }
+
+    #[test]
+    fn detects_multiple_register_blueprint_calls() {
+        let src = r#"
+from flask import Flask, Blueprint
+
+users_bp = Blueprint('users', __name__)
+items_bp = Blueprint('items', __name__)
+
+app = Flask(__name__)
+app.register_blueprint(users_bp, url_prefix='/users')
+app.register_blueprint(items_bp, url_prefix='/items')
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.blueprint_registrations.len(), 2);
+        let prefixes: Vec<Option<&str>> = summary
+            .blueprint_registrations
+            .iter()
+            .map(|r| r.url_prefix.as_deref())
+            .collect();
+        assert!(prefixes.contains(&Some("/users")));
+        assert!(prefixes.contains(&Some("/items")));
     }
 
     #[test]
@@ -1493,6 +1701,49 @@ blp = Blueprint('pets', __name__, description='Operations on pets')
         assert_eq!(summary.blueprints.len(), 1);
         assert_eq!(summary.blueprints[0].var_name, "blp");
         assert_eq!(summary.blueprints[0].import_name, "pets");
+        assert_eq!(summary.blueprints[0].url_prefix, None);
+    }
+
+    #[test]
+    fn detects_smorest_blueprint_with_url_prefix_and_description() {
+        // Flask-smorest Blueprint can carry both url_prefix and description.
+        // The url_prefix kwarg should be captured; description should be ignored.
+        let src = r#"
+from flask_smorest import Blueprint
+
+blp = Blueprint('pets', __name__, url_prefix='/pets', description='Operations on pets')
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.blueprints.len(), 1);
+        assert_eq!(summary.blueprints[0].var_name, "blp");
+        assert_eq!(summary.blueprints[0].import_name, "pets");
+        assert_eq!(
+            summary.blueprints[0].url_prefix,
+            Some("/pets".to_string())
+        );
+    }
+
+    #[test]
+    fn detects_smorest_api_register_blueprint_with_url_prefix() {
+        // flask-smorest uses `api.register_blueprint(blp, url_prefix=...)` where
+        // `api` is an `Api(app)` instance.  The extractor matches any
+        // `<expr>.register_blueprint(...)` call so this should work identically
+        // to `app.register_blueprint(...)`.
+        let src = r#"
+from flask import Flask
+from flask_smorest import Api, Blueprint
+
+app = Flask(__name__)
+api = Api(app)
+
+blp = Blueprint('pets', __name__)
+api.register_blueprint(blp, url_prefix='/pets')
+"#;
+        let summary = parse_and_summarize_flask(src).unwrap();
+        assert_eq!(summary.blueprint_registrations.len(), 1);
+        let reg = &summary.blueprint_registrations[0];
+        assert_eq!(reg.bp_var_name, "blp");
+        assert_eq!(reg.url_prefix, Some("/pets".to_string()));
     }
 
     #[test]

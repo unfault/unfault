@@ -7,5 +7,5 @@
 
 pub use unfault_core::semantics::python::fastapi::{
     FastApiApp, FastApiExceptionHandler, FastApiFileSummary, FastApiMiddleware, FastApiRoute,
-    FastApiRouter, RouteParam, summarize_fastapi,
+    FastApiRouter, FastApiRouterInstance, RouteParam, summarize_fastapi,
 };

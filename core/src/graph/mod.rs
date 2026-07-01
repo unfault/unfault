@@ -2076,10 +2076,24 @@ fn add_fastapi_nodes(
         app_nodes.insert(app.var_name.clone(), app_node);
     }
 
-    // Build a lookup: router var name → prefix, from include_router calls in this file.
-    // e.g. `web.include_router(router, prefix="/assistant")` → "router" → "/assistant"
+    // Build a lookup: router var name → prefix.
+    //
+    // Two sources, in priority order:
+    //   1. `include_router(router, prefix="/foo")` — explicit registration prefix (highest).
+    //   2. `router = APIRouter(prefix="/foo")` — constructor prefix (fallback, covers the
+    //      common split-file pattern where routes live in the same file as the APIRouter).
     let mut router_prefix: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+
+    // Seed with constructor-level prefixes (lowest priority).
+    for inst in &fastapi.router_instances {
+        if let Some(ref prefix) = inst.prefix {
+            router_prefix
+                .entry(inst.var_name.clone())
+                .or_insert_with(|| prefix.clone());
+        }
+    }
+    // include_router prefix wins: overwrite constructor prefix when present.
     for inc in &fastapi.routers {
         let var_name = inc
             .router_expr
@@ -2089,9 +2103,7 @@ fn add_fastapi_nodes(
             .trim()
             .to_string();
         if let Some(ref prefix) = inc.prefix {
-            router_prefix
-                .entry(var_name)
-                .or_insert_with(|| prefix.clone());
+            router_prefix.insert(var_name, prefix.clone());
         }
     }
 
@@ -2264,7 +2276,48 @@ fn add_flask_nodes(
         )
     });
 
+    // Build a lookup: blueprint var_name → effective url_prefix.
+    //
+    // Priority (mirrors Flask's own behaviour):
+    //   1. `url_prefix` from `register_blueprint(bp, url_prefix="/foo")` — wins.
+    //   2. `url_prefix` from `Blueprint('name', __name__, url_prefix="/foo")` — fallback.
+    //
+    // When the same blueprint variable appears in multiple `register_blueprint`
+    // calls we use the first one found (same `entry().or_insert` idiom as FastAPI).
+    let mut blueprint_prefix: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+
+    // Seed from constructor-level prefixes.
+    for bp in &flask.blueprints {
+        if let Some(ref prefix) = bp.url_prefix {
+            blueprint_prefix
+                .entry(bp.var_name.clone())
+                .or_insert_with(|| prefix.clone());
+        }
+    }
+    // Registration-time prefix wins over constructor prefix.
+    for reg in &flask.blueprint_registrations {
+        if let Some(ref prefix) = reg.url_prefix {
+            blueprint_prefix.insert(reg.bp_var_name.clone(), prefix.clone());
+        }
+    }
+
     for route in &flask.routes {
+        // Resolve full path: prepend blueprint prefix when the route's app_var_name
+        // matches a known blueprint variable, mirroring the FastAPI router_prefix logic.
+        let full_path = match blueprint_prefix.get(&route.app_var_name) {
+            Some(prefix) => {
+                let p = prefix.trim_end_matches('/');
+                let s = route.path.trim_start_matches('/');
+                if s.is_empty() {
+                    p.to_string()
+                } else {
+                    format!("{}/{}", p, s)
+                }
+            }
+            None => route.path.clone(),
+        };
+
         // Resolve non-routing decorators for this handler.
         let handler_decorators: Vec<DecoratorSemantic> = py
             .decorators
@@ -2323,7 +2376,7 @@ fn add_flask_nodes(
             is_async: route.is_async,
             is_handler: true,
             http_method: Some(route.http_method.clone()),
-            http_path: Some(route.path.clone()),
+            http_path: Some(full_path),
             decorators: handler_decorators,
             is_writer: file_is_writer,
             line: handler_line,

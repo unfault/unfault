@@ -1081,11 +1081,25 @@ fn add_fastapi_nodes(
         app_nodes.insert(app.var_name.clone(), app_node);
     }
 
-    // Build a lookup: router var name → prefix (from include_router calls in this file).
-    // e.g. `web.include_router(router, prefix="/assistant")` → "router" → "/assistant"
-    // When multiple include_router calls for the same router var exist (e.g. web + api with
-    // the same prefix), we just take the first prefix found.
+    // Build a lookup: router var name → prefix.
+    //
+    // Two sources, in priority order:
+    //   1. `include_router(router, prefix="/foo")` — explicit registration prefix (highest).
+    //   2. `router = APIRouter(prefix="/foo")` — constructor prefix (fallback, covers the
+    //      common split-file pattern where routes live in the same file as the APIRouter).
+    //
+    // When multiple include_router calls for the same router var exist we take the first.
     let mut router_prefix: HashMap<String, String> = HashMap::new();
+
+    // Seed with constructor-level prefixes (lowest priority).
+    for inst in &fastapi.router_instances {
+        if let Some(ref prefix) = inst.prefix {
+            router_prefix
+                .entry(inst.var_name.clone())
+                .or_insert_with(|| prefix.clone());
+        }
+    }
+    // include_router prefix wins: overwrite constructor prefix when present.
     for inc in &fastapi.routers {
         // router_expr is the first positional arg text, e.g. "router" or "users.router"
         let var_name = inc
@@ -1096,9 +1110,7 @@ fn add_fastapi_nodes(
             .trim()
             .to_string();
         if let Some(ref prefix) = inc.prefix {
-            router_prefix
-                .entry(var_name)
-                .or_insert_with(|| prefix.clone());
+            router_prefix.insert(var_name, prefix.clone());
         }
     }
 
@@ -1140,6 +1152,11 @@ fn add_fastapi_nodes(
         // Back-fill http_method and http_path on the corresponding Function node
         // (identified by handler_name in the same file) so that the Function node
         // carries the full prefixed path too.
+        //
+        // Note: `add_function_nodes` skips FastAPI route handlers (they are in
+        // `handler_names_to_skip`), so the function node may not exist yet when
+        // this code runs.  When the node is absent we create it directly here —
+        // the same way `core/src/graph/mod.rs::add_fastapi_nodes` does.
         let handler_key = (file_id, route.handler_name.clone());
         if let Some(&fn_idx) = cg.function_nodes.get(&handler_key) {
             if let GraphNode::Function {
@@ -1158,6 +1175,28 @@ fn add_fastapi_nodes(
                     *line = Some(route.location.range.start_line);
                 }
             }
+        } else {
+            // No pre-existing function node — create one with full HTTP metadata.
+            let func_node = cg.graph.add_node(GraphNode::Function {
+                file_id,
+                name: route.handler_name.clone(),
+                qualified_name: route.handler_name.clone(),
+                is_async: route.is_async,
+                is_handler: true,
+                http_method: Some(route.http_method.clone()),
+                http_path: Some(full_path.clone()),
+                decorators: vec![],
+                is_writer: false,
+                line: Some(route.location.range.start_line),
+                column: None,
+                request_schema: None,
+                response_schema: None,
+                raw_calls: vec![],
+            });
+            cg.graph
+                .add_edge(file_node, func_node, GraphEdgeKind::Contains);
+            cg.function_nodes
+                .insert(handler_key, func_node);
         }
     }
 
@@ -1180,7 +1219,7 @@ fn add_fastapi_nodes(
         }
     }
 
-    let _ = (py, router_prefix); // suppress unused warnings
+    let _ = py; // suppress unused warning (py is passed for future enrichment)
 }
 
 /// Add Flask route handlers as function nodes with `http_method` and `http_path` populated.
@@ -1190,7 +1229,55 @@ fn add_flask_nodes(
     file_id: FileId,
     flask: &FlaskFileSummary,
 ) {
+    // Build a lookup: blueprint var_name → effective url_prefix.
+    //
+    // Priority (mirrors Flask's own behaviour):
+    //   1. `url_prefix` from `register_blueprint(bp, url_prefix="/foo")` — wins.
+    //   2. `url_prefix` from `Blueprint('name', __name__, url_prefix="/foo")` — fallback.
+    let mut blueprint_prefix: HashMap<String, String> = HashMap::new();
+
+    // Seed from constructor-level prefixes.
+    for bp in &flask.blueprints {
+        if let Some(ref prefix) = bp.url_prefix {
+            blueprint_prefix
+                .entry(bp.var_name.clone())
+                .or_insert_with(|| prefix.clone());
+        }
+    }
+    // Registration-time prefix wins over constructor prefix.
+    for reg in &flask.blueprint_registrations {
+        if let Some(ref prefix) = reg.url_prefix {
+            blueprint_prefix.insert(reg.bp_var_name.clone(), prefix.clone());
+        }
+    }
+
     for route in &flask.routes {
+        // Skip handlers already registered by add_fastapi_nodes (or another framework
+        // handler). FastAPI decorators like `@router.get(...)` are syntactically
+        // identical to Flask decorators and can be picked up by the Flask extractor
+        // in files that contain both FastAPI and Flask-like patterns.
+        if cg
+            .function_nodes
+            .contains_key(&(file_id, route.handler_name.clone()))
+        {
+            continue;
+        }
+
+        // Resolve full path: prepend blueprint prefix when the route's app_var_name
+        // matches a known blueprint variable.
+        let full_path = match blueprint_prefix.get(&route.app_var_name) {
+            Some(prefix) => {
+                let p = prefix.trim_end_matches('/');
+                let s = route.path.trim_start_matches('/');
+                if s.is_empty() {
+                    p.to_string()
+                } else {
+                    format!("{}/{}", p, s)
+                }
+            }
+            None => route.path.clone(),
+        };
+
         let qualified_name = route.handler_name.clone();
         let func_node = cg.graph.add_node(GraphNode::Function {
             file_id,
@@ -1199,7 +1286,7 @@ fn add_flask_nodes(
             is_async: route.is_async,
             is_handler: true,
             http_method: Some(route.http_method.clone()),
-            http_path: Some(route.path.clone()),
+            http_path: Some(full_path),
             decorators: vec![],
             is_writer: false,
             line: Some(route.location.range.start_line),
@@ -1666,6 +1753,121 @@ async def create_user():
         assert_eq!(route_count, 2);
     }
 
+    // ==================== FastAPI APIRouter(prefix=...) Tests ====================
+
+    #[test]
+    fn fastapi_apirouter_constructor_prefix_applied_to_routes() {
+        // router = APIRouter(prefix="/users") in the same file as routes:
+        // routes should get /users prepended.
+        let src = r#"
+from fastapi import FastAPI, APIRouter
+
+router = APIRouter(prefix="/users")
+
+@router.get("/list")
+async def list_users():
+    return []
+
+app = FastAPI()
+app.include_router(router)
+"#;
+        let (file_id, sem) = parse_and_build_semantics("users.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let node_idx = cg
+            .function_nodes
+            .get(&(file_id, "list_users".to_string()))
+            .expect("list_users should be in function_nodes");
+        let node = &cg.graph[*node_idx];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    http_path: Some(p),
+                    ..
+                } if p == "/users/list"
+            ),
+            "expected http_path /users/list, got {:?}",
+            node
+        );
+    }
+
+    #[test]
+    fn fastapi_include_router_prefix_wins_over_constructor() {
+        // When both APIRouter(prefix=...) and include_router(prefix=...) are present,
+        // the include_router prefix should win.
+        let src = r#"
+from fastapi import FastAPI, APIRouter
+
+router = APIRouter(prefix="/ctor-prefix")
+
+@router.get("/items")
+async def list_items():
+    return []
+
+app = FastAPI()
+app.include_router(router, prefix="/reg-prefix")
+"#;
+        let (file_id, sem) = parse_and_build_semantics("items.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let node_idx = cg
+            .function_nodes
+            .get(&(file_id, "list_items".to_string()))
+            .expect("list_items should be in function_nodes");
+        let node = &cg.graph[*node_idx];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    http_path: Some(p),
+                    ..
+                } if p == "/reg-prefix/items"
+            ),
+            "expected http_path /reg-prefix/items (include_router prefix wins), got {:?}",
+            node
+        );
+    }
+
+    #[test]
+    fn fastapi_apirouter_no_prefix_path_unchanged() {
+        // APIRouter() without prefix — routes keep their original path.
+        let src = r#"
+from fastapi import FastAPI, APIRouter
+
+router = APIRouter()
+
+@router.get("/health")
+async def health():
+    return {"status": "ok"}
+
+app = FastAPI()
+app.include_router(router)
+"#;
+        let (file_id, sem) = parse_and_build_semantics("health.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let node_idx = cg
+            .function_nodes
+            .get(&(file_id, "health".to_string()))
+            .expect("health should be in function_nodes");
+        let node = &cg.graph[*node_idx];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    http_path: Some(p),
+                    ..
+                } if p == "/health"
+            ),
+            "expected http_path /health (no prefix), got {:?}",
+            node
+        );
+    }
+
     #[test]
     fn build_code_graph_middleware_attached_to_correct_app() {
         let src = r#"
@@ -1929,6 +2131,248 @@ def list_users():
                 }
             ),
             "Flask handler should have http_method and http_path set"
+        );
+    }
+
+    // ==================== Flask blueprint url_prefix Tests ====================
+
+    #[test]
+    fn flask_blueprint_constructor_prefix_applied_to_routes() {
+        // Blueprint with url_prefix in the constructor: routes should get the prefix prepended.
+        let src = r#"
+from flask import Flask, Blueprint
+
+users_bp = Blueprint('users', __name__, url_prefix='/users')
+
+@users_bp.route('/list')
+def list_users():
+    return []
+
+app = Flask(__name__)
+app.register_blueprint(users_bp)
+"#;
+        let (file_id, sem) = parse_and_build_semantics("api.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let node_idx = cg
+            .function_nodes
+            .get(&(file_id, "list_users".to_string()))
+            .expect("list_users should be in function_nodes");
+        let node = &cg.graph[*node_idx];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    http_path: Some(p),
+                    ..
+                } if p == "/users/list"
+            ),
+            "expected http_path /users/list, got {:?}",
+            node
+        );
+    }
+
+    #[test]
+    fn flask_register_blueprint_prefix_wins_over_constructor() {
+        // Registration-time prefix wins when both are present.
+        let src = r#"
+from flask import Flask, Blueprint
+
+items_bp = Blueprint('items', __name__, url_prefix='/items-ctor')
+
+@items_bp.route('/all')
+def list_items():
+    return []
+
+app = Flask(__name__)
+app.register_blueprint(items_bp, url_prefix='/items')
+"#;
+        let (file_id, sem) = parse_and_build_semantics("api.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let node_idx = cg
+            .function_nodes
+            .get(&(file_id, "list_items".to_string()))
+            .expect("list_items should be in function_nodes");
+        let node = &cg.graph[*node_idx];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    http_path: Some(p),
+                    ..
+                } if p == "/items/all"
+            ),
+            "expected http_path /items/all (registration prefix wins), got {:?}",
+            node
+        );
+    }
+
+    #[test]
+    fn flask_blueprint_no_prefix_path_unchanged() {
+        // Blueprint with no prefix: routes should keep their original path.
+        let src = r#"
+from flask import Flask, Blueprint
+
+health_bp = Blueprint('health', __name__)
+
+@health_bp.route('/ping')
+def ping():
+    return 'pong'
+
+app = Flask(__name__)
+app.register_blueprint(health_bp)
+"#;
+        let (file_id, sem) = parse_and_build_semantics("api.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let node_idx = cg
+            .function_nodes
+            .get(&(file_id, "ping".to_string()))
+            .expect("ping should be in function_nodes");
+        let node = &cg.graph[*node_idx];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    http_path: Some(p),
+                    ..
+                } if p == "/ping"
+            ),
+            "expected http_path /ping (no prefix), got {:?}",
+            node
+        );
+    }
+
+    #[test]
+    fn flask_register_blueprint_prefix_no_constructor_prefix() {
+        // Prefix only at register_blueprint call site.
+        let src = r#"
+from flask import Flask, Blueprint
+
+api_bp = Blueprint('api', __name__)
+
+@api_bp.route('/status')
+def status():
+    return 'ok'
+
+app = Flask(__name__)
+app.register_blueprint(api_bp, url_prefix='/api/v1')
+"#;
+        let (file_id, sem) = parse_and_build_semantics("api.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let node_idx = cg
+            .function_nodes
+            .get(&(file_id, "status".to_string()))
+            .expect("status should be in function_nodes");
+        let node = &cg.graph[*node_idx];
+        assert!(
+            matches!(
+                node,
+                GraphNode::Function {
+                    http_path: Some(p),
+                    ..
+                } if p == "/api/v1/status"
+            ),
+            "expected http_path /api/v1/status, got {:?}",
+            node
+        );
+    }
+
+    #[test]
+    fn flask_smorest_methodview_with_api_register_blueprint_prefix() {
+        // Full flask-smorest pattern:
+        //   - MethodView class decorated with @blp.route(...)
+        //   - api.register_blueprint(blp, url_prefix='/pets')
+        // MethodView methods should get the registration prefix prepended.
+        let src = r#"
+from flask import Flask
+from flask_smorest import Api, Blueprint
+from flask.views import MethodView
+
+app = Flask(__name__)
+api = Api(app)
+
+blp = Blueprint('pets', __name__)
+
+@blp.route('/list')
+class PetList(MethodView):
+    def get(self):
+        return []
+
+    def post(self):
+        return {}, 201
+
+api.register_blueprint(blp, url_prefix='/pets')
+"#;
+        let (file_id, sem) = parse_and_build_semantics("pets.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        // PetList.get should have path /pets/list
+        let get_idx = cg
+            .function_nodes
+            .get(&(file_id, "PetList.get".to_string()))
+            .expect("PetList.get should be in function_nodes");
+        assert!(
+            matches!(
+                &cg.graph[*get_idx],
+                GraphNode::Function { http_path: Some(p), .. } if p == "/pets/list"
+            ),
+            "expected /pets/list for PetList.get, got {:?}",
+            &cg.graph[*get_idx]
+        );
+
+        // PetList.post should also have path /pets/list
+        let post_idx = cg
+            .function_nodes
+            .get(&(file_id, "PetList.post".to_string()))
+            .expect("PetList.post should be in function_nodes");
+        assert!(
+            matches!(
+                &cg.graph[*post_idx],
+                GraphNode::Function { http_path: Some(p), .. } if p == "/pets/list"
+            ),
+            "expected /pets/list for PetList.post, got {:?}",
+            &cg.graph[*post_idx]
+        );
+    }
+
+    #[test]
+    fn flask_smorest_blueprint_constructor_prefix_methodview() {
+        // flask-smorest Blueprint with url_prefix in constructor — no register_blueprint call.
+        // Routes should still get the constructor prefix prepended.
+        let src = r#"
+from flask_smorest import Blueprint
+from flask.views import MethodView
+
+blp = Blueprint('orders', __name__, url_prefix='/orders', description='Order endpoints')
+
+@blp.route('/')
+class OrderList(MethodView):
+    def get(self):
+        return []
+"#;
+        let (file_id, sem) = parse_and_build_semantics("orders.py", src);
+        let sem_entries = vec![(file_id, sem)];
+        let cg = build_code_graph(&sem_entries);
+
+        let get_idx = cg
+            .function_nodes
+            .get(&(file_id, "OrderList.get".to_string()))
+            .expect("OrderList.get should be in function_nodes");
+        assert!(
+            matches!(
+                &cg.graph[*get_idx],
+                GraphNode::Function { http_path: Some(p), .. } if p == "/orders"
+            ),
+            "expected /orders for OrderList.get, got {:?}",
+            &cg.graph[*get_idx]
         );
     }
 

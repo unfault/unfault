@@ -6,9 +6,38 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
-### Added
-
 ### Fixed
+
+- **Flask blueprint `url_prefix` now captured and prepended to route paths.**
+
+  `FlaskBlueprint` gains a `url_prefix: Option<String>` field populated from
+  the `url_prefix=` kwarg on the `Blueprint(...)` constructor. A new
+  `BlueprintRegistration` struct (and matching `blueprint_registrations` field
+  on `FlaskFileSummary`) captures every `<app>.register_blueprint(bp,
+  url_prefix=...)` call site — the receiver may be any variable name (`app`,
+  `api`, etc.) so flask-smorest's `Api.register_blueprint` is handled
+  transparently.
+
+  `add_flask_nodes` (both `core` and `analysis` crates) now builds a
+  `blueprint_prefix` map before iterating routes.  Priority mirrors Flask's own
+  behaviour: registration-time prefix wins over constructor prefix when both are
+  present.  Routes whose `app_var_name` matches a blueprint key get the prefix
+  prepended with the same join logic used by FastAPI's `router_prefix` (no
+  double slashes, trailing-slash normalisation).
+
+  Works for all Flask routing patterns: plain `@bp.route(...)` handlers,
+  flask-smorest `MethodView` classes, and the custom `action_route` pattern.
+
+- **FastAPI `APIRouter(prefix=...)` constructor prefix now captured.**
+
+  A new `FastApiRouterInstance` struct and matching `router_instances` field on
+  `FastApiFileSummary` capture every `router = APIRouter(prefix="/foo")`
+  constructor call.  `add_fastapi_nodes` seeds the `router_prefix` map from
+  `router_instances` before processing `include_router` calls, so the
+  standard split-file pattern — `router = APIRouter(prefix="/users")` and
+  `@router.get("/list")` in the same file — now resolves to the correct full
+  path `/users/list`.  An explicit `include_router(router, prefix=...)` at
+  registration time still wins when present.
 
 ## [1.0.57] — 2026-06-28
 
