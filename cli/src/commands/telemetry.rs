@@ -140,7 +140,7 @@ pub struct UnobservedRouteRef {
 /// Core ranking logic for `critical-unobserved`, extracted for testability.
 ///
 /// Groups every unobserved callee across all routes in `report` by
-/// `(name, location.file)`, deduplicates by route, and returns the list
+/// `(name, location.file, location.line)`, deduplicates by route, and returns the list
 /// sorted by `route_count` descending (ties broken by name ascending).
 ///
 /// `role_filter`: one of `"all"`, `"db"` / `"database"`, `"http"`, `"remote"`.
@@ -152,9 +152,14 @@ pub fn rank_unobserved_boundaries(
     let include_http = role_filter == "all" || role_filter == "http";
     let include_remote = role_filter == "all" || role_filter == "remote";
 
-    // Key: (name, location_file) → (entry, set of route_keys already counted)
+    // Key: (name, location.file, location.line) → (entry, set of route_keys already counted).
+    // Two calls with the same name but different source locations are distinct
+    // call sites and must not be collapsed — e.g. three db_session.commit calls
+    // in the same file at lines 215, 279, 338 stay as three separate entries.
+    // Only a genuinely shared call site (same name + same file + same line,
+    // reached from multiple routes via an imported helper) gets route_count > 1.
     let mut index: std::collections::HashMap<
-        (String, String),
+        (String, String, Option<u32>),
         (CriticalUnobservedEntry, std::collections::HashSet<String>),
     > = std::collections::HashMap::new();
 
@@ -183,7 +188,11 @@ pub fn rank_unobserved_boundaries(
         }
 
         for (callee, role_str) in candidates {
-            let key = (callee.name.clone(), callee.location.file.clone());
+            let key = (
+                callee.name.clone(),
+                callee.location.file.clone(),
+                callee.location.line,
+            );
 
             let (entry, seen_routes) = index.entry(key).or_insert_with(|| {
                 let stmt_kind = if role_str == "database" {
@@ -2685,6 +2694,90 @@ mod tests {
         // Routes sorted: GET /a before POST /z
         assert_eq!(ranked[0].routes[0].method, "GET");
         assert_eq!(ranked[0].routes[1].method, "POST");
+    }
+
+    #[test]
+    fn rank_unobserved_same_name_different_line_stays_separate() {
+        // Regression: critical-unobserved was keying by (name, file) alone,
+        // so three db_session.commit calls in the same file at different lines
+        // collapsed into a single entry with an inflated route_count.
+        // Each distinct (name, file, line) must produce its own entry.
+        fn callee_at(name: &str, file: &str, line: u32) -> UnobservedCallee {
+            UnobservedCallee {
+                name: name.to_string(),
+                location: Location::new(file, Some(line)),
+                role: NodeRole::Database,
+                depth: 1,
+                path: vec![],
+            }
+        }
+
+        fn route_with_callee(
+            method: &str,
+            path: &str,
+            handler: &str,
+            callee: UnobservedCallee,
+        ) -> RouteTelemetry {
+            RouteTelemetry {
+                method: method.to_string(),
+                path: path.to_string(),
+                handler: handler.to_string(),
+                location: Location::new("router.py", None),
+                anchor_kind: AnchorKind::FrameworkAuto,
+                anchor_attributes: vec![],
+                logs: RouteLogs {
+                    kind: LoggingQuality::None_,
+                    library: None,
+                },
+                metrics: RouteMetrics {
+                    present: false,
+                    library: None,
+                },
+                total_callees: 1,
+                instrumented_callees: 0,
+                callees: vec![],
+                unobserved: UnobservedPaths {
+                    total: 1,
+                    anchor_unobserved: false,
+                    by_role: UnobservedByRole {
+                        database: vec![callee],
+                        http: vec![],
+                        remote: vec![],
+                        logic: vec![],
+                    },
+                    deepest: vec![],
+                },
+            }
+        }
+
+        // Three distinct db_session.commit call sites at lines 215, 279, 338.
+        let report = empty_report(vec![
+            route_with_callee(
+                "POST",
+                "/publish",
+                "publish",
+                callee_at("db_session.commit", "router.py", 279),
+            ),
+            route_with_callee(
+                "DELETE",
+                "/delete",
+                "delete",
+                callee_at("db_session.commit", "router.py", 338),
+            ),
+        ]);
+
+        let ranked = rank_unobserved_boundaries(&report, "all");
+
+        // Must be two separate entries, not one collapsed entry with route_count 2.
+        assert_eq!(
+            ranked.len(),
+            2,
+            "expected 2 distinct entries (one per line), got {}",
+            ranked.len()
+        );
+        for entry in &ranked {
+            assert_eq!(entry.route_count, 1, "each call site is reached by exactly one route");
+        }
     }
 
     // ── collect_nodes_with_path ──────────────────────────────────────────────

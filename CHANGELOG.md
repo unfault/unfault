@@ -4,9 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-## [Unreleased]
+## [1.0.58] — 2026-07-01
 
 ### Fixed
+
+- **`critical-unobserved` now groups by `(name, file, line)` instead of `name` alone.**
+
+  The ranking index key was `callee.name`, so three `db_session.commit` calls
+  in the same file at different lines (e.g. 215, 279, 338) collapsed into a
+  single entry with an inflated `route_count`. An agent fixing line 279 would
+  incorrectly believe both routes were covered while the commit at 338 remained
+  unobserved.
+
+  The key is now `(name, location.file, location.line)`. Distinct call sites
+  with the same name stay separate entries. Only a genuinely shared call site —
+  the same name, file, and line reached from multiple routes via an imported
+  helper — gets `route_count > 1`, and for those the count is meaningful.
 
 - **Flask blueprint `url_prefix` now captured and prepended to route paths.**
 
